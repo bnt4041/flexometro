@@ -1,0 +1,188 @@
+name: obras
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [obras]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    # start-dev usa H2 embebida: vale para desarrollo, no para producción.
+    # --import-realm crea el realm al arrancar si no existe, así que el stack
+    # sale usable sin configurar nada a mano.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: 8080
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-obras.json:/opt/keycloak/data/import/realm-obras.json:ro
+      # Tema de login con la marca de Flexómetro. start-dev no cachea temas, así
+      # que un reinicio del contenedor basta para recoger cambios aquí.
+      - ./keycloak/themes/obrai:/opt/keycloak/themes/obrai
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    healthcheck:
+      # La imagen no trae curl ni wget; se usa el cliente HTTP de la JVM.
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    networks: [obras]
+
+  # Servicio de un solo uso: aplica todas las ramas de migración y termina.
+  # La API no arranca hasta que este contenedor sale con código 0.
+  #
+  # Se conecta como el superusuario `obras` porque las migraciones hacen DDL
+  # (CREATE SCHEMA, CREATE TABLE...) y, en la primera ejecución, crean también
+  # el rol de mínimo privilegio con el que se conecta la API en tiempo de
+  # ejecución. Ese rol nunca ve credenciales de superusuario.
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade heads
+    environment: &db_common
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
+      STUB_ORGANIZATION_SLUG: ${STUB_ORGANIZATION_SLUG:-demo}
+      # URL interna: la API valida los tokens desde dentro de la red de Docker.
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL:-http://keycloak:8080}
+      # URL pública: la que el navegador usa para redirigir al login. El emisor
+      # del token lleva esta, así que ambas tienen que aparecer como válidas.
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-obras}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-obras-api}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # La migración que crea el rol de la API necesita saber a quién conceder
+      # los permisos y con qué contraseña dejarlo.
+      APP_DB_USER: ${APP_DB_USER:-obras_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks: [obras]
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      <<: *db_common
+      # Rol de mínimo privilegio: sin SUPERUSER, sin BYPASSRLS. Es lo que hace
+      # que las políticas de la migración anterior aíslen de verdad — un
+      # superusuario se salta RLS pase lo que pase, sin importar FORCE ROW
+      # LEVEL SECURITY.
+      POSTGRES_USER: ${APP_DB_USER:-obras_app}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+      # Solo la API llama a DeepSeek/Gemini; las migraciones no hacen DDL con esto.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      # El panel de superadmin crea usuarios de organización vía el API de
+      # administración de Keycloak, con las mismas credenciales de arranque
+      # del contenedor de Keycloak.
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Bind mount para que --reload vea los cambios sin reconstruir la imagen.
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.obras-api.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.services.obras-api.loadbalancer.server.port=8000"
+    networks: [obras]
+
+  web:
+    build:
+      context: ./frontend
+    environment:
+      # El navegador habla con Keycloak directamente, así que necesita la URL
+      # pública, no la de la red interna de Docker.
+      VITE_KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+      VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-obras}
+      VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-obras-web}
+      VITE_AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      # Volumen anónimo: evita que el bind mount tape el node_modules
+      # instalado dentro de la imagen.
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.obras-web.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`)"
+      - "traefik.http.services.obras-web.loadbalancer.server.port=5173"
+    networks: [obras]
+
+  # Perfil "proxy": en desarrollo se accede por los puertos publicados, pero el
+  # enrutado de producción ya está descrito y se puede probar en local con
+  #   docker compose --profile proxy up
+  traefik:
+    image: traefik:v3.3
+    profiles: [proxy]
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--api.dashboard=true"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [obras]
+
+volumes:
+  pgdata:
+
+networks:
+  obras:
+    driver: bridge

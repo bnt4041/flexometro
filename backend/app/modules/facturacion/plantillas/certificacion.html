@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+<div class="cabecera">
+  <div>
+    <div class="cabecera__tipo">Certificación de obra</div>
+    <h1>Nº {{ certificacion.numero }}</h1>
+  </div>
+  <div class="cabecera__datos">
+    <div>Fecha: {{ certificacion.fecha.strftime('%d/%m/%Y') }}</div>
+    <div>Estado: {{ 'Emitida' if certificacion.estado == 'emitida' else 'Borrador' }}</div>
+  </div>
+</div>
+
+<div class="partes">
+  <div class="partes__bloque">
+    <div class="partes__etiqueta">Obra</div>
+    <div>{{ obra_codigo }} — {{ obra_nombre }}</div>
+  </div>
+</div>
+
+<h2>Medición certificada</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 22mm">Código</th>
+      <th>Descripción</th>
+      <th class="num" style="width: 22mm">Anterior</th>
+      <th class="num" style="width: 22mm">Actual</th>
+      <th class="num" style="width: 20mm">Periodo</th>
+      <th class="num" style="width: 18mm">Precio</th>
+      <th class="num" style="width: 24mm">Importe</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linea in certificacion.lineas %}
+      <tr>
+        <td class="cod">{{ linea.codigo }}</td>
+        <td>{{ linea.resumen }} <span class="apagado">({{ linea.unidad }})</span></td>
+        <td class="num apagado">{{ linea.medicion_anterior | num(3) }}</td>
+        <td class="num">{{ linea.medicion_actual | num(3) }}</td>
+        <td class="num">{{ linea.medicion_periodo | num(3) }}</td>
+        <td class="num">{{ linea.precio | eur }}</td>
+        <td class="num">{{ linea.importe_periodo | eur }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<table class="totales">
+  <tr>
+    <td>Importe ejecutado en este periodo</td>
+    <td class="num">{{ importes.importe_ejecutado | eur }} €</td>
+  </tr>
+  {% if certificacion.retencion_garantia_pct %}
+    <tr>
+      <td>Retención de garantía ({{ certificacion.retencion_garantia_pct | num(2) }} %)</td>
+      <td class="num">-{{ importes.importe_retenido | eur }} €</td>
+    </tr>
+  {% endif %}
+  <tr class="total">
+    <td>Líquido a certificar</td>
+    <td class="num">{{ importes.importe_liquido | eur }} €</td>
+  </tr>
+</table>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% macro filas(nodo, nivel) %}
+  <tr class="fila-capitulo">
+    <td class="cod" style="padding-left: {{ 2 + nivel * 4 }}mm">{{ nodo.codigo }}</td>
+    <td colspan="3">{{ nodo.resumen }}</td>
+    <td class="num">{{ nodo.importe | eur }}</td>
+  </tr>
+  {% for partida in nodo.partidas %}
+    <tr>
+      <td class="cod" style="padding-left: {{ 2 + (nivel + 1) * 4 }}mm">{{ partida.codigo }}</td>
+      <td>
+        {{ partida.resumen }}
+        {% if partida.texto %}<div class="texto-largo">{{ partida.texto }}</div>{% endif %}
+      </td>
+      <td class="num">{{ partida.medicion | num(3) }} {{ partida.unidad }}</td>
+      <td class="num">{{ partida.precio | eur }}</td>
+      <td class="num">{{ partida.importe | eur }}</td>
+    </tr>
+  {% endfor %}
+  {% for hijo in nodo.hijos %}{{ filas(hijo, nivel + 1) }}{% endfor %}
+{% endmacro %}
+
+{% block contenido %}
+<h2>Presupuesto por capítulos</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 22mm">Código</th>
+      <th>Descripción</th>
+      <th class="num" style="width: 24mm">Medición</th>
+      <th class="num" style="width: 20mm">Precio</th>
+      <th class="num" style="width: 24mm">Importe</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for nodo in capitulos %}{{ filas(nodo, 0) }}{% endfor %}
+  </tbody>
+</table>
+
+<table class="totales">
+  <tr>
+    <td>Presupuesto de ejecución material</td>
+    <td class="num">{{ totales.pem | eur }}</td>
+  </tr>
+  <tr class="suave">
+    <td>Gastos generales {{ presupuesto.gastos_generales | num(2) }} %</td>
+    <td class="num">{{ totales.gastos_generales | eur }}</td>
+  </tr>
+  <tr class="suave">
+    <td>Beneficio industrial {{ presupuesto.beneficio_industrial | num(2) }} %</td>
+    <td class="num">{{ totales.beneficio_industrial | eur }}</td>
+  </tr>
+  <tr>
+    <td>Presupuesto de ejecución por contrata</td>
+    <td class="num">{{ totales.pec_sin_iva | eur }}</td>
+  </tr>
+  <tr class="suave">
+    {% if presupuesto.inversion_sujeto_pasivo %}
+      <td>IVA — inversión del sujeto pasivo</td>
+    {% else %}
+      <td>IVA {{ totales.porcentaje_iva | num(0) }} %</td>
+    {% endif %}
+    <td class="num">{{ totales.iva | eur }}</td>
+  </tr>
+  <tr class="total">
+    <td>Total</td>
+    <td class="num">{{ totales.total | eur }} €</td>
+  </tr>
+</table>
+
+{% if presupuesto.inversion_sujeto_pasivo %}
+  <p class="apagado" style="margin-top: 5mm; font-size: 7.5pt">
+    Operación con inversión del sujeto pasivo conforme al artículo 84.Uno.2.º f)
+    de la Ley 37/1992 del IVA. El destinatario es el sujeto pasivo del impuesto.
+  </p>
+{% endif %}
+
+{% if presupuesto.notas %}
+  <h2>Observaciones</h2>
+  <p>{{ presupuesto.notas }}</p>
+{% endif %}
+
+<div class="firma">
+  <div>Conforme, el cliente:</div>
+  <div class="firma__linea">
+    {% if cliente %}{{ cliente.razon_social }}{% endif %}
+  </div>
+</div>
+{% endblock %}

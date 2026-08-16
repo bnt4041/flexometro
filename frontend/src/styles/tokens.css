@@ -1,0 +1,145 @@
+/* Identidad visual de Flexómetro.
+ *
+ * Paleta corporativa tomada del logo: azul marino (~#1b293e) como color
+ * estructural — barra lateral, cabeceras, texto — y ocre (~#f5a904) como
+ * acento de acción. Son los mismos tonos del logo anterior (Obrai); el
+ * logo de Flexómetro usa un marino/ocre muy parecido, así que esta paleta
+ * no se ha re-derivado pixel a pixel. `--c-accent` es la variante legible
+ * del ocre (mismo tono, más oscura para que el texto cumpla contraste AA
+ * sobre blanco); `--c-accent-strong` es el ocre de superficie, reservado
+ * para rellenos (botones primarios, insignias) donde el contraste lo pone
+ * el fondo, no el texto.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Superficies */
+  --c-bg: #ffffff;
+  --c-surface: #ffffff;
+  --c-surface-2: #f3f4f6;
+  --c-surface-3: #e7e9ed;
+  --c-border: #dde1e7;
+  --c-border-strong: #c3c9d3;
+
+  /* Texto */
+  --c-text: #1a2130;
+  --c-text-muted: #5b6472;
+  --c-text-subtle: #88909a;
+
+  /* Marca — azul marino */
+  --c-primary: #1b293e;
+  --c-primary-hover: #111a27;
+  --c-primary-soft: #eef1f5;
+  --c-primary-contrast: #ffffff;
+
+  /* Marca — ocre */
+  --c-accent: #9a6300;
+  --c-accent-hover: #7a4e00;
+  --c-accent-soft: #fdf1d9;
+  --c-accent-strong: #f5a904;
+  --c-accent-strong-hover: #c48703;
+  --c-accent-contrast: #1b293e;
+
+  /* Estado */
+  --c-success: #15803d;
+  --c-success-soft: #e8f5ec;
+  --c-danger: #b91c1c;
+  --c-danger-soft: #fdeceb;
+
+  /* Tipografía */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-lg: 1rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.625rem;
+
+  /* Espaciado y forma */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --radius-sm: 4px;
+  --radius: 7px;
+  --radius-lg: 11px;
+
+  --shadow-sm: 0 1px 2px rgb(27 41 62 / 0.06);
+  --shadow: 0 2px 8px rgb(27 41 62 / 0.1);
+
+  --sidebar-w: 244px;
+  --topbar-h: 56px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --c-bg: #12161d;
+    --c-surface: #181d26;
+    --c-surface-2: #1f2530;
+    --c-surface-3: #2a303d;
+    --c-border: #2d3441;
+    --c-border-strong: #434b5a;
+
+    --c-text: #eef1f5;
+    --c-text-muted: #a3aab8;
+    --c-text-subtle: #747d8c;
+
+    --c-primary: #3a4f70;
+    --c-primary-hover: #4c6488;
+    --c-primary-soft: #1f2937;
+    --c-primary-contrast: #ffffff;
+
+    --c-accent: #f0a020;
+    --c-accent-hover: #ffb84d;
+    --c-accent-soft: #2c2113;
+    --c-accent-strong: #f5a904;
+    --c-accent-strong-hover: #ffbe3d;
+    --c-accent-contrast: #1a1206;
+
+    --c-success: #4ade80;
+    --c-success-soft: #16251b;
+    --c-danger: #f87171;
+    --c-danger-soft: #2a1717;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow: 0 2px 10px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme='dark'] {
+  --c-bg: #12161d;
+  --c-surface: #181d26;
+  --c-surface-2: #1f2530;
+  --c-surface-3: #2a303d;
+  --c-border: #2d3441;
+  --c-border-strong: #434b5a;
+
+  --c-text: #eef1f5;
+  --c-text-muted: #a3aab8;
+  --c-text-subtle: #747d8c;
+
+  --c-primary: #3a4f70;
+  --c-primary-hover: #4c6488;
+  --c-primary-soft: #1f2937;
+  --c-primary-contrast: #ffffff;
+
+  --c-accent: #f0a020;
+  --c-accent-hover: #ffb84d;
+  --c-accent-soft: #2c2113;
+  --c-accent-strong: #f5a904;
+  --c-accent-strong-hover: #ffbe3d;
+  --c-accent-contrast: #1a1206;
+
+  --c-success: #4ade80;
+  --c-success-soft: #16251b;
+  --c-danger: #f87171;
+  --c-danger-soft: #2a1717;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow: 0 2px 10px rgb(0 0 0 / 0.4);
+}

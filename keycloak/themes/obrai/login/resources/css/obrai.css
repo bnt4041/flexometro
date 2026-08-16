@@ -1,0 +1,80 @@
+/* Flexómetro — tema de login de Keycloak.
+ *
+ * Se apoya en las variables CSS que el propio tema keycloak.v2 ya expone
+ * (--keycloak-bg-logo-url, --keycloak-card-top-color) en vez de pelearse con
+ * las clases internas de PatternFly, y solo toca por selector directo lo que
+ * esas variables no cubren: el bloque de cabecera (#kc-header-wrapper, que
+ * por defecto es el nombre del realm en texto) y el botón primario.
+ * `!important` solo donde el propio tema base ya lo usa (el color del
+ * texto de cabecera), para poder ganarle la partida a la cascada.
+ */
+
+:root {
+  --keycloak-bg-logo-url: none;
+  --keycloak-card-top-color: #f5a904;
+}
+
+.login-pf body {
+  background: #ffffff;
+}
+
+.pf-v5-c-login__container {
+  grid-template-columns: 26rem;
+}
+
+#kc-header-wrapper {
+  background-image: url(../img/logo.png);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  min-height: 48px;
+  width: 100%;
+  font-size: 0 !important;
+  text-indent: -9999px;
+  color: transparent !important;
+}
+
+.pf-v5-c-login__main {
+  background: #ffffff;
+  border: 1px solid #dde1e7;
+  border-radius: 11px;
+  box-shadow: 0 2px 8px rgb(27 41 62 / 0.1);
+  padding: 8px 8px 24px;
+}
+
+.pf-v5-c-title,
+#kc-page-title {
+  color: #1b293e;
+}
+
+.pf-v5-c-login__main-body a,
+.pf-v5-c-login__main-footer a,
+#kc-registration a,
+#kc-info-wrapper a {
+  color: #9a6300;
+}
+
+.pf-v5-c-login__main-body a:hover,
+.pf-v5-c-login__main-footer a:hover,
+#kc-registration a:hover,
+#kc-info-wrapper a:hover {
+  color: #7a4e00;
+}
+
+.pf-v5-c-button.pf-m-primary {
+  background-color: #f5a904;
+  color: #1b293e;
+  border-color: #f5a904;
+  font-weight: 700;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:focus {
+  background-color: #c48703;
+  border-color: #c48703;
+}
+
+.pf-v5-c-form-control:focus {
+  border-bottom-color: #f5a904;
+  box-shadow: none;
+}

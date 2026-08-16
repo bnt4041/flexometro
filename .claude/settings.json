@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(docker --version)",
+      "PowerShell(docker compose version)",
+      "Bash(git --version)",
+      "PowerShell(docker compose -f c:\\\\aplicaciones\\\\obras\\\\docker-compose.yml --project-directory c:\\\\aplicaciones\\\\obras up -d --build)",
+      "PowerShell($p = \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\"; if \\(Test-Path $p\\) { Start-Process $p; \"lanzado\" } else { \"no encontrado en $p\" })",
+      "PowerShell(docker compose -f c:\\\\aplicaciones\\\\obras\\\\docker-compose.yml --project-directory c:\\\\aplicaciones\\\\obras logs migrate --no-log-prefix)",
+      "PowerShell(docker compose -f c:\\\\aplicaciones\\\\obras\\\\docker-compose.yml --project-directory c:\\\\aplicaciones\\\\obras up -d)",
+      "Bash(curl -s http://localhost:8081/admin/realms/obras)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('displayName:', d.get\\('displayName'\\)\\); print\\('loginTheme:', d.get\\('loginTheme'\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('displayName:', d.get\\('displayName'\\)\\)\")",
+      "Bash(curl -s \"http://localhost:8081/realms/obras/protocol/openid-connect/auth?client_id=obras-web&response_type=code&scope=openid&redirect_uri=http://localhost:5173&code_challenge=abc&code_challenge_method=S256\" -o /c/aplicaciones/obras/_login_page.html -w \"STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -sL -c /c/aplicaciones/obras/_cookies.txt \"http://localhost:8081/realms/obras/protocol/openid-connect/auth?client_id=obras-web&response_type=code&scope=openid&redirect_uri=http://localhost:5173&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256\" -o /c/aplicaciones/obras/_login_page.html -w \"STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"favicon.ico: %{http_code}\\\\n\" http://localhost:5173/favicon.ico)",
+      "Bash(curl -s -o /dev/null -w \"logo.png: %{http_code}\\\\n\" http://localhost:5173/src/assets/logo.png)",
+      "Bash(python3 -m json.tool)"
+    ]
+  }
+}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+<h2>Cuadro de precios descompuestos</h2>
+
+<p class="apagado" style="margin-bottom: 4mm; font-size: 7.5pt">
+  Descomposición de cada precio unitario empleado en el presupuesto. El importe
+  de cada línea se redondea a dos decimales antes de sumar.
+</p>
+
+{% for concepto in conceptos %}
+  <div style="break-inside: avoid; margin-bottom: 6mm">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 24mm">{{ concepto.codigo }}</th>
+          <th colspan="2">{{ concepto.resumen }}</th>
+          <th class="num" style="width: 20mm">{{ concepto.unidad }}</th>
+          <th class="num" style="width: 24mm">{{ concepto.precio | eur }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if concepto.texto %}
+          <tr><td></td><td colspan="4" class="texto-largo">{{ concepto.texto }}</td></tr>
+        {% endif %}
+
+        {% for linea in concepto.lineas %}
+          <tr>
+            <td class="cod" style="padding-left: 6mm">{{ linea.hijo_codigo }}</td>
+            <td>{{ linea.hijo_resumen }}</td>
+            <td class="num">{{ linea.rendimiento | num(3) }} {{ linea.hijo_unidad }}</td>
+            <td class="num">{{ linea.hijo_precio | eur }}</td>
+            <td class="num">{{ linea.importe | eur }}</td>
+          </tr>
+        {% endfor %}
+
+        <tr class="fila-subtotal">
+          <td></td>
+          <td colspan="3" class="num">Coste directo</td>
+          <td class="num">{{ concepto.coste_directo | eur }}</td>
+        </tr>
+        {% if concepto.costes_indirectos %}
+          <tr class="suave">
+            <td></td>
+            <td colspan="3" class="num apagado">
+              Costes indirectos {{ concepto.costes_indirectos | num(2) }} %
+            </td>
+            <td class="num apagado">
+              {{ (concepto.precio - concepto.coste_directo) | eur }}
+            </td>
+          </tr>
+        {% endif %}
+        <tr class="fila-subtotal">
+          <td></td>
+          <td colspan="3" class="num">Precio por {{ concepto.unidad }}</td>
+          <td class="num">{{ concepto.precio | eur }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="apagado">
+    Ninguna partida de este presupuesto está ligada a un precio descompuesto.
+  </p>
+{% endfor %}
+{% endblock %}

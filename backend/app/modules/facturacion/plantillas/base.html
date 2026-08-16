@@ -1,0 +1,116 @@
+{# Maqueta propia del módulo, no compartida con presupuestos: cada módulo es
+   dueño de su espacio de datos y de su papelería, así que una duplicación
+   pequeña aquí es preferible a acoplar dos módulos por un CSS. #}
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{{ titulo }} — {{ codigo }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm 18mm 15mm;
+    @bottom-right {
+      content: "Página " counter(page) " de " counter(pages);
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 7.5pt;
+      color: #948c80;
+    }
+  }
+
+  body {
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    color: #1b1917;
+  }
+
+  h1 { font-size: 17pt; letter-spacing: -0.02em; margin: 0 0 2mm; }
+  h2 {
+    font-size: 10.5pt;
+    margin: 8mm 0 2mm;
+    padding-bottom: 1.5mm;
+    border-bottom: 0.6pt solid #c9c2b7;
+    break-after: avoid;
+  }
+
+  .cabecera {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8mm;
+    padding-bottom: 4mm;
+    border-bottom: 1pt solid #1b1917;
+  }
+  .cabecera__tipo {
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #b45309;
+    font-weight: bold;
+    margin-bottom: 2mm;
+  }
+  .cabecera__datos {
+    text-align: right;
+    color: #4a443a;
+    font-size: 8pt;
+  }
+  .cabecera__datos div { margin-bottom: 0.8mm; }
+
+  .partes {
+    display: flex;
+    justify-content: space-between;
+    gap: 10mm;
+    margin-bottom: 8mm;
+  }
+  .partes__bloque { flex: 1; }
+  .partes__etiqueta {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #948c80;
+    margin-bottom: 1.5mm;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6d665c;
+    text-align: left;
+    padding: 1.5mm 2mm;
+    border-bottom: 0.6pt solid #c9c2b7;
+  }
+  td {
+    padding: 1.5mm 2mm;
+    border-bottom: 0.3pt solid #e6e1d9;
+    vertical-align: top;
+  }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cod { font-family: "DejaVu Sans Mono", monospace; font-size: 7.5pt; color: #6d665c; }
+  .apagado { color: #948c80; }
+
+  .totales { margin-top: 8mm; margin-left: auto; width: 90mm; break-inside: avoid; }
+  .totales tr td { border-bottom: 0.3pt solid #e6e1d9; padding: 1.8mm 2mm; }
+  .totales .total td {
+    border-top: 1pt solid #1b1917;
+    border-bottom: none;
+    font-size: 11pt;
+    font-weight: bold;
+    padding-top: 2.5mm;
+  }
+
+  .aviso-legal {
+    margin-top: 6mm;
+    font-size: 7.5pt;
+    color: #6d665c;
+  }
+</style>
+</head>
+<body>
+{% block contenido %}{% endblock %}
+</body>
+</html>

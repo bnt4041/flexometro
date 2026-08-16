@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+<div class="cabecera">
+  <div>
+    <div class="cabecera__tipo">Factura</div>
+    <h1>{{ factura.serie }}/{{ '%05d'|format(factura.numero) if factura.numero else 'BORRADOR' }}</h1>
+  </div>
+  <div class="cabecera__datos">
+    {% if factura.fecha_emision %}<div>Fecha: {{ factura.fecha_emision.strftime('%d/%m/%Y') }}</div>{% endif %}
+    {% if factura.fecha_vencimiento %}<div>Vencimiento: {{ factura.fecha_vencimiento.strftime('%d/%m/%Y') }}</div>{% endif %}
+  </div>
+</div>
+
+<div class="partes">
+  <div class="partes__bloque">
+    <div class="partes__etiqueta">Cliente</div>
+    <div>{{ cliente.razon_social if cliente else '—' }}</div>
+    {% if cliente and cliente.nif %}<div class="apagado">{{ cliente.nif }}</div>{% endif %}
+    {% if cliente and cliente.direccion %}<div class="apagado">{{ cliente.direccion }}</div>{% endif %}
+  </div>
+  <div class="partes__bloque">
+    <div class="partes__etiqueta">Obra</div>
+    <div>{{ obra_codigo }} — {{ obra_nombre }}</div>
+  </div>
+</div>
+
+<h2>Concepto</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Descripción</th>
+      <th class="num" style="width: 30mm">Importe</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ factura.concepto }}</td>
+      <td class="num">{{ factura.base_imponible | eur }} €</td>
+    </tr>
+  </tbody>
+</table>
+
+<table class="totales">
+  <tr>
+    <td>Base imponible</td>
+    <td class="num">{{ factura.base_imponible | eur }} €</td>
+  </tr>
+  <tr>
+    {% if factura.inversion_sujeto_pasivo %}
+      <td>IVA — inversión del sujeto pasivo</td>
+    {% else %}
+      <td>IVA {{ etiqueta_iva }}</td>
+    {% endif %}
+    <td class="num">{{ factura.cuota_iva | eur }} €</td>
+  </tr>
+  <tr class="total">
+    <td>Total</td>
+    <td class="num">{{ factura.total | eur }} €</td>
+  </tr>
+</table>
+
+{% if factura.inversion_sujeto_pasivo %}
+  <p class="aviso-legal">
+    Operación con inversión del sujeto pasivo conforme al artículo 84.Uno.2.º f)
+    de la Ley 37/1992 del IVA. El destinatario es el sujeto pasivo del impuesto.
+  </p>
+{% endif %}
+
+{% if factura.estado == 'anulada' %}
+  <p class="aviso-legal" style="color:#b91c1c; font-weight:bold;">
+    FACTURA ANULADA{% if factura.motivo_anulacion %} — {{ factura.motivo_anulacion }}{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

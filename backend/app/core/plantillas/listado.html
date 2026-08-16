@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4 landscape; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 9pt; color: #1a2130; margin: 0; }
+  .cabecera { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #f5a904; padding-bottom: 6mm; margin-bottom: 6mm; }
+  .cabecera h1 { font-size: 14pt; color: #1b293e; margin: 0; }
+  .cabecera .fecha { color: #5b6472; font-size: 8pt; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; background: #1b293e; color: #ffffff; padding: 2.2mm 3mm; font-size: 8pt; font-weight: 600; }
+  td { padding: 1.8mm 3mm; border-bottom: 0.3mm solid #dde1e7; font-size: 8pt; }
+  tr:nth-child(even) td { background: #f7f8fa; }
+  .pie { position: fixed; bottom: -8mm; left: 0; right: 0; text-align: center; font-size: 7pt; color: #9aa1ac; }
+</style>
+</head>
+<body>
+  <div class="cabecera">
+    <h1>{{ titulo }}</h1>
+    <div class="fecha">{{ generado_en }} · {{ total_filas }} registro{{ 's' if total_filas != 1 else '' }}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        {% for columna in columnas %}<th>{{ columna }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for fila in filas %}
+      <tr>
+        {% for celda in fila %}<td>{{ celda }}</td>{% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="pie">Flexómetro — ERP de construcción</div>
+</body>
+</html>

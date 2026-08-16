@@ -1,0 +1,160 @@
+{# Maqueta común de los tres documentos. Pensada para papel: A4, cabecera y
+   pie repetidos en cada página, y las tablas cortando por filas enteras. #}
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{{ titulo }} — {{ presupuesto.codigo }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm 18mm 15mm;
+
+    @top-left {
+      content: "{{ presupuesto.codigo }} · {{ presupuesto.nombre|e }}";
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 7.5pt;
+      color: #7c746a;
+      border-bottom: 0.4pt solid #d8d2c8;
+      width: 100%;
+      padding-bottom: 3mm;
+    }
+    @bottom-left {
+      content: "{{ titulo }}";
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 7.5pt;
+      color: #948c80;
+    }
+    @bottom-right {
+      content: "Página " counter(page) " de " counter(pages);
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 7.5pt;
+      color: #948c80;
+    }
+  }
+
+  /* La primera página lleva la portada, así que no repite la cabecera. */
+  @page :first {
+    @top-left { content: ""; border-bottom: none; }
+  }
+
+  body {
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    color: #1b1917;
+  }
+
+  h1 { font-size: 17pt; letter-spacing: -0.02em; margin: 0 0 2mm; }
+  h2 {
+    font-size: 10.5pt;
+    margin: 8mm 0 2mm;
+    padding-bottom: 1.5mm;
+    border-bottom: 0.6pt solid #c9c2b7;
+    /* Un encabezado no debe quedarse solo al final de la página. */
+    break-after: avoid;
+  }
+
+  .portada { margin-bottom: 10mm; }
+  .portada__tipo {
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #b45309;
+    font-weight: bold;
+    margin-bottom: 2mm;
+  }
+  .portada__meta {
+    margin-top: 4mm;
+    border-top: 0.6pt solid #d8d2c8;
+    padding-top: 3mm;
+    color: #4a443a;
+  }
+  .portada__meta div { margin-bottom: 1mm; }
+  .portada__meta .etiqueta {
+    display: inline-block;
+    width: 30mm;
+    color: #948c80;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; }   /* repite el encabezado al cortar */
+  tr { break-inside: avoid; }
+
+  th {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6d665c;
+    text-align: left;
+    padding: 1.5mm 2mm;
+    border-bottom: 0.6pt solid #c9c2b7;
+  }
+  td {
+    padding: 1.5mm 2mm;
+    border-bottom: 0.3pt solid #e6e1d9;
+    vertical-align: top;
+  }
+
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cod { font-family: "DejaVu Sans Mono", monospace; font-size: 7.5pt; color: #6d665c; }
+  .apagado { color: #948c80; }
+  .texto-largo { color: #4a443a; font-size: 7.5pt; padding-top: 0.5mm; }
+
+  .fila-capitulo td {
+    background: #f4f2ee;
+    font-weight: bold;
+    border-top: 0.5pt solid #d8d2c8;
+  }
+  .fila-subtotal td {
+    border-top: 0.5pt solid #c9c2b7;
+    font-weight: bold;
+  }
+
+  .totales {
+    margin-top: 8mm;
+    margin-left: auto;
+    width: 95mm;
+    break-inside: avoid;
+  }
+  .totales tr td { border-bottom: 0.3pt solid #e6e1d9; padding: 1.8mm 2mm; }
+  .totales .suave td { color: #6d665c; }
+  .totales .total td {
+    border-top: 1pt solid #1b1917;
+    border-bottom: none;
+    font-size: 11pt;
+    font-weight: bold;
+    padding-top: 2.5mm;
+  }
+
+  .firma {
+    margin-top: 18mm;
+    break-inside: avoid;
+    color: #6d665c;
+  }
+  .firma__linea {
+    margin-top: 16mm;
+    border-top: 0.4pt solid #948c80;
+    width: 70mm;
+    padding-top: 1.5mm;
+  }
+</style>
+</head>
+<body>
+
+<div class="portada">
+  <div class="portada__tipo">{{ titulo }}</div>
+  <h1>{{ presupuesto.nombre }}</h1>
+  <div class="portada__meta">
+    <div><span class="etiqueta">Código</span>{{ presupuesto.codigo }}{% if presupuesto.version > 1 %} · versión {{ presupuesto.version }}{% endif %}</div>
+    {% if cliente %}<div><span class="etiqueta">Cliente</span>{{ cliente.razon_social }}{% if cliente.nif %} · {{ cliente.nif }}{% endif %}</div>{% endif %}
+    {% if presupuesto.emplazamiento %}<div><span class="etiqueta">Emplazamiento</span>{{ presupuesto.emplazamiento }}</div>{% endif %}
+    {% if presupuesto.fecha %}<div><span class="etiqueta">Fecha</span>{{ presupuesto.fecha.strftime('%d/%m/%Y') }}</div>{% endif %}
+    {% if presupuesto.validez_dias %}<div><span class="etiqueta">Validez</span>{{ presupuesto.validez_dias }} días</div>{% endif %}
+  </div>
+</div>
+
+{% block contenido %}{% endblock %}
+
+</body>
+</html>
