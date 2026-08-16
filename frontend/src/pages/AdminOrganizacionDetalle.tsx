@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Ban, Power, Save } from 'lucide-react'
 
 import { ErrorNotice, Field, ModalPantalla, PruebaSmtpCard } from '../components/ui'
 import { api } from '../lib/api'
@@ -99,6 +100,9 @@ export function AdminOrganizacionDetalle() {
               disabled={modulo.always_active || busyModulo !== null}
               onClick={() => void toggleModulo(modulo.code, !modulo.is_active)}
             >
+              {busyModulo !== modulo.code && !modulo.always_active && (
+                <Power size={14} aria-hidden="true" />
+              )}
               {busyModulo === modulo.code
                 ? '...'
                 : modulo.always_active
@@ -174,9 +178,11 @@ function DatosOrganizacion({
           disabled={guardando}
           onClick={() => void toggleActiva()}
         >
+          {organizacion.is_active ? <Ban size={16} aria-hidden="true" /> : <Power size={16} aria-hidden="true" />}
           {organizacion.is_active ? 'Desactivar organización' : 'Reactivar organización'}
         </button>
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : 'Guardar datos'}
         </button>
       </div>
@@ -277,6 +283,7 @@ function SmtpOrganizacionCard({ organizationId }: { organizationId: string }) {
         </div>
         <div className="form-actions">
           <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar'}
           </button>
         </div>

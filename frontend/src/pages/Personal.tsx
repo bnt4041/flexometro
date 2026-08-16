@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Pencil, Plus, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, Modal, Pager, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, Pager, Tooltip, formatoImporte } from '../components/ui'
 import { api } from '../lib/api'
 import type { Personal as PersonalT } from '../lib/api'
 
@@ -48,9 +49,12 @@ export function Personal() {
             (salario más cargas sociales), y se congela en cada asignación a obra.
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => setCreando(true)}>
-          Nuevo trabajador
-        </button>
+        <Tooltip texto="Dar de alta un trabajador">
+          <button className="btn btn--primary" onClick={() => setCreando(true)}>
+            <Plus size={16} aria-hidden="true" />
+            Nuevo trabajador
+          </button>
+        </Tooltip>
       </div>
 
       <div className="toolbar">
@@ -95,6 +99,7 @@ export function Personal() {
                   <td className="table__num">{formatoImporte(p.coste_hora)} €</td>
                   <td className="table__actions">
                     <button className="btn btn--sm" onClick={() => setEditando(p)}>
+                      <Pencil size={14} aria-hidden="true" />
                       Editar
                     </button>
                   </td>
@@ -223,6 +228,7 @@ function FormularioPersonal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -230,6 +236,7 @@ function FormularioPersonal({
           disabled={guardando || nombre.trim() === ''}
           onClick={() => void guardar()}
         >
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : persona ? 'Guardar cambios' : 'Crear'}
         </button>
       </div>

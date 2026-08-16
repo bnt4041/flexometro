@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Ban, FileDown, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_FACTURA, ETIQUETA_SITUACION_COBRO, api, descargar } from '../lib/api'
 import type { FacturaDetalle as Detalle } from '../lib/api'
 import { useContextoFacturas } from './Facturas'
@@ -90,25 +91,34 @@ export function FacturaDetalle() {
           {factura.fecha_emision && <> · emitida {factura.fecha_emision}</>}
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <button
-            className="btn"
-            onClick={() =>
-              void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
-                abrir: true,
-              }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }
-          >
-            PDF
-          </button>
-          {factura.estado === 'borrador' && (
-            <button className="btn btn--primary" onClick={() => void emitir()}>
-              Emitir
+          <Tooltip texto="Descargar el PDF de esta factura">
+            <button
+              className="btn"
+              onClick={() =>
+                void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
+                  abrir: true,
+                }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+              }
+            >
+              <FileDown size={16} aria-hidden="true" />
+              PDF
             </button>
+          </Tooltip>
+          {factura.estado === 'borrador' && (
+            <Tooltip texto="Emitir: asigna número fiscal definitivo">
+              <button className="btn btn--primary" onClick={() => void emitir()}>
+                <Send size={16} aria-hidden="true" />
+                Emitir
+              </button>
+            </Tooltip>
           )}
           {factura.estado === 'emitida' && (
-            <button className="btn btn--danger" onClick={() => setAnulando(true)}>
-              Anular
-            </button>
+            <Tooltip texto="Anular esta factura (conserva su número)">
+              <button className="btn btn--danger" onClick={() => setAnulando(true)}>
+                <Ban size={16} aria-hidden="true" />
+                Anular
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -136,6 +146,7 @@ export function FacturaDetalle() {
         <div className="notice notice--aviso">
           Todavía no se ha notificado a n8n para el circuito Veri*Factu/Facturae.{' '}
           <button className="btn btn--sm" onClick={() => void reintentarNotificacion()}>
+            <RefreshCw size={14} aria-hidden="true" />
             Reintentar envío
           </button>
         </div>
@@ -161,9 +172,12 @@ export function FacturaDetalle() {
           <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
             <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Cobros</h2>
             {factura.situacion_cobro !== 'cobrada' && (
-              <button className="btn" onClick={() => setCobrando(true)}>
-                Registrar cobro
-              </button>
+              <Tooltip texto="Registrar un cobro para esta factura">
+                <button className="btn" onClick={() => setCobrando(true)}>
+                  <Plus size={16} aria-hidden="true" />
+                  Registrar cobro
+                </button>
+              </Tooltip>
             )}
           </div>
 
@@ -187,12 +201,14 @@ export function FacturaDetalle() {
                       <td>{c.forma_pago ?? <span className="muted">—</span>}</td>
                       <td className="table__num">{formatoImporte(c.importe)}</td>
                       <td className="table__actions">
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void eliminarCobro(c.id)}
-                        >
-                          ×
-                        </button>
+                        <Tooltip texto="Eliminar este cobro">
+                          <button
+                            className="btn btn--sm btn--danger btn--solo-icono"
+                            onClick={() => void eliminarCobro(c.id)}
+                          >
+                            <Trash2 size={14} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
                       </td>
                     </tr>
                   ))}
@@ -282,6 +298,7 @@ function AnularModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -289,6 +306,7 @@ function AnularModal({
           disabled={motivo.trim() === ''}
           onClick={() => void confirmar()}
         >
+          <Ban size={16} aria-hidden="true" />
           Anular
         </button>
       </div>
@@ -357,9 +375,11 @@ function CobroModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button className="btn btn--primary" disabled={importe === ''} onClick={() => void guardar()}>
+          <Plus size={16} aria-hidden="true" />
           Registrar
         </button>
       </div>

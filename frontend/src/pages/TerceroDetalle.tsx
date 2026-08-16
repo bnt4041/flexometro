@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Plus, Save, Trash2, X } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
-import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, EmptyState } from '../components/ui'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
+import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, EmptyState, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
 import type { Contacto, FormaPago, TerceroDetalle as Detalle } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
@@ -82,24 +85,8 @@ export function TerceroDetalle() {
     }
   }
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {tercero.razon_social} <span className="table__code">{tercero.codigo}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
-      <div className="page-head">
-        <p className="page-lead" style={{ marginBottom: 0 }}>
-          Origen del dato: {tercero.origen_dato}
-        </p>
-        <button className="btn btn--danger" onClick={() => void eliminar()}>
-          Eliminar
-        </button>
-      </div>
-
+  const pestanaDatos = (
+    <>
       <ErrorNotice error={error} />
 
       <div className="card">
@@ -335,6 +322,7 @@ export function TerceroDetalle() {
 
         <div className="form-actions">
           <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
+            <X size={16} aria-hidden="true" />
             Descartar
           </button>
           <button
@@ -342,18 +330,28 @@ export function TerceroDetalle() {
             disabled={!hayCambios || guardando}
             onClick={() => void guardar()}
           >
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
       </div>
 
       <CamposLibres entidad="tercero" entidadId={id} />
+    </>
+  )
 
-      <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
-        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Contactos</h2>
-        <button className="btn" onClick={() => setNuevoContacto(true)}>
-          Añadir contacto
-        </button>
+  const pestanaContactos = (
+    <>
+      <div className="page-head">
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          Personas con las que se trata en esta empresa.
+        </p>
+        <Tooltip texto="Añadir una persona de contacto">
+          <button className="btn" onClick={() => setNuevoContacto(true)}>
+            <Plus size={16} aria-hidden="true" />
+            Añadir contacto
+          </button>
+        </Tooltip>
       </div>
 
       <div className="table-wrap">
@@ -391,7 +389,37 @@ export function TerceroDetalle() {
           }}
         />
       )}
-    </ModalPantalla>
+    </>
+  )
+
+  const pestanas: PestanaFicha[] = [
+    { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    { id: 'contactos', etiqueta: 'Contactos', icono: 'contactos', contenido: pestanaContactos },
+  ]
+
+  return (
+    <FichaDetalle
+      titulo={
+        <>
+          {tercero.razon_social} <span className="table__code">{tercero.codigo}</span>
+        </>
+      }
+      subtitulo={
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          Origen del dato: {tercero.origen_dato}
+        </p>
+      }
+      acciones={
+        <Tooltip texto="Eliminar este tercero">
+          <button className="btn btn--danger" onClick={() => void eliminar()}>
+            <Trash2 size={16} aria-hidden="true" />
+            Eliminar
+          </button>
+        </Tooltip>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
   )
 }
 
@@ -413,6 +441,7 @@ function FilaContacto({ contacto, onCambio }: { contacto: Contacto; onCambio: ()
       <td>{contacto.telefono ?? contacto.movil ?? <span className="muted">—</span>}</td>
       <td className="table__actions">
         <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
+          <Trash2 size={14} aria-hidden="true" />
           Eliminar
         </button>
       </td>
@@ -516,6 +545,7 @@ function NuevoContactoModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -523,6 +553,7 @@ function NuevoContactoModal({
           disabled={nombre.trim() === ''}
           onClick={() => void guardar()}
         >
+          <Plus size={16} aria-hidden="true" />
           Crear
         </button>
       </div>

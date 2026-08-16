@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Ban, Check } from 'lucide-react'
 
 import { ErrorNotice, formatoImporte } from '../components/ui'
 import { api } from '../lib/api'
@@ -139,6 +140,7 @@ export function AplicacionesDescuentoCard({ cuentaId }: { cuentaId: string }) {
           disabled={aplicando || seleccionados.length === 0}
           onClick={() => void aplicar()}
         >
+          {!aplicando && <Check size={16} aria-hidden="true" />}
           {aplicando
             ? 'Aplicando…'
             : `Aplicar${seleccionados.length > 0 ? ` (${seleccionados.length})` : ''}`}
@@ -185,6 +187,7 @@ export function AplicacionesDescuentoCard({ cuentaId }: { cuentaId: string }) {
                       disabled={busyId === a.id}
                       onClick={() => void anular(a)}
                     >
+                      {busyId !== a.id && <Ban size={14} aria-hidden="true" />}
                       {busyId === a.id ? '...' : 'Anular'}
                     </button>
                   )}

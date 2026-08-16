@@ -9,9 +9,19 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import type { ColumnDef, ColumnFiltersState, SortingState, VisibilityState } from '@tanstack/react-table'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Columns3,
+  FileDown,
+  GripVertical,
+  Sheet,
+} from 'lucide-react'
 
 import { exportarCsv, exportarPdf } from '../lib/exportar'
-import { formatoImporte } from './ui'
+import { Tooltip, formatoImporte } from './ui'
 
 export type TipoColumna = 'texto' | 'numero' | 'importe' | 'fecha' | 'select'
 
@@ -204,13 +214,16 @@ export function DataTable<T>({
     <div className="data-table">
       <div className="data-table__toolbar">
         <div className="data-table__toolbar-menu">
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={() => setMenuColumnasAbierto((v) => !v)}
-          >
-            Columnas
-          </button>
+          <Tooltip texto="Elegir qué columnas se ven">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => setMenuColumnasAbierto((v) => !v)}
+            >
+              <Columns3 size={14} aria-hidden="true" />
+              Columnas
+            </button>
+          </Tooltip>
           {menuColumnasAbierto && (
             <>
               <div className="data-table__menu-backdrop" onClick={() => setMenuColumnasAbierto(false)} />
@@ -229,26 +242,32 @@ export function DataTable<T>({
             </>
           )}
         </div>
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={() => {
-            const { columnas: cols, filas } = datosParaExportar()
-            exportarCsv(nombreArchivo, cols, filas)
-          }}
-        >
-          CSV
-        </button>
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={() => {
-            const { columnas: cols, filas } = datosParaExportar()
-            void exportarPdf(nombreArchivo, nombreArchivo, cols, filas)
-          }}
-        >
-          PDF
-        </button>
+        <Tooltip texto="Descargar esta tabla como CSV (Excel)">
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => {
+              const { columnas: cols, filas } = datosParaExportar()
+              exportarCsv(nombreArchivo, cols, filas)
+            }}
+          >
+            <Sheet size={14} aria-hidden="true" />
+            CSV
+          </button>
+        </Tooltip>
+        <Tooltip texto="Descargar esta tabla como PDF">
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => {
+              const { columnas: cols, filas } = datosParaExportar()
+              void exportarPdf(nombreArchivo, nombreArchivo, cols, filas)
+            }}
+          >
+            <FileDown size={14} aria-hidden="true" />
+            PDF
+          </button>
+        </Tooltip>
       </div>
 
       <div className="table-wrap">
@@ -280,12 +299,14 @@ export function DataTable<T>({
                       className="data-table__th-titulo"
                       onClick={header.column.getToggleSortingHandler()}
                     >
-                      <span className="data-table__drag-handle" title="Arrastra para reordenar">
-                        ⠿
-                      </span>
+                      <Tooltip texto="Arrastra para reordenar la columna">
+                        <span className="data-table__drag-handle">
+                          <GripVertical size={14} aria-hidden="true" />
+                        </span>
+                      </Tooltip>
                       <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
-                      {header.column.getIsSorted() === 'asc' && <span>▲</span>}
-                      {header.column.getIsSorted() === 'desc' && <span>▼</span>}
+                      {header.column.getIsSorted() === 'asc' && <ChevronUp size={14} aria-hidden="true" />}
+                      {header.column.getIsSorted() === 'desc' && <ChevronDown size={14} aria-hidden="true" />}
                     </div>
                     {header.column.getCanFilter() && (
                       <FiltroColumna
@@ -349,10 +370,12 @@ export function DataTable<T>({
             ))}
           </select>
           <button className="btn btn--sm" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
+            <ChevronLeft size={14} aria-hidden="true" />
             Anterior
           </button>
           <button className="btn btn--sm" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>
             Siguiente
+            <ChevronRight size={14} aria-hidden="true" />
           </button>
         </div>
       </div>

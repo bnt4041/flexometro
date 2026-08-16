@@ -295,7 +295,6 @@ def _fila_concepto(
             OrigenPrecio.DESCOMPOSICION if descompuesto else OrigenPrecio.MANUAL
         ),
         "fecha_precio": concepto.fecha,
-        "producto_id": None,
         "costes_indirectos": None,
         "activo": True,
         "origen_dato": OrigenDato.FIEBDC3,

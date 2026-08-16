@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { ArrowRight, Plus, X } from 'lucide-react'
 
 import { EmptyState, ErrorNotice, Field, ModalPantalla } from '../components/ui'
 import { api } from '../lib/api'
@@ -44,6 +45,7 @@ export function AdminCuentas() {
           </p>
         </div>
         <Link className="btn btn--primary" to="nueva">
+          <Plus size={16} aria-hidden="true" />
           Nueva cuenta
         </Link>
       </div>
@@ -80,6 +82,7 @@ export function AdminCuentas() {
                   <td className="table__actions">
                     <Link className="btn btn--sm" to={`${cuenta.id}`}>
                       Gestionar
+                      <ArrowRight size={14} aria-hidden="true" />
                     </Link>
                   </td>
                 </tr>
@@ -135,6 +138,7 @@ export function AdminCuentaCrear() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -142,6 +146,7 @@ export function AdminCuentaCrear() {
             disabled={guardando || nombre.trim() === ''}
             onClick={() => void guardar()}
           >
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Creando…' : 'Crear cuenta'}
           </button>
         </div>

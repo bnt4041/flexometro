@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Plus, Power, Trash2 } from 'lucide-react'
 
 import { ErrorNotice, Field, formatoImporte } from '../components/ui'
 import { api } from '../lib/api'
@@ -156,6 +157,7 @@ export function DescuentosCard({ tarifaId }: { tarifaId: string }) {
           disabled={guardando || nombre.trim() === '' || valor.trim() === ''}
           onClick={() => void crear()}
         >
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Creando…' : 'Añadir descuento'}
         </button>
       </div>
@@ -198,6 +200,7 @@ export function DescuentosCard({ tarifaId }: { tarifaId: string }) {
                     disabled={busyId === d.id}
                     onClick={() => void toggleActivo(d)}
                   >
+                    <Power size={14} aria-hidden="true" />
                     {d.activo ? 'Desactivar' : 'Activar'}
                   </button>
                   <button
@@ -205,6 +208,7 @@ export function DescuentosCard({ tarifaId }: { tarifaId: string }) {
                     disabled={busyId === d.id}
                     onClick={() => void eliminar(d)}
                   >
+                    <Trash2 size={14} aria-hidden="true" />
                     Eliminar
                   </button>
                 </td>

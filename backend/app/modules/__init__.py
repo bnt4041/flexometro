@@ -7,17 +7,19 @@ Alembic autogenere migraciones.
 Grafo de dependencias:
 
     terceros     (base)
-    catalogo     -> terceros
-    presupuestos -> catalogo
+    presupuestos -> terceros
     obras        -> presupuestos
-    compras      -> obras, catalogo
+    compras      -> obras
     facturacion  -> obras, terceros
     ia           -> presupuestos
+
+El módulo `catalogo` (Producto, Familia, PrecioSuministro) existió hasta la
+Fase 25, cuando se fusionó en `presupuestos.Concepto` bajo el nombre "banco de
+precios": un producto/servicio y una partida unitaria son la misma ficha.
 """
 
 from app.core.modules import registry
 from app.modules.campos_libres import SPEC as CAMPOS_LIBRES
-from app.modules.catalogo import SPEC as CATALOGO
 from app.modules.compras import SPEC as COMPRAS
 from app.modules.core import SPEC as CORE
 from app.modules.facturacion import SPEC as FACTURACION
@@ -26,7 +28,7 @@ from app.modules.obras import SPEC as OBRAS
 from app.modules.presupuestos import SPEC as PRESUPUESTOS
 from app.modules.terceros import SPEC as TERCEROS
 
-ALL_SPECS = (CORE, CAMPOS_LIBRES, TERCEROS, CATALOGO, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA)
+ALL_SPECS = (CORE, CAMPOS_LIBRES, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA)
 
 
 def register_all() -> None:
@@ -38,7 +40,6 @@ def register_all() -> None:
 def import_models() -> None:
     """Puebla Base.metadata. Lo usa el env.py de Alembic."""
     from app.modules.campos_libres import models as _campos_libres_models  # noqa: F401
-    from app.modules.catalogo import models as _catalogo_models  # noqa: F401
     from app.modules.compras import models as _compras_models  # noqa: F401
     from app.modules.core import billing_models as _core_billing_models  # noqa: F401
     from app.modules.core import diccionario_models as _core_diccionario_models  # noqa: F401

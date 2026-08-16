@@ -4,12 +4,87 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.enums import OrigenDato
+from app.core.enums import OrigenDato, TipoIVA
 from app.modules.presupuestos.models import (
     NaturalezaConcepto,
     OrigenPrecio,
     TipoConcepto,
 )
+
+
+class FamiliaBase(BaseModel):
+    codigo: str = Field(min_length=1, max_length=32)
+    nombre: str = Field(min_length=1, max_length=160)
+    parent_id: uuid.UUID | None = None
+    orden: int = 0
+
+
+class FamiliaCreate(FamiliaBase):
+    pass
+
+
+class FamiliaUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str | None = Field(default=None, min_length=1, max_length=32)
+    nombre: str | None = Field(default=None, min_length=1, max_length=160)
+    parent_id: uuid.UUID | None = None
+    orden: int | None = None
+
+
+class FamiliaOut(FamiliaBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    creado_por_nombre: str | None = None
+
+
+class PrecioSuministroBase(BaseModel):
+    proveedor_id: uuid.UUID
+    precio: Decimal = Field(ge=0, decimal_places=4)
+    moneda: str = Field(default="EUR", min_length=3, max_length=3)
+    descuento: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    cantidad_minima: Decimal | None = Field(default=None, ge=0)
+    plazo_entrega_dias: int | None = Field(default=None, ge=0)
+    referencia_proveedor: str | None = Field(default=None, max_length=60)
+    vigente_desde: date
+    vigente_hasta: date | None = None
+    es_preferente: bool = False
+    notas: str | None = None
+
+
+class PrecioSuministroCreate(PrecioSuministroBase):
+    origen_dato: OrigenDato = OrigenDato.MANUAL
+
+
+class PrecioSuministroUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proveedor_id: uuid.UUID | None = None
+    precio: Decimal | None = Field(default=None, ge=0)
+    moneda: str | None = Field(default=None, min_length=3, max_length=3)
+    descuento: Decimal | None = Field(default=None, ge=0, le=100)
+    cantidad_minima: Decimal | None = Field(default=None, ge=0)
+    plazo_entrega_dias: int | None = Field(default=None, ge=0)
+    referencia_proveedor: str | None = None
+    vigente_desde: date | None = None
+    vigente_hasta: date | None = None
+    es_preferente: bool | None = None
+    notas: str | None = None
+
+
+class PrecioSuministroOut(PrecioSuministroBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    concepto_id: uuid.UUID
+    origen_dato: OrigenDato
+    precio_neto: Decimal
+    # Desnormalizado en la respuesta para no obligar al cliente a una segunda
+    # llamada solo para pintar el nombre del proveedor en una tabla.
+    proveedor_razon_social: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ConceptoBase(BaseModel):
@@ -19,9 +94,12 @@ class ConceptoBase(BaseModel):
     resumen: str = Field(min_length=1, max_length=250)
     texto: str | None = None
     origen_precio: OrigenPrecio = OrigenPrecio.MANUAL
-    producto_id: uuid.UUID | None = None
     costes_indirectos: Decimal | None = Field(default=None, ge=0, le=100)
     fecha_precio: date | None = None
+    ean: str | None = Field(default=None, max_length=14)
+    familia_id: uuid.UUID | None = None
+    precio_venta: Decimal | None = Field(default=None, ge=0)
+    tipo_iva: TipoIVA = TipoIVA.GENERAL
     activo: bool = True
 
 
@@ -43,9 +121,12 @@ class ConceptoUpdate(BaseModel):
     texto: str | None = None
     precio: Decimal | None = Field(default=None, ge=0)
     origen_precio: OrigenPrecio | None = None
-    producto_id: uuid.UUID | None = None
     costes_indirectos: Decimal | None = Field(default=None, ge=0, le=100)
     fecha_precio: date | None = None
+    ean: str | None = None
+    familia_id: uuid.UUID | None = None
+    precio_venta: Decimal | None = Field(default=None, ge=0)
+    tipo_iva: TipoIVA | None = None
     activo: bool | None = None
 
 
@@ -95,6 +176,32 @@ class LineaUpdate(BaseModel):
     orden: int | None = None
 
 
+class HistoricoPrecioOut(BaseModel):
+    """Una entrada del histórico de precios: qué costes ha tenido el concepto."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    precio: Decimal
+    origen_precio: OrigenPrecio
+    fecha: datetime
+
+
+class VentasOut(BaseModel):
+    """Qué venta ha tenido el concepto, presupuestado y facturado por separado.
+
+    `presupuestado` cuenta toda partida que lo referencia, esté o no
+    certificada todavía; `facturado` solo lo que una certificación ya emitida
+    ha reconocido como ejecutado. Son dos preguntas distintas y mezclarlas en
+    un único número ocultaría cuánto de lo vendido está aún por cobrar.
+    """
+
+    presupuestado_partidas: int
+    presupuestado_importe: Decimal
+    facturado_lineas: int
+    facturado_importe: Decimal
+
+
 class ConceptoDetalle(ConceptoOut):
     lineas: list[LineaOut] = Field(default_factory=list)
     # Suma de las líneas, antes de aplicar costes indirectos.
@@ -102,10 +209,11 @@ class ConceptoDetalle(ConceptoOut):
     # simple / complejo / funcional, deducido de los hijos. No se almacena:
     # la clasificación se sigue de la estructura, no al revés.
     clase: str | None = None
+    suministros: list[PrecioSuministroOut] = Field(default_factory=list)
 
 
 class UsoOut(BaseModel):
-    """Un concepto que contiene al consultado."""
+    """Un concepto que contiene al consultado, directa o indirectamente."""
 
     id: uuid.UUID
     codigo: str
@@ -113,6 +221,28 @@ class UsoOut(BaseModel):
     tipo: TipoConcepto
     precio: Decimal
     rendimiento: Decimal
+
+
+class PartidaUsoOut(BaseModel):
+    """Una partida de un presupuesto que usa este concepto."""
+
+    id: uuid.UUID
+    presupuesto_id: uuid.UUID
+    presupuesto_nombre: str
+    presupuesto_estado: str
+    codigo: str
+    resumen: str
+    medicion: Decimal
+    precio: Decimal
+    importe: Decimal
+
+
+class UsoCompletoOut(BaseModel):
+    """Dónde participa un concepto: en descompuestos de otros conceptos, y en
+    partidas de presupuestos concretos."""
+
+    en_descomposiciones: list[UsoOut]
+    en_partidas: list[PartidaUsoOut]
 
 
 class NodoArbol(BaseModel):

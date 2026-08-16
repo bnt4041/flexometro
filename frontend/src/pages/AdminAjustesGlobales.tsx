@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Save } from 'lucide-react'
 
 import { ErrorNotice, Field, PruebaSmtpCard } from '../components/ui'
 import { api } from '../lib/api'
@@ -119,6 +120,7 @@ function AjustesIA() {
       </div>
       <div className="form-actions">
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </div>
@@ -222,6 +224,7 @@ function AjustesSmtp() {
       </div>
       <div className="form-actions">
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </div>
@@ -308,6 +311,7 @@ function AjustesPasarela() {
       </div>
       <div className="form-actions">
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : 'Guardar'}
         </button>
       </div>

@@ -35,7 +35,7 @@ SCHEMA = "campos_libres"
 
 class EntidadCampoLibre(StrEnum):
     TERCERO = "tercero"
-    PRODUCTO = "producto"
+    CONCEPTO = "concepto"
     OBRA = "obra"
     PRESUPUESTO = "presupuesto"
     CAPITULO = "capitulo"

@@ -78,11 +78,11 @@ class Albaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
 
 
 class AlbaranLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
-    """Una línea del albarán: cantidad de un producto a un precio.
+    """Una línea del albarán: cantidad de un concepto a un precio.
 
-    `producto_id` es opcional, igual que `concepto_id` en `Partida`: un
-    material fuera de catálogo (una compra puntual) se registra a mano con su
-    descripción, sin forzar un alta en el catálogo solo para esta línea.
+    `concepto_id` es opcional, igual que en `Partida`: un material fuera del
+    banco de precios (una compra puntual) se registra a mano con su
+    descripción, sin forzar un alta solo para esta línea.
     """
 
     __tablename__ = "albaran_linea"
@@ -97,9 +97,9 @@ class AlbaranLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base)
         ForeignKey(f"{SCHEMA}.albaran.id", ondelete="CASCADE"),
         nullable=False,
     )
-    producto_id: Mapped[uuid.UUID | None] = mapped_column(
+    concepto_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("catalogo.producto.id", ondelete="SET NULL"),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
         nullable=True,
     )
     # SET NULL: igual que en ParteTrabajo, borrar el capítulo no borra el

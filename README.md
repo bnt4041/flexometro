@@ -9,7 +9,7 @@ Precio de suministro → Precio básico → Precio auxiliar → Precio unitario
                             → Medición → Presupuesto (capítulos y partidas)
 ```
 
-## Estado: Fase 12 — usuarios, grupos y permisos por módulo
+## Estado: Fase 25 — banco de precios
 
 | | |
 |---|---|
@@ -38,7 +38,20 @@ Precio de suministro → Precio básico → Precio auxiliar → Precio unitario
 | 10 | IA de medición desde planos (Gemini) | hecha, primer slice: planos acotados; foto/vídeo de obra ejecutada queda pendiente |
 | 11 | Administración de organizaciones, tarifas, cobros y ajustes globales | hecha |
 | 12 | Usuarios, grupos y permisos por módulo (ver/editar, todos/propios) | hecha |
-| 13 | Big data de precios sectorial | |
+| 13 | Personal de la plataforma: superadmin sin organización propia | hecha |
+| 14 | Cuenta como contrato de pago por encima de Organización; agrupa varios CIF | hecha |
+| 15 | Compartir maestros (terceros, banco de precios) entre organizaciones de una cuenta | hecha |
+| 16 | Numeración configurable por cuenta (patrones con placeholders, secuencia compartida) | hecha |
+| 17 | Vestíbulo de Ajustes: activación de módulos + entrada a los ajustes de cada uno | hecha |
+| 18 | Diccionario de referencia editable por cuenta (país, forma de pago, provincia...) | hecha |
+| 19 | Traducción de la interfaz con overrides por cuenta | hecha |
+| 20 | Diccionarios adicionales estilo Dolibarr (forma jurídica, tratamiento, cargo) | hecha |
+| 21-22 | Campos libres estilo Dolibarr: definiciones por cuenta, valores por organización | hecha |
+| 23 | Monedas y tipo de cambio; IVA/recargo de equivalencia/retención en el diccionario | hecha |
+| 24 | Tabla de datos genérica (DataTable): orden, filtro, columnas configurables, export CSV/PDF | hecha |
+| 25 | Banco de precios: fusión de Producto/Familia/PrecioSuministro (antiguo catálogo) en Concepto | hecha |
+| 26 | Iconos + tooltips en toda la interfaz | en curso |
+| 27 | Ficha genérica con cabecera y pestañas (piloto) | en curso |
 
 ## Arrancar
 
@@ -791,6 +804,160 @@ cruzando `obras`/`compras`/`facturacion` (`Obra`, `Personal`, `Albaran`,
 `Factura` creados por el mismo usuario y con `creado_por_subject` correcto
 en los cuatro). `alembic check` sin desviación y los 155 tests existentes en
 verde tras cada uno de los 7 módulos tocados.
+
+### Personal de la plataforma (Fase 13)
+
+El personal de la propia plataforma (rol `superadmin`) no pertenece a ninguna
+organización: `organization_id` y `organizaciones` llegan vacíos en el
+`Principal`, y la ausencia del claim `organizacion` de Keycloak —que para
+cualquier otro usuario sería un error de aprovisionamiento
+(`SinOrganizacion`)— se tolera precisamente porque tiene ese rol. El alta
+reutiliza el mismo flujo que un usuario de organización (contraseña temporal
++ correo de bienvenida best-effort), solo que sin slug de organización y con
+el rol `superadmin`. `require_admin_organizacion` comprueba además que
+`organization_id` no sea nulo: alguien que pasa a ser personal de plataforma
+puede conservar un rol `admin` residual de cuando sí tenía una organización, y
+sin esa comprobación intentaría administrar "la suya" sin tener ninguna.
+
+### Cuenta (Fase 14)
+
+`Cuenta` se introduce por encima de `Organization` como el contrato de pago:
+puede agrupar varias organizaciones (CIF) bajo un mismo cliente — un grupo
+empresarial con varias sociedades, por ejemplo. La facturación de la
+plataforma (tarifa asignada, cobros, coste estimado, descuentos) vive en
+`Cuenta`, no en `Organization`; los datos de negocio (presupuestos, terceros,
+facturas) siguen aislados siempre por organización — `Cuenta` nunca es una
+frontera de aislamiento de datos, solo de facturación y, desde la Fase 15 y de
+forma opcional, de maestros compartidos. `compartir_maestros` es una columna
+booleana propia, no un valor dentro del JSON `settings`, porque gobierna una
+política RLS: un flag de seguridad no puede arriesgarse a un error de tipado
+silencioso.
+
+### Compartir maestros entre organizaciones (Fase 15)
+
+`organizaciones_visibles()` (`app/core/visibilidad.py`) devuelve siempre la
+organización propia, más las hermanas de la misma cuenta si
+`compartir_maestros` está activo. Vive en `app.core`, no en un módulo de
+negocio, para no crear una dependencia módulo-a-módulo; usa SQL crudo en vez
+de los modelos ORM por el mismo motivo. Se aplica solo a lecturas/listados de
+maestros (terceros, banco de precios) — nunca a altas/ediciones/bajas, que
+siguen atadas siempre a la organización propia. La aplicación real es RLS
+(`activar_rls_maestro`); esta función solo decide qué le pide el backend a la
+base, nunca qué le deja leer o escribir — el `WITH CHECK` de escritura de la
+política no se amplía nunca por esto.
+
+### Numeración de documentos (Fase 16)
+
+`PatronNumeracion`/`ContadorDocumento` (`app/core/numeracion.py`) viven por
+cuenta, no por organización, con un flag `secuencia_compartida` opcional: si
+está activo, el contador cuenta por cuenta; si no, por organización. Los
+patrones admiten `{SEQ:0Nd}`, `{YYYY}`, `{YY}`, `{MM}`, `{DD}` y `{ORG}`
+(slug); sin patrón propio, una cuenta sigue con el prefijo fijo de siempre
+(`PRE`, `ALB`, `FAC`). Solo gobierna el `codigo` interno de
+Presupuesto/Albarán/Factura — nunca `Factura.serie`/`numero`, que siguen las
+reglas de Veri\*Factu/Facturae de la Fase 8 (correlativo por
+organización+serie, nunca reutilizado). El contador incrementa con `INSERT
+... ON CONFLICT DO UPDATE`, no con SELECT+UPDATE, para que dos altas
+simultáneas no puedan llevarse el mismo número.
+
+### Vestíbulo de Ajustes (Fase 17)
+
+`ajustes_router.py` resuelve siempre `cuenta_id` desde
+`principal.organization_id` — nunca como parámetro de ruta, para que nadie
+pueda cruzar a la cuenta de otro. Por ahora expone la numeración
+(`GET`/`PUT /ajustes/numeracion`); pensado como punto de entrada genérico
+para los ajustes propios de cada módulo, patrón que reutilizan después
+traducción y diccionario.
+
+### Diccionario de referencia (Fase 18)
+
+`EntradaDiccionario` son listas de referencia editables por cuenta (país,
+forma de pago, provincia, unidad de medida...), únicas por `(cuenta_id, tipo,
+clave)`. `TipoDiccionario` es un catálogo cerrado a nivel de código — añadir
+una categoría nueva exige migración, pero las entradas dentro de una
+categoría las edita el admin de cuenta. `forma_pago` convive con el enum
+`FormaPago` (con su propio CHECK en `terceros`), que sigue siendo quien de
+verdad restringe qué vale en `Tercero.forma_pago`: el diccionario solo decide
+etiqueta, orden y activación de cara a la interfaz — una clave fuera del enum
+simplemente no se puede usar.
+
+### Traducción por cuenta (Fase 19)
+
+Los textos base de la interfaz viven en el bundle del frontend
+(`i18n/es.ts`); `TraduccionOverride` solo guarda las claves que una cuenta
+decide reescribir (p. ej. "obra" → "proyecto") — no es un catálogo de
+idiomas, añadir uno de verdad sigue siendo trabajo de traducción del bundle,
+no esta tabla. "Dos sabores": lectura abierta a cualquier usuario autenticado
+(el frontend la fusiona con `i18n.addResourceBundle` al arrancar) y edición
+detrás de `require_admin_organizacion`, mismo patrón que ajustes/diccionario.
+El personal de la plataforma, sin organización, recibe `{}` de la lectura.
+
+### Diccionarios adicionales y forma jurídica (Fase 20)
+
+Migración puramente de datos, sin DDL: cinco categorías nuevas sembradas en
+el diccionario (provincia —el listado completo español—, unidad de medida,
+forma jurídica, tratamiento, cargo), posible porque `tipo` es un varchar sin
+CHECK de base de datos (el enum se valida solo en Python). Añade además dos
+columnas reales de texto libre, `Tercero.forma_juridica` y
+`Contacto.tratamiento`, que referencian al diccionario pero —a diferencia de
+`forma_pago`— sin ningún enum que restrinja su valor.
+
+### Campos libres (Fase 21-22)
+
+Extrafields al estilo Dolibarr: el admin de cuenta define qué campos existen
+para cada tipo de entidad (`EntidadCampoLibre`) en `CampoLibreDefinicion`; los
+valores concretos de cada registro viven en `CampoLibreValor`, protegidos por
+RLS de organización como cualquier dato de negocio — la definición es por
+cuenta, el valor es por organización. Separar definición de valor es lo que
+permite añadir un campo nuevo sin migrar nada del lado de los datos.
+
+### Monedas, IVA, recargo y retención (Fase 23)
+
+`Moneda` vive a nivel de plataforma, no de cuenta, y sin RLS — mismo nivel
+que `Cuenta`/`Organization` pero compartida por toda la instalación;
+`unidades_por_euro` sigue la convención del BCE. Es solo de referencia:
+presupuestos y facturas siguen siendo 100 % EUR. La misma migración añade una
+columna `valor` (decimal) al diccionario y tres categorías nuevas: `IVA` y
+`recargo de equivalencia` son solo documentales (el cálculo fiscal real lo
+sigue gobernando `TipoIVA`/`TIPO_IVA_PORCENTAJE` en `app/core/enums.py`, así
+que una cuenta no puede romper su propio cálculo de impuestos editando el
+diccionario); `retención` sí alimenta de verdad el campo libre
+`Tercero.irpf_retencion` como lista de sugerencias.
+
+### Tabla de datos genérica y exportación (Fase 24)
+
+`DataTable.tsx` sustituye las tablas ad-hoc de cada listado por un
+componente único: orden, filtro por columna, columnas
+reordenables/redimensionables/ocultables (persistido en `localStorage` por
+listado), paginación y exportación CSV/PDF de exactamente lo que hay en
+pantalla (filtrado, ordenado, con las columnas visibles del usuario), nunca
+una relectura de la base. El CSV es 100 % en el navegador (`;` como
+separador porque la coma es el decimal, BOM UTF-8 para las tildes); el PDF es
+en el servidor (mismo motor Jinja2+WeasyPrint que los informes de
+facturación/presupuestos), con límites defensivos (`MAX_FILAS`,
+`MAX_COLUMNAS`) porque el render ocurre en memoria dentro del propio
+contenedor de la API, no en una cola de trabajos.
+
+### Banco de precios (Fase 25)
+
+Fusión de `catalogo.Producto`/`Familia`/`PrecioSuministro` en
+`presupuestos.Concepto`: un producto o servicio y una partida unitaria o
+precio descompuesto pasan a ser la misma ficha. `donde_se_usa` pasa a ser
+recursivo (antes solo miraba un nivel arriba) y suma correctamente rendimientos
+por varias rutas cuando hay rombos en el árbol. Nuevo cruce con
+`Partida`/`Certificacion` que distingue "presupuestado" (aparece en una
+partida, esté o no facturada) de "facturado" (una certificación ya emitida lo
+ha reconocido) — vive en el router de `facturacion`, no en el de
+`presupuestos`, porque `presupuestos` no puede importar `facturacion` (la
+dependencia va al revés) y el cruce necesita ver las dos piezas a la vez;
+mismo patrón que el informe de coste real de `compras/costes.py`. Nuevo
+histórico de precios (`HistoricoPrecioConcepto`), una fila por cada cambio
+real de precio, no por cada recálculo de la cascada. El módulo `catalogo` se
+disuelve por completo: sus tablas se mudan de schema (no se recrean, para no
+perder datos ni FKs) y se repuntan `PrecioSuministro`/`AlbaranLinea` al
+concepto resultante. Verificado en vivo contra la base real de desarrollo
+(fusión de datos, recálculo en cascada, histórico, cruce con facturación) con
+un script desechable y rollback antes de darla por buena.
 
 ## Tests
 

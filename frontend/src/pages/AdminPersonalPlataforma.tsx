@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, ModalPantalla } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
 import type { UsuarioKeycloak } from '../lib/api'
 
@@ -86,9 +87,12 @@ export function AdminPersonalPlataforma() {
             una en concreto.
           </p>
         </div>
-        <Link className="btn btn--primary" to="nuevo">
-          Nueva persona
-        </Link>
+        <Tooltip texto="Dar de alta personal de la plataforma">
+          <Link className="btn btn--primary" to="nuevo">
+            <Plus size={16} aria-hidden="true" />
+            Nueva persona
+          </Link>
+        </Tooltip>
       </div>
 
       <ErrorNotice error={error} />

@@ -79,7 +79,7 @@ async def crear(
     except (
         service.ObraInvalida,
         service.ProveedorInvalido,
-        service.ProductoInvalido,
+        service.ConceptoInvalido,
         service.LineaSinDatos,
     ) as exc:
         raise HTTPException(
@@ -160,7 +160,7 @@ async def anadir_linea(
     await _albaran_propio(session, albaran_id, alcance, principal)
     try:
         linea = await service.anadir_linea(session, albaran_id, datos)
-    except (service.ProductoInvalido, service.LineaSinDatos) as exc:
+    except (service.ConceptoInvalido, service.LineaSinDatos) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc

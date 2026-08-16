@@ -8,8 +8,9 @@ from sqlalchemy.orm import aliased, selectinload
 from app.core.numeracion import siguiente_referencia
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
+from app.modules.presupuestos import calculo
 from app.modules.presupuestos import presupuesto_calculo as calc
-from app.modules.presupuestos.models import Concepto
+from app.modules.presupuestos.models import Concepto, OrigenPrecio, TipoConcepto
 from app.modules.presupuestos.models_presupuesto import (
     ESTADOS_BLOQUEADOS,
     Capitulo,
@@ -41,6 +42,10 @@ class ConceptoInvalido(Exception):
 
 
 class PartidaSinDatos(Exception):
+    pass
+
+
+class ConceptoYaVinculado(Exception):
     pass
 
 
@@ -346,6 +351,55 @@ async def eliminar_partida(session: AsyncSession, partida_id: uuid.UUID) -> bool
     await session.delete(partida)
     await session.flush()
     return True
+
+
+async def integrar_en_banco_precios(session: AsyncSession, partida_id: uuid.UUID) -> Partida | None:
+    """Da de alta un concepto nuevo a partir de una partida alzada, y liga la
+    partida a él.
+
+    A partir de aquí la partida sigue la cascada de precios como cualquier
+    otra del cuadro (mientras el presupuesto no esté bloqueado); antes de esto
+    una partida alzada era un callejón sin salida, sin forma de reutilizar lo
+    que llevaba tecleado en otro presupuesto.
+    """
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return None
+    if partida.concepto_id is not None:
+        raise ConceptoYaVinculado(
+            "Esta partida ya está vinculada a un concepto del banco de precios"
+        )
+
+    org_id = require_organization_id()
+    existe = await session.scalar(
+        select(Concepto.id).where(
+            Concepto.organization_id == org_id, Concepto.codigo == partida.codigo
+        )
+    )
+    if existe:
+        raise CodigoDuplicado(
+            f"Ya existe un concepto con el código '{partida.codigo}' en el banco de precios; "
+            "cambia el código de la partida antes de integrarla"
+        )
+
+    concepto = Concepto(
+        organization_id=org_id,
+        codigo=partida.codigo,
+        tipo=TipoConcepto.UNITARIO,
+        unidad=partida.unidad,
+        resumen=partida.resumen,
+        texto=partida.texto,
+        precio=partida.precio,
+        origen_precio=OrigenPrecio.MANUAL,
+        **datos_autoria(),
+    )
+    session.add(concepto)
+    await session.flush()
+    await calculo.registrar_historico(session, concepto)
+
+    partida.concepto_id = concepto.id
+    await session.flush()
+    return partida
 
 
 # --- Líneas de medición ---

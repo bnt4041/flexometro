@@ -9,7 +9,7 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.facturacion import informes, service, webhook
+from app.modules.facturacion import informes, service, ventas_concepto, webhook
 from app.modules.facturacion.models import EstadoFactura
 from app.modules.facturacion.schemas import (
     AnularFactura,
@@ -27,6 +27,7 @@ from app.modules.facturacion.schemas import (
     FacturaUpdate,
     GenerarDesdeCertificacion,
 )
+from app.modules.presupuestos.schemas import VentasOut
 
 guard = Depends(require_module("facturacion"))
 
@@ -35,6 +36,11 @@ certificaciones_router = APIRouter(
 )
 facturas_router = APIRouter(prefix="/api/facturas", tags=["facturacion"], dependencies=[guard])
 cobros_router = APIRouter(prefix="/api/cobros", tags=["facturacion"], dependencies=[guard])
+# Prefijo /api/conceptos a propósito, igual que /api/obras en compras/costes.py:
+# el cruce vive aquí porque facturacion es el único módulo que puede ver a la
+# vez la partida y su certificación, pero la URL habla del concepto que el
+# usuario está consultando en su ficha del banco de precios.
+ventas_router = APIRouter(prefix="/api/conceptos", tags=["facturacion"], dependencies=[guard])
 
 
 def _excepciones_certificacion(exc: Exception) -> HTTPException:
@@ -417,7 +423,17 @@ async def eliminar_cobro(
     await service.eliminar_cobro(session, cobro_id)
 
 
+@ventas_router.get("/{concepto_id}/ventas", response_model=VentasOut)
+async def ventas_de_concepto(
+    concepto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("facturacion", "ver")),
+) -> VentasOut:
+    return await ventas_concepto.ventas_de_concepto(session, concepto_id)
+
+
 router = APIRouter()
 router.include_router(certificaciones_router)
 router.include_router(facturas_router)
 router.include_router(cobros_router)
+router.include_router(ventas_router)

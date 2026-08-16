@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Save } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field } from './ui'
 import { api } from '../lib/api'
@@ -102,6 +103,7 @@ export function CamposLibres({ entidad, entidadId }: { entidad: EntidadCampoLibr
             disabled={!hayCambios || guardando}
             onClick={() => void guardar()}
           >
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar campos libres'}
           </button>
         </div>

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { ArrowRight, Settings } from 'lucide-react'
 
 import { useWorkspace } from '../workspace'
 
@@ -30,6 +31,7 @@ export function Ajustes() {
           </div>
           <Link className="btn" to="/ajustes/modulos">
             {t('comun.abrir')}
+            <ArrowRight size={16} aria-hidden="true" />
           </Link>
         </div>
         {esAdminOrganizacion && (
@@ -41,6 +43,7 @@ export function Ajustes() {
               </div>
               <Link className="btn" to="/ajustes/diccionario">
                 {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
               </Link>
             </div>
             <div className="module-row">
@@ -50,6 +53,7 @@ export function Ajustes() {
               </div>
               <Link className="btn" to="/ajustes/traduccion">
                 {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
               </Link>
             </div>
             <div className="module-row">
@@ -59,6 +63,7 @@ export function Ajustes() {
               </div>
               <Link className="btn" to="/ajustes/campos-libres">
                 {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
               </Link>
             </div>
             <div className="module-row">
@@ -70,6 +75,7 @@ export function Ajustes() {
               </div>
               <Link className="btn" to="/ajustes/monedas">
                 {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
               </Link>
             </div>
           </>
@@ -93,7 +99,7 @@ export function Ajustes() {
                   to={`/ajustes/modulo/${m.code}`}
                   aria-label={t('nav.ajustesDe', { modulo: m.name })}
                 >
-                  ⚙️ {t('nav.ajustes')}
+                  <Settings size={14} aria-hidden="true" /> {t('nav.ajustes')}
                 </Link>
               </div>
             ))}

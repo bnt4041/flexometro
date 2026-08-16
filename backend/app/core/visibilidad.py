@@ -1,12 +1,12 @@
 """Qué organizaciones puede LEER un principal en los maestros compartibles
-(terceros, catálogo, cuadro de precios) — Fase 15.
+(terceros, banco de precios) — Fase 15.
 
 Vive en `app.core` (no en `app.modules.core`) porque lo consultan los
-servicios de terceros/catalogo/presupuestos, y ningún módulo de negocio debe
-depender de otro módulo de negocio salvo las dependencias ya explícitas del
-grafo de módulos (`depends_on` en el registro). SQL crudo en vez de los
-modelos ORM de `app.modules.core.models` por el mismo motivo: evita que este
-paquete tenga que importar ese módulo.
+servicios de terceros/presupuestos, y ningún módulo de negocio debe depender
+de otro módulo de negocio salvo las dependencias ya explícitas del grafo de
+módulos (`depends_on` en el registro). SQL crudo en vez de los modelos ORM de
+`app.modules.core.models` por el mismo motivo: evita que este paquete tenga
+que importar ese módulo.
 
 Uso EXCLUSIVO de listados/lecturas de maestros — nunca de altas, ediciones o
 borrados, que siguen atribuyéndose y limitándose siempre a la organización

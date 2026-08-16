@@ -2,8 +2,22 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, useLocation } from 'react-router-dom'
+import {
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Menu,
+  Receipt,
+  Settings,
+  Shield,
+  UserCog,
+  Users,
+} from 'lucide-react'
 
 import logoOscuro from '../assets/logo-sobre-oscuro.png'
+import { Icon } from '../components/Icon'
+import { Tooltip } from '../components/ui'
 import { useWorkspace } from '../workspace'
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -53,14 +67,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="nav__group-label">
                 {module.name}
                 {esAdminOrganizacion && module.tipo_documento_numeracion !== null && (
-                  <NavLink
-                    to={`/ajustes/modulo/${module.code}`}
-                    className="nav__group-ajustes"
-                    aria-label={t('nav.ajustesDe', { modulo: module.name })}
-                    title={t('nav.ajustesDe', { modulo: module.name })}
-                  >
-                    ⚙️
-                  </NavLink>
+                  <Tooltip texto={t('nav.ajustesDe', { modulo: module.name })}>
+                    <NavLink
+                      to={`/ajustes/modulo/${module.code}`}
+                      className="nav__group-ajustes"
+                      aria-label={t('nav.ajustesDe', { modulo: module.name })}
+                    >
+                      <Settings size={14} aria-hidden="true" />
+                    </NavLink>
+                  </Tooltip>
                 )}
               </div>
               {module.nav.map((item) => (
@@ -71,6 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     isActive ? 'nav__link nav__link--active' : 'nav__link'
                   }
                 >
+                  <Icon name={item.icon} />
                   {item.label}
                 </NavLink>
               ))}
@@ -86,6 +102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   isActive ? 'nav__link nav__link--active' : 'nav__link'
                 }
               >
+                <UserCog size={16} aria-hidden="true" />
                 {t('nav.usuariosYGrupos')}
               </NavLink>
             </div>
@@ -102,6 +119,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : 'nav__link'
                 }
               >
+                <Building2 size={16} aria-hidden="true" />
                 {t('nav.cuentas')}
               </NavLink>
               <NavLink
@@ -110,6 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   isActive ? 'nav__link nav__link--active' : 'nav__link'
                 }
               >
+                <Receipt size={16} aria-hidden="true" />
                 {t('nav.tarifas')}
               </NavLink>
               <NavLink
@@ -118,6 +137,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   isActive ? 'nav__link nav__link--active' : 'nav__link'
                 }
               >
+                <Users size={16} aria-hidden="true" />
                 {t('nav.personalPlataforma')}
               </NavLink>
               <NavLink
@@ -126,6 +146,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   isActive ? 'nav__link nav__link--active' : 'nav__link'
                 }
               >
+                <Shield size={16} aria-hidden="true" />
                 {t('nav.ajustes')}
               </NavLink>
             </div>
@@ -142,20 +163,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             aria-expanded={menuAbierto}
             onClick={() => setMenuAbierto((v) => !v)}
           >
-            <span />
-            <span />
-            <span />
+            <Menu size={20} aria-hidden="true" />
           </button>
 
-          <button
-            type="button"
-            className="topbar__colapsar-btn"
-            aria-label={colapsada ? t('nav.mostrarMenu') : t('nav.ocultarMenu')}
-            aria-expanded={!colapsada}
-            onClick={() => setColapsada((v) => !v)}
-          >
-            {colapsada ? '›' : '‹'}
-          </button>
+          <Tooltip texto={colapsada ? t('nav.mostrarMenu') : t('nav.ocultarMenu')}>
+            <button
+              type="button"
+              className="topbar__colapsar-btn"
+              aria-label={colapsada ? t('nav.mostrarMenu') : t('nav.ocultarMenu')}
+              aria-expanded={!colapsada}
+              onClick={() => setColapsada((v) => !v)}
+            >
+              {colapsada ? (
+                <ChevronRight size={16} aria-hidden="true" />
+              ) : (
+                <ChevronLeft size={16} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
 
           <div className="topbar__org">
             {varias ? (
@@ -181,9 +206,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="topbar__usuario">
             <span className="muted topbar__usuario-nombre">{principal?.username ?? 'sin sesión'}</span>
             {principal?.roles.includes('admin') && <span className="badge">admin</span>}
-            <button className="btn btn--sm" onClick={salir}>
-              {t('nav.salir')}
-            </button>
+            <Tooltip texto={t('nav.salir')}>
+              <button className="btn btn--sm" onClick={salir}>
+                <LogOut size={14} aria-hidden="true" />
+                {t('nav.salir')}
+              </button>
+            </Tooltip>
           </div>
         </header>
         <main className="content">

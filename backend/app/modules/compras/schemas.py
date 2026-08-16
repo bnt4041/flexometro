@@ -8,13 +8,13 @@ from app.modules.compras.models import EstadoAlbaran
 
 
 class AlbaranLineaBase(BaseModel):
-    producto_id: uuid.UUID | None = None
+    concepto_id: uuid.UUID | None = None
     capitulo_id: uuid.UUID | None = None
     descripcion: str | None = Field(default=None, max_length=250)
     unidad: str | None = Field(default=None, max_length=10)
     cantidad: Decimal = Field(gt=0)
-    # Si no se indica y hay producto, se toma el precio de referencia del
-    # catálogo (la tarifa preferente del proveedor).
+    # Si no se indica y hay concepto, se toma el precio de referencia del
+    # banco de precios (la tarifa preferente del proveedor).
     precio_unitario: Decimal | None = Field(default=None, ge=0)
     orden: int = 0
 
@@ -39,7 +39,7 @@ class AlbaranLineaOut(BaseModel):
 
     id: uuid.UUID
     albaran_id: uuid.UUID
-    producto_id: uuid.UUID | None
+    concepto_id: uuid.UUID | None
     capitulo_id: uuid.UUID | None
     descripcion: str
     unidad: str

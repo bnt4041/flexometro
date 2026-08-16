@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { ArrowLeft, Plus, Save, Trash2, X } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field } from '../components/ui'
 import { api } from '../lib/api'
@@ -69,6 +70,7 @@ export function AjustesDiccionario() {
           <p className="page-lead">{t('ajustes.diccionario.descripcionPantalla')}</p>
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           {t('ajustes.modulos.volverAAjustes')}
         </Link>
       </div>
@@ -95,6 +97,7 @@ export function AjustesDiccionario() {
           />
         </div>
         <button className="btn btn--primary" onClick={() => setCreando(true)}>
+          <Plus size={16} aria-hidden="true" />
           {t('ajustes.diccionario.nuevaEntrada')}
         </button>
       </div>
@@ -197,6 +200,7 @@ function NuevaEntrada({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onCancelar}>
+          <X size={16} aria-hidden="true" />
           {t('comun.cancelar')}
         </button>
         <button
@@ -204,6 +208,7 @@ function NuevaEntrada({
           disabled={guardando || clave.trim() === '' || etiqueta.trim() === ''}
           onClick={() => void guardar()}
         >
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? t('comun.creando') : t('comun.crear')}
         </button>
       </div>
@@ -289,9 +294,11 @@ function FilaEntrada({
         disabled={!cambiado || guardando}
         onClick={() => void guardar()}
       >
+        {!guardando && <Save size={14} aria-hidden="true" />}
         {guardando ? t('comun.guardando') : t('comun.guardar')}
       </button>
       <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
+        <Trash2 size={14} aria-hidden="true" />
         {t('comun.eliminar')}
       </button>
     </div>

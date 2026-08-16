@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Plus, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, ModalPantalla } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
@@ -83,9 +84,12 @@ export function Obras() {
             a lo presupuestado.
           </p>
         </div>
-        <Link className="btn btn--primary" to="nueva">
-          Nueva obra
-        </Link>
+        <Tooltip texto="Ejecutar un presupuesto aprobado como obra">
+          <Link className="btn btn--primary" to="nueva">
+            <Plus size={16} aria-hidden="true" />
+            Nueva obra
+          </Link>
+        </Tooltip>
       </div>
 
       <ErrorNotice error={error} />
@@ -188,6 +192,7 @@ export function ObraCrear() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -195,6 +200,7 @@ export function ObraCrear() {
             disabled={nombre.trim() === '' || presupuestoId === ''}
             onClick={() => void guardar()}
           >
+            <Plus size={16} aria-hidden="true" />
             Crear
           </button>
         </div>

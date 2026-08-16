@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  Check,
+  Copy,
+  Download,
+  FileDown,
+  FolderPlus,
+  Layers,
+  Plus,
+  RefreshCw,
+  Ruler,
+  Save,
+  Scan,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO, api, descargar } from '../lib/api'
 import type {
   Concepto,
@@ -14,6 +29,7 @@ import type {
   PresupuestoDetalle as Detalle,
   Version,
 } from '../lib/api'
+import { useDiccionario } from '../lib/useDiccionario'
 import { useContextoPresupuestos } from './Presupuestos'
 import { useWorkspace } from '../workspace'
 
@@ -132,9 +148,12 @@ export function PresupuestoDetalle() {
               </option>
             ))}
           </select>
-          <button className="btn btn--danger" onClick={() => void eliminar()}>
-            Eliminar
-          </button>
+          <Tooltip texto="Eliminar este presupuesto">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -157,6 +176,7 @@ export function PresupuestoDetalle() {
                 ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
               }
             >
+              <FileDown size={14} aria-hidden="true" />
               {etiqueta} PDF
             </button>
           ))}
@@ -169,16 +189,23 @@ export function PresupuestoDetalle() {
               ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
             }
           >
+            <Download size={14} aria-hidden="true" />
             BC3
           </button>
         </span>
         <span className="barra-acciones__grupo">
-          <button className="btn btn--sm" onClick={() => void crearVersion()}>
-            Nueva versión
-          </button>
-          <button className="btn btn--sm" onClick={() => setGuardandoPlantilla(true)}>
-            Guardar como plantilla
-          </button>
+          <Tooltip texto="Duplicar como versión siguiente, con precios libres otra vez">
+            <button className="btn btn--sm" onClick={() => void crearVersion()}>
+              <Copy size={14} aria-hidden="true" />
+              Nueva versión
+            </button>
+          </Tooltip>
+          <Tooltip texto="Guardar esta estructura como plantilla reutilizable">
+            <button className="btn btn--sm" onClick={() => setGuardandoPlantilla(true)}>
+              <Layers size={14} aria-hidden="true" />
+              Guardar como plantilla
+            </button>
+          </Tooltip>
         </span>
       </div>
 
@@ -214,6 +241,7 @@ export function PresupuestoDetalle() {
           precio distinto del que hay ahora en el cuadro. Con los precios congelados no se
           actualizan solas.{' '}
           <button className="btn btn--sm" onClick={() => void sincronizar()}>
+            <RefreshCw size={14} aria-hidden="true" />
             Traer precios del cuadro
           </button>
         </div>
@@ -223,9 +251,12 @@ export function PresupuestoDetalle() {
 
       <div className="page-head" style={{ marginBottom: 'var(--sp-3)' }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Capítulos y partidas</h2>
-        <button className="btn" onClick={() => setNuevoCapituloEn(null)}>
-          Añadir capítulo
-        </button>
+        <Tooltip texto="Añadir un capítulo en la raíz">
+          <button className="btn" onClick={() => setNuevoCapituloEn(null)}>
+            <FolderPlus size={16} aria-hidden="true" />
+            Añadir capítulo
+          </button>
+        </Tooltip>
       </div>
 
       <div className="table-wrap">
@@ -401,6 +432,7 @@ function GuardarPlantillaModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -408,6 +440,7 @@ function GuardarPlantillaModal({
           disabled={nombre.trim() === ''}
           onClick={() => void guardar()}
         >
+          <Save size={16} aria-hidden="true" />
           Guardar
         </button>
       </div>
@@ -472,14 +505,21 @@ function FilasCapitulo({
         </td>
         <td className="table__actions">
           <button className="btn btn--sm" onClick={() => onAnadirPartida(nodo.id)}>
-            + partida
+            <Plus size={14} aria-hidden="true" />
+            partida
           </button>{' '}
           <button className="btn btn--sm" onClick={() => onAnadirCapitulo(nodo.id)}>
-            + subcapítulo
+            <FolderPlus size={14} aria-hidden="true" />
+            subcapítulo
           </button>{' '}
-          <button className="btn btn--sm btn--danger" onClick={() => void eliminarCapitulo()}>
-            ×
-          </button>
+          <Tooltip texto="Eliminar este capítulo y su contenido">
+            <button
+              className="btn btn--sm btn--danger btn--solo-icono"
+              onClick={() => void eliminarCapitulo()}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </Tooltip>
         </td>
       </tr>
 
@@ -519,10 +559,30 @@ function FilaPartida({
   onMedir: (partida: Partida) => void
   onCambio: () => void
 }) {
+  const [error, setError] = useState<string | null>(null)
+
   async function eliminar() {
     if (!window.confirm(`¿Eliminar la partida «${partida.resumen}»?`)) return
     await api.partidas.remove(partida.id)
     onCambio()
+  }
+
+  async function integrarBancoPrecios() {
+    if (
+      !window.confirm(
+        `¿Dar de alta «${partida.resumen}» como concepto nuevo del banco de precios? A partir de ` +
+          'ahora esta partida seguirá su precio.',
+      )
+    ) {
+      return
+    }
+    setError(null)
+    try {
+      await api.partidas.integrarBancoPrecios(partida.id)
+      onCambio()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
   }
 
   return (
@@ -534,17 +594,32 @@ function FilaPartida({
         {partida.resumen}{' '}
         <span className="muted">({partida.unidad})</span>
         {partida.concepto_id === null && <span className="badge"> alzada</span>}
+        {error && <div className="muted">{error}</div>}
       </td>
       <td className="table__num">{formatoImporte(partida.medicion, 3)}</td>
       <td className="table__num">{formatoImporte(partida.precio)}</td>
       <td className="table__num">{formatoImporte(partida.importe)}</td>
       <td className="table__actions">
+        {partida.concepto_id === null && (
+          <>
+            <button className="btn btn--sm" onClick={() => void integrarBancoPrecios()}>
+              <Layers size={14} aria-hidden="true" />
+              Añadir al banco
+            </button>{' '}
+          </>
+        )}
         <button className="btn btn--sm" onClick={() => onMedir(partida)}>
+          <Ruler size={14} aria-hidden="true" />
           Medir
         </button>{' '}
-        <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
-          ×
-        </button>
+        <Tooltip texto="Eliminar esta partida">
+          <button
+            className="btn btn--sm btn--danger btn--solo-icono"
+            onClick={() => void eliminar()}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
       </td>
     </tr>
   )
@@ -588,6 +663,7 @@ function NuevoCapituloModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -595,6 +671,7 @@ function NuevoCapituloModal({
           disabled={resumen.trim() === ''}
           onClick={() => void guardar()}
         >
+          <Plus size={16} aria-hidden="true" />
           Crear
         </button>
       </div>
@@ -612,6 +689,7 @@ function NuevaPartidaModal({
   onCreada: () => void
 }) {
   const [modo, setModo] = useState<'cuadro' | 'alzada'>('cuadro')
+  const unidadesMedida = useDiccionario('unidad_medida')
   const [q, setQ] = useState('')
   const [candidatos, setCandidatos] = useState<Concepto[]>([])
   const [conceptoId, setConceptoId] = useState('')
@@ -659,7 +737,7 @@ function NuevaPartidaModal({
             value={modo}
             onChange={(e) => setModo(e.target.value as 'cuadro' | 'alzada')}
           >
-            <option value="cuadro">Del cuadro de precios</option>
+            <option value="cuadro">Del banco de precios</option>
             <option value="alzada">Partida alzada (sin concepto)</option>
           </select>
         </Field>
@@ -680,7 +758,7 @@ function NuevaPartidaModal({
             <div className="lista-seleccion">
               {candidatos.length === 0 ? (
                 <div className="muted" style={{ padding: 'var(--sp-3)' }}>
-                  No hay unitarios en el cuadro de precios
+                  No hay unitarios en el banco de precios
                 </div>
               ) : (
                 candidatos.map((c) => (
@@ -721,7 +799,13 @@ function NuevaPartidaModal({
               />
             </Field>
             <Field label="Unidad">
-              <input className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)} />
+              <select className="select" value={unidad} onChange={(e) => setUnidad(e.target.value)}>
+                {unidadesMedida.map((u) => (
+                  <option key={u.clave} value={u.clave}>
+                    {u.etiqueta}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Precio">
               <input
@@ -737,9 +821,11 @@ function NuevaPartidaModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button className="btn btn--primary" disabled={!listo} onClick={() => void guardar()}>
+          <Plus size={16} aria-hidden="true" />
           Añadir
         </button>
       </div>
@@ -838,12 +924,16 @@ function MedicionModal({
 
         <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
           <button className="btn" onClick={() => void anadir()}>
+            <Plus size={16} aria-hidden="true" />
             Añadir línea
           </button>
           {iaActiva && (
-            <button className="btn" onClick={() => setLeyendoPlano(true)}>
-              Leer plano (IA)
-            </button>
+            <Tooltip texto="Extraer mediciones de un plano acotado con IA">
+              <button className="btn" onClick={() => setLeyendoPlano(true)}>
+                <Scan size={16} aria-hidden="true" />
+                Leer plano (IA)
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -852,6 +942,7 @@ function MedicionModal({
 
       <div className="form-actions">
         <button className="btn btn--primary" onClick={onClose}>
+          <Check size={16} aria-hidden="true" />
           Hecho
         </button>
       </div>
@@ -1040,6 +1131,7 @@ function LeerPlanoModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         {lectura && (
@@ -1048,6 +1140,7 @@ function LeerPlanoModal({
             disabled={aplicando || lineas.every((l) => !l.incluir)}
             onClick={() => void aplicar()}
           >
+            {!aplicando && <Check size={16} aria-hidden="true" />}
             {aplicando ? 'Aplicando…' : 'Aplicar seleccionadas'}
           </button>
         )}
@@ -1119,9 +1212,14 @@ function FilaMedicion({
         <strong>{formatoImporte(linea.parcial, 3)}</strong>
       </td>
       <td className="table__actions">
-        <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
-          ×
-        </button>
+        <Tooltip texto="Eliminar esta línea de medición">
+          <button
+            className="btn btn--sm btn--danger btn--solo-icono"
+            onClick={() => void eliminar()}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
       </td>
     </tr>
   )

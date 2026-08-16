@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { ArrowLeft, RotateCcw, Save } from 'lucide-react'
 
 import { ErrorNotice } from '../components/ui'
 import { aplanar } from '../i18n/aplanar'
@@ -59,6 +60,7 @@ export function AjustesTraduccion() {
           <p className="page-lead">{t('ajustes.traduccion.descripcionPantalla')}</p>
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           {t('ajustes.modulos.volverAAjustes')}
         </Link>
       </div>
@@ -172,10 +174,12 @@ function FilaTraduccion({
       />
       {tienePersonalizacion && <span className="badge">{t('ajustes.traduccion.personalizado')}</span>}
       <button className="btn btn--sm" disabled={!cambiado || guardando} onClick={() => void guardar()}>
+        {!guardando && <Save size={14} aria-hidden="true" />}
         {guardando ? t('comun.guardando') : t('comun.guardar')}
       </button>
       {tienePersonalizacion && (
         <button className="btn btn--sm" disabled={guardando} onClick={() => void restablecer()}>
+          <RotateCcw size={14} aria-hidden="true" />
           {t('ajustes.traduccion.restablecer')}
         </button>
       )}

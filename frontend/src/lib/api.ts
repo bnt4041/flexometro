@@ -43,9 +43,9 @@ export interface CuentaAdmin {
   nombre: string
   is_active: boolean
   tarifa_id: string | null
-  // Fase 15: si está activo, terceros/catálogo/cuadro de precios se ven
-  // (solo lectura) entre las organizaciones de esta cuenta. Presupuestos,
-  // obras, facturas... nunca se comparten, sin importar este valor.
+  // Fase 15: si está activo, terceros/banco de precios se ven (solo
+  // lectura) entre las organizaciones de esta cuenta. Presupuestos, obras,
+  // facturas... nunca se comparten, sin importar este valor.
   compartir_maestros: boolean
   created_at: string
 }
@@ -115,7 +115,7 @@ export interface Moneda {
 
 export type EntidadCampoLibre =
   | 'tercero'
-  | 'producto'
+  | 'concepto'
   | 'obra'
   | 'presupuesto'
   | 'capitulo'
@@ -389,7 +389,6 @@ export interface Page<T> {
 
 export type TipoPersona = 'fisica' | 'juridica'
 export type OrigenDato = 'manual' | 'fiebdc3' | 'ia' | 'importado'
-export type TipoProducto = 'material' | 'mano_obra' | 'maquinaria' | 'servicio' | 'otro'
 export type TipoIVA = 'general' | 'reducido' | 'superreducido' | 'exento'
 export type FormaPago =
   | 'transferencia'
@@ -459,7 +458,7 @@ export interface Familia {
 
 export interface PrecioSuministro {
   id: string
-  producto_id: string
+  concepto_id: string
   proveedor_id: string
   proveedor_razon_social: string | null
   precio: string
@@ -476,26 +475,6 @@ export interface PrecioSuministro {
   notas: string | null
 }
 
-export interface Producto {
-  id: string
-  codigo: string
-  tipo: TipoProducto
-  familia_id: string | null
-  resumen: string
-  descripcion: string | null
-  unidad: string
-  tipo_iva: TipoIVA
-  precio_venta: string | null
-  ean: string | null
-  activo: boolean
-  origen_dato: OrigenDato
-  atributos: Record<string, unknown>
-}
-
-export interface ProductoDetalle extends Producto {
-  suministros: PrecioSuministro[]
-}
-
 export type TipoConcepto = 'basico' | 'auxiliar' | 'unitario'
 export type OrigenPrecio = 'manual' | 'producto' | 'descomposicion'
 export type NaturalezaConcepto =
@@ -503,9 +482,12 @@ export type NaturalezaConcepto =
   | 'mano_obra'
   | 'maquinaria'
   | 'material'
+  | 'servicio'
   | 'residuo'
   | 'otro'
 
+// "Banco de precios" (Fase 25): un producto/servicio del antiguo catálogo y
+// una partida unitaria/precio descompuesto son la misma ficha.
 export interface Concepto {
   id: string
   codigo: string
@@ -516,9 +498,12 @@ export interface Concepto {
   texto: string | null
   precio: string
   origen_precio: OrigenPrecio
-  producto_id: string | null
   costes_indirectos: string | null
   fecha_precio: string | null
+  ean: string | null
+  familia_id: string | null
+  precio_venta: string | null
+  tipo_iva: TipoIVA
   activo: boolean
   origen_dato: OrigenDato
 }
@@ -541,6 +526,38 @@ export interface ConceptoDetalle extends Concepto {
   lineas: Linea[]
   coste_directo: string
   clase: string | null
+  suministros: PrecioSuministro[]
+}
+
+export interface HistoricoPrecio {
+  id: string
+  precio: string
+  origen_precio: OrigenPrecio
+  fecha: string
+}
+
+export interface PartidaUso {
+  id: string
+  presupuesto_id: string
+  presupuesto_nombre: string
+  presupuesto_estado: string
+  codigo: string
+  resumen: string
+  medicion: string
+  precio: string
+  importe: string
+}
+
+export interface UsoCompleto {
+  en_descomposiciones: Uso[]
+  en_partidas: PartidaUso[]
+}
+
+export interface Ventas {
+  presupuestado_partidas: number
+  presupuestado_importe: string
+  facturado_lineas: number
+  facturado_importe: string
 }
 
 export type EstadoPresupuesto =
@@ -741,7 +758,7 @@ export interface ObraDetalle extends Obra {
 export interface AlbaranLinea {
   id: string
   albaran_id: string
-  producto_id: string | null
+  concepto_id: string | null
   capitulo_id: string | null
   descripcion: string
   unidad: string
@@ -1568,25 +1585,9 @@ export const api = {
   familias: {
     list: () => request<Familia[]>('/api/familias'),
     create: (datos: Partial<Familia>) => post<Familia>('/api/familias', datos),
+    update: (id: string, datos: Partial<Familia>) =>
+      patch<Familia>(`/api/familias/${id}`, datos),
     remove: (id: string) => del(`/api/familias/${id}`),
-  },
-
-  productos: {
-    list: (params: {
-      q?: string
-      tipo?: string
-      familia_id?: string
-      activo?: boolean
-      limit?: number
-      offset?: number
-    }) => request<Page<Producto>>(`/api/productos${query(params)}`),
-    get: (id: string) => request<ProductoDetalle>(`/api/productos/${id}`),
-    create: (datos: Partial<Producto>) => post<ProductoDetalle>('/api/productos', datos),
-    update: (id: string, datos: Partial<Producto>) =>
-      patch<Producto>(`/api/productos/${id}`, datos),
-    remove: (id: string) => del(`/api/productos/${id}`),
-    addSuministro: (productoId: string, datos: Partial<PrecioSuministro>) =>
-      post<PrecioSuministro>(`/api/productos/${productoId}/suministros`, datos),
   },
 
   suministros: {
@@ -1610,7 +1611,13 @@ export const api = {
     remove: (id: string) => del(`/api/conceptos/${id}`),
     addLinea: (id: string, datos: { hijo_id: string; rendimiento: string; factor?: string }) =>
       post<Linea>(`/api/conceptos/${id}/lineas`, datos),
-    dondeSeUsa: (id: string) => request<Uso[]>(`/api/conceptos/${id}/donde-se-usa`),
+    addSuministro: (conceptoId: string, datos: Partial<PrecioSuministro>) =>
+      post<PrecioSuministro>(`/api/conceptos/${conceptoId}/suministros`, datos),
+    dondeSeUsa: (id: string) => request<UsoCompleto>(`/api/conceptos/${id}/donde-se-usa`),
+    historico: (id: string) => request<HistoricoPrecio[]>(`/api/conceptos/${id}/historico-precios`),
+    // Vive en el router de facturación (cruza partida + certificación), pero
+    // la URL sigue hablando del concepto que el usuario está consultando.
+    ventas: (id: string) => request<Ventas>(`/api/conceptos/${id}/ventas`),
     recalcular: (id: string) =>
       post<{ conceptos_modificados: number; ids: string[] }>(
         `/api/conceptos/${id}/recalcular`,
@@ -1685,6 +1692,8 @@ export const api = {
     get: (id: string) => request<PartidaDetalle>(`/api/partidas/${id}`),
     update: (id: string, datos: Partial<Partida>) => patch<Partida>(`/api/partidas/${id}`, datos),
     remove: (id: string) => del(`/api/partidas/${id}`),
+    integrarBancoPrecios: (id: string) =>
+      post<Partida>(`/api/partidas/${id}/integrar-banco-precios`, {}),
     addLinea: (
       id: string,
       datos: {
@@ -1774,7 +1783,7 @@ export const api = {
       numero_proveedor?: string | null
       fecha: string
       lineas?: {
-        producto_id?: string | null
+        concepto_id?: string | null
         capitulo_id?: string | null
         descripcion?: string | null
         unidad?: string | null
@@ -1787,7 +1796,7 @@ export const api = {
     addLinea: (
       id: string,
       datos: {
-        producto_id?: string | null
+        concepto_id?: string | null
         capitulo_id?: string | null
         descripcion?: string | null
         unidad?: string | null
@@ -1941,22 +1950,15 @@ export const ETIQUETA_NATURALEZA: Record<NaturalezaConcepto, string> = {
   mano_obra: 'Mano de obra',
   maquinaria: 'Maquinaria',
   material: 'Material',
+  servicio: 'Servicio',
   residuo: 'Residuo',
   otro: 'Otro',
 }
 
 export const ETIQUETA_ORIGEN_PRECIO: Record<OrigenPrecio, string> = {
   manual: 'Manual',
-  producto: 'Del catálogo',
+  producto: 'Tarifa de proveedor',
   descomposicion: 'Calculado',
-}
-
-export const ETIQUETA_TIPO_PRODUCTO: Record<TipoProducto, string> = {
-  material: 'Material',
-  mano_obra: 'Mano de obra',
-  maquinaria: 'Maquinaria',
-  servicio: 'Servicio',
-  otro: 'Otro',
 }
 
 export const ETIQUETA_IVA: Record<TipoIVA, string> = {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Mail, Pencil, Plus, Power, Save, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field, ModalPantalla } from '../components/ui'
 import type { Alcance, Grupo, ModuloDisponible, UsuarioKeycloak, UsuariosGruposAPI } from '../lib/api'
@@ -93,6 +94,7 @@ function Seccion({
         </div>
         {accion && (
           <button className="btn btn--primary" onClick={accion.onClick}>
+            <Plus size={16} aria-hidden="true" />
             {accion.etiqueta}
           </button>
         )}
@@ -194,6 +196,7 @@ function UsuariosSeccion({
                 </td>
                 <td className="table__actions">
                   <button className="btn btn--sm" disabled={busy === u.id} onClick={() => setEditando(u)}>
+                    <Pencil size={14} aria-hidden="true" />
                     Editar
                   </button>
                   <button
@@ -201,9 +204,11 @@ function UsuariosSeccion({
                     disabled={busy === u.id}
                     onClick={() => void toggleHabilitado(u)}
                   >
+                    <Power size={14} aria-hidden="true" />
                     {u.enabled ? 'Deshabilitar' : 'Habilitar'}
                   </button>
                   <button className="btn btn--sm" disabled={busy === u.id} onClick={() => void reenviar(u)}>
+                    <Mail size={14} aria-hidden="true" />
                     Reenviar invitación
                   </button>
                   <button
@@ -211,6 +216,7 @@ function UsuariosSeccion({
                     disabled={busy === u.id}
                     onClick={() => void eliminar(u)}
                   >
+                    <Trash2 size={14} aria-hidden="true" />
                     Eliminar
                   </button>
                 </td>
@@ -309,6 +315,7 @@ function UsuarioCrearModal({
         </div>
         <div className="form-actions">
           <button className="btn" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -316,6 +323,7 @@ function UsuarioCrearModal({
             disabled={guardando || !username || !email || !nombre || !apellidos}
             onClick={() => void crear()}
           >
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Creando…' : 'Crear usuario'}
           </button>
         </div>
@@ -370,9 +378,11 @@ function UsuarioEditarModal({
         </div>
         <div className="form-actions">
           <button className="btn" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
@@ -443,9 +453,11 @@ function GruposSeccion({
                 <td className="table__num">{grupo.miembros.length}</td>
                 <td className="table__actions">
                   <button className="btn btn--sm" onClick={() => setGestionando(grupo)}>
+                    <Pencil size={14} aria-hidden="true" />
                     Gestionar
                   </button>
                   <button className="btn btn--sm btn--danger" onClick={() => void eliminar(grupo)}>
+                    <Trash2 size={14} aria-hidden="true" />
                     Eliminar
                   </button>
                 </td>
@@ -527,9 +539,11 @@ function GrupoCrearModal({
         </div>
         <div className="form-actions">
           <button className="btn" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button className="btn btn--primary" disabled={guardando || !nombre} onClick={() => void crear()}>
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Creando…' : 'Crear grupo'}
           </button>
         </div>
@@ -682,6 +696,7 @@ function GrupoGestionarModal({
       </div>
       <div className="form-actions" style={{ border: 'none', background: 'none', padding: 'var(--sp-4) 0' }}>
         <button className="btn btn--primary" disabled={guardandoPermisos} onClick={() => void guardarPermisos()}>
+          {!guardandoPermisos && <Save size={16} aria-hidden="true" />}
           {guardandoPermisos ? 'Guardando…' : 'Guardar permisos'}
         </button>
       </div>
@@ -701,6 +716,7 @@ function GrupoGestionarModal({
               disabled={busyMiembro === m.id}
               onClick={() => void quitarMiembro(m.id)}
             >
+              <UserMinus size={14} aria-hidden="true" />
               Quitar
             </button>
           </div>

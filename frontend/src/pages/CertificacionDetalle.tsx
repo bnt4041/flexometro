@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { FileDown, Plus, Send, Trash2, X } from 'lucide-react'
 
-import { ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_CERTIFICACION, api, descargar } from '../lib/api'
 import type { CertificacionDetalle as Detalle, Obra } from '../lib/api'
 import { useContextoCertificaciones } from './Certificaciones'
@@ -86,32 +87,44 @@ export function CertificacionDetalle() {
           {certificacion.facturada && <span className="badge"> facturada</span>}
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <button
-            className="btn"
-            onClick={() =>
-              void descargar(
-                api.certificaciones.pdfUrl(id),
-                `${certificacion.codigo}.pdf`,
-                { abrir: true },
-              ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }
-          >
-            PDF
-          </button>
+          <Tooltip texto="Descargar el PDF de esta certificación">
+            <button
+              className="btn"
+              onClick={() =>
+                void descargar(
+                  api.certificaciones.pdfUrl(id),
+                  `${certificacion.codigo}.pdf`,
+                  { abrir: true },
+                ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+              }
+            >
+              <FileDown size={16} aria-hidden="true" />
+              PDF
+            </button>
+          </Tooltip>
           {esBorrador ? (
             <>
-              <button className="btn btn--danger" onClick={() => void eliminar()}>
-                Eliminar
-              </button>
-              <button className="btn btn--primary" onClick={() => void emitir()}>
-                Emitir
-              </button>
+              <Tooltip texto="Eliminar esta certificación">
+                <button className="btn btn--danger" onClick={() => void eliminar()}>
+                  <Trash2 size={16} aria-hidden="true" />
+                  Eliminar
+                </button>
+              </Tooltip>
+              <Tooltip texto="Emitir: a partir de aquí queda bloqueada">
+                <button className="btn btn--primary" onClick={() => void emitir()}>
+                  <Send size={16} aria-hidden="true" />
+                  Emitir
+                </button>
+              </Tooltip>
             </>
           ) : (
             !certificacion.facturada && (
-              <button className="btn btn--primary" onClick={() => setGenerando(true)}>
-                Generar factura
-              </button>
+              <Tooltip texto="Generar la factura a partir de esta certificación">
+                <button className="btn btn--primary" onClick={() => setGenerando(true)}>
+                  <Plus size={16} aria-hidden="true" />
+                  Generar factura
+                </button>
+              </Tooltip>
             )
           )}
         </div>
@@ -242,9 +255,11 @@ function GenerarFacturaModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Generando…' : 'Generar factura'}
         </button>
       </div>

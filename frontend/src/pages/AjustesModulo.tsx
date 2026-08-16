@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 
 import { EmptyState, ErrorNotice } from '../components/ui'
 import { NumeracionCard } from '../components/NumeracionCard'
@@ -40,6 +41,7 @@ export function AjustesModulo() {
           {modulo && <p className="page-lead">{modulo.description}</p>}
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           {t('ajustes.modulos.volverAAjustes')}
         </Link>
       </div>

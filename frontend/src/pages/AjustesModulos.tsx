@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { ArrowLeft, Power } from 'lucide-react'
 
 import { api } from '../lib/api'
 import { useWorkspace } from '../workspace'
@@ -32,6 +33,7 @@ export function AjustesModulos() {
           <p className="page-lead">{t('ajustes.modulos.descripcionPantalla')}</p>
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           {t('ajustes.modulos.volverAAjustes')}
         </Link>
       </div>
@@ -60,6 +62,9 @@ export function AjustesModulos() {
               disabled={module.always_active || busy !== null}
               onClick={() => void toggle(module.code, !module.is_active)}
             >
+              {busy !== module.code && !module.always_active && (
+                <Power size={14} aria-hidden="true" />
+              )}
               {busy === module.code
                 ? '...'
                 : module.always_active

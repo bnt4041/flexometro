@@ -16,12 +16,19 @@ from app.modules.presupuestos.schemas import (
     ConceptoDetalle,
     ConceptoOut,
     ConceptoUpdate,
+    FamiliaCreate,
+    FamiliaOut,
+    FamiliaUpdate,
+    HistoricoPrecioOut,
     LineaCreate,
     LineaOut,
     LineaUpdate,
     NodoArbol,
+    PrecioSuministroCreate,
+    PrecioSuministroOut,
+    PrecioSuministroUpdate,
     ResultadoRecalculo,
-    UsoOut,
+    UsoCompletoOut,
 )
 
 guard = Depends(require_module("presupuestos"))
@@ -29,6 +36,10 @@ guard = Depends(require_module("presupuestos"))
 conceptos_router = APIRouter(prefix="/api/conceptos", tags=["presupuestos"], dependencies=[guard])
 lineas_router = APIRouter(
     prefix="/api/descomposicion", tags=["presupuestos"], dependencies=[guard]
+)
+familias_router = APIRouter(prefix="/api/familias", tags=["presupuestos"], dependencies=[guard])
+suministros_router = APIRouter(
+    prefix="/api/suministros", tags=["presupuestos"], dependencies=[guard]
 )
 
 
@@ -45,12 +56,13 @@ def _detalle(concepto) -> ConceptoDetalle:
         lineas=lineas,
         coste_directo=service.coste_directo_de(lineas),
         clase=service.clase_de(concepto),
+        suministros=[PrecioSuministroOut.model_validate(s) for s in concepto.suministros],
     )
 
 
 @conceptos_router.get("", response_model=Page[ConceptoOut])
 async def listar(
-    q: str | None = Query(default=None, description="Busca en resumen, código y texto"),
+    q: str | None = Query(default=None, description="Busca en resumen, código, texto y EAN"),
     tipo: TipoConcepto | None = None,
     activo: bool | None = None,
     limit: int = Query(default=50, ge=1, le=500),
@@ -153,18 +165,32 @@ async def arbol(
     return nodo
 
 
-@conceptos_router.get("/{concepto_id}/donde-se-usa", response_model=list[UsoOut])
+@conceptos_router.get("/{concepto_id}/donde-se-usa", response_model=UsoCompletoOut)
 async def donde_se_usa(
     concepto_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
     alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
-) -> list[UsoOut]:
+) -> UsoCompletoOut:
     existente = await service.obtener_concepto(session, concepto_id)
     if existente is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
     verificar_propiedad(alcance, principal, existente.creado_por_subject)
     return await service.donde_se_usa(session, concepto_id)
+
+
+@conceptos_router.get("/{concepto_id}/historico-precios", response_model=list[HistoricoPrecioOut])
+async def historico_precios(
+    concepto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> list[HistoricoPrecioOut]:
+    existente = await service.obtener_concepto(session, concepto_id)
+    if existente is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
+    verificar_propiedad(alcance, principal, existente.creado_por_subject)
+    return await service.historico_de(session, concepto_id)
 
 
 @conceptos_router.post("/{concepto_id}/recalcular", response_model=ResultadoRecalculo)
@@ -247,11 +273,140 @@ async def eliminar_linea(
     await service.eliminar_linea(session, linea_id)
 
 
+# --- Familias ---
+
+
+@familias_router.get("", response_model=list[FamiliaOut])
+async def listar_familias(
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> list[FamiliaOut]:
+    familias = await service.listar_familias(
+        session, creado_por_subject=principal.subject if alcance == Alcance.PROPIOS else None
+    )
+    return [FamiliaOut.model_validate(f) for f in familias]
+
+
+@familias_router.post("", response_model=FamiliaOut, status_code=status.HTTP_201_CREATED)
+async def crear_familia(
+    datos: FamiliaCreate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> FamiliaOut:
+    try:
+        familia = await service.crear_familia(session, datos)
+    except service.CodigoDuplicado as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return FamiliaOut.model_validate(familia)
+
+
+@familias_router.patch("/{familia_id}", response_model=FamiliaOut)
+async def actualizar_familia(
+    familia_id: uuid.UUID,
+    datos: FamiliaUpdate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> FamiliaOut:
+    existente = await service.obtener_familia(session, familia_id)
+    if existente is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Familia no encontrada")
+    verificar_propiedad(alcance, principal, existente.creado_por_subject)
+    familia = await service.actualizar_familia(session, familia_id, datos)
+    return FamiliaOut.model_validate(familia)
+
+
+@familias_router.delete("/{familia_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_familia(
+    familia_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> None:
+    existente = await service.obtener_familia(session, familia_id)
+    if existente is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Familia no encontrada")
+    verificar_propiedad(alcance, principal, existente.creado_por_subject)
+    await service.eliminar_familia(session, familia_id)
+
+
+# --- Precios de suministro ---
+
+
+@conceptos_router.post(
+    "/{concepto_id}/suministros",
+    response_model=PrecioSuministroOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_suministro(
+    concepto_id: uuid.UUID,
+    datos: PrecioSuministroCreate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PrecioSuministroOut:
+    concepto = await service.obtener_concepto(session, concepto_id)
+    if concepto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
+    verificar_propiedad(alcance, principal, concepto.creado_por_subject)
+    try:
+        suministro = await service.crear_suministro(session, concepto_id, datos)
+    except service.ProveedorInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    assert suministro is not None
+    return PrecioSuministroOut.model_validate(suministro)
+
+
+async def _verificar_propiedad_suministro(
+    session: AsyncSession, suministro_id: uuid.UUID, alcance: Alcance, principal: Principal
+) -> None:
+    suministro = await service.obtener_suministro(session, suministro_id)
+    if suministro is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarifa no encontrada")
+    concepto = await service.obtener_concepto(session, suministro.concepto_id)
+    verificar_propiedad(alcance, principal, concepto.creado_por_subject if concepto else None)
+
+
+@suministros_router.patch("/{suministro_id}", response_model=PrecioSuministroOut)
+async def actualizar_suministro(
+    suministro_id: uuid.UUID,
+    datos: PrecioSuministroUpdate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PrecioSuministroOut:
+    await _verificar_propiedad_suministro(session, suministro_id, alcance, principal)
+    try:
+        suministro = await service.actualizar_suministro(session, suministro_id, datos)
+    except service.ProveedorInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    assert suministro is not None
+    return PrecioSuministroOut.model_validate(suministro)
+
+
+@suministros_router.delete("/{suministro_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_suministro(
+    suministro_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> None:
+    await _verificar_propiedad_suministro(session, suministro_id, alcance, principal)
+    await service.eliminar_suministro(session, suministro_id)
+
+
 router = APIRouter()
 router.include_router(conceptos_router)
 router.include_router(lineas_router)
+router.include_router(familias_router)
+router.include_router(suministros_router)
 
-# El presupuesto vive en su propio fichero: comparte módulo con el cuadro de
+# El presupuesto vive en su propio fichero: comparte módulo con el banco de
 # precios, pero son dos dominios distintos y mezclarlos en un router haría
 # ilegibles los dos.
 from app.modules.presupuestos.presupuesto_router import router as presupuesto_router  # noqa: E402

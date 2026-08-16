@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArrowRight, Ban, Plus, Power, Save, X } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
 import { NumeracionCard } from '../components/NumeracionCard'
@@ -149,9 +150,9 @@ function DatosCuenta({ cuenta, onCambio }: { cuenta: Detalle; onCambio: () => Pr
           onChange={setCompartirMaestros}
         />
         <p className="page-lead" style={{ marginTop: 'var(--sp-1)' }}>
-          Terceros, catálogo y cuadro de precios se ven (solo lectura) entre las organizaciones
-          de esta cuenta. Presupuestos, obras, facturas y albaranes nunca se comparten — están
-          atados por ley a un CIF concreto.
+          Terceros y banco de precios se ven (solo lectura) entre las organizaciones de esta
+          cuenta. Presupuestos, obras, facturas y albaranes nunca se comparten — están atados
+          por ley a un CIF concreto.
         </p>
       </div>
       <div className="form-actions" style={{ justifyContent: 'space-between' }}>
@@ -160,9 +161,11 @@ function DatosCuenta({ cuenta, onCambio }: { cuenta: Detalle; onCambio: () => Pr
           disabled={guardando}
           onClick={() => void toggleActiva()}
         >
+          {cuenta.is_active ? <Ban size={16} aria-hidden="true" /> : <Power size={16} aria-hidden="true" />}
           {cuenta.is_active ? 'Desactivar cuenta' : 'Reactivar cuenta'}
         </button>
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? 'Guardando…' : 'Guardar datos'}
         </button>
       </div>
@@ -209,6 +212,7 @@ function OrganizacionesDeCuenta({ cuentaId }: { cuentaId: string }) {
       <div className="page-head" style={{ marginBottom: 'var(--sp-3)' }}>
         <div />
         <button className="btn" onClick={() => setCreando(true)}>
+          <Plus size={16} aria-hidden="true" />
           Nueva organización
         </button>
       </div>
@@ -240,6 +244,7 @@ function OrganizacionesDeCuenta({ cuentaId }: { cuentaId: string }) {
                 <td className="table__actions">
                   <Link className="btn btn--sm" to={`/admin/organizaciones/${org.id}`}>
                     Gestionar
+                    <ArrowRight size={14} aria-hidden="true" />
                   </Link>
                 </td>
               </tr>
@@ -323,6 +328,7 @@ function NuevaOrganizacionModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -330,6 +336,7 @@ function NuevaOrganizacionModal({
           disabled={guardando || slug.trim() === '' || name.trim() === ''}
           onClick={() => void guardar()}
         >
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Creando…' : 'Crear organización'}
         </button>
       </div>
@@ -444,6 +451,7 @@ function CobrosCard({ cuentaId }: { cuentaId: string }) {
             disabled={guardando || !concepto || !importe}
             onClick={() => void registrar()}
           >
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Registrando…' : 'Registrar cobro'}
           </button>
         </div>

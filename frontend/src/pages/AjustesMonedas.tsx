@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArrowLeft, RefreshCw } from 'lucide-react'
 
 import { ErrorNotice } from '../components/ui'
 import { api } from '../lib/api'
@@ -59,12 +60,14 @@ export function AjustesMonedas() {
           </p>
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           Volver a Ajustes
         </Link>
       </div>
 
       <div className="toolbar">
         <button className="btn btn--primary" disabled={actualizando} onClick={() => void actualizar()}>
+          {!actualizando && <RefreshCw size={16} aria-hidden="true" />}
           {actualizando ? 'Actualizando…' : 'Actualizar ahora'}
         </button>
       </div>

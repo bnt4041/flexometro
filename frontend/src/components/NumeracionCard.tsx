@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Save } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field } from './ui'
 import { useToast } from '../toast'
@@ -178,6 +179,7 @@ function FilaPatron({
           disabled={guardando || !cambiado || valor.trim() === ''}
           onClick={() => void guardar()}
         >
+          {!guardando && <Save size={16} aria-hidden="true" />}
           {guardando ? t('comun.guardando') : t('comun.guardar')}
         </button>
       </div>

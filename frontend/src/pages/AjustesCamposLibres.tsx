@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArrowLeft, Plus, Save, Trash2, X } from 'lucide-react'
 
 import { Checkbox, ErrorNotice, Field } from '../components/ui'
 import { api } from '../lib/api'
@@ -8,7 +9,7 @@ import { useToast } from '../toast'
 
 const ETIQUETA_ENTIDAD: Record<EntidadCampoLibre, string> = {
   tercero: 'Terceros',
-  producto: 'Productos',
+  concepto: 'Banco de precios',
   obra: 'Obras',
   presupuesto: 'Presupuestos',
   capitulo: 'Capítulos',
@@ -57,11 +58,12 @@ export function AjustesCamposLibres() {
         <div>
           <h1 className="page-title">Campos libres</h1>
           <p className="page-lead">
-            Campos propios de la cuenta sobre terceros, productos, obras, presupuestos y sus
-            líneas — al estilo Dolibarr.
+            Campos propios de la cuenta sobre terceros, el banco de precios, obras, presupuestos
+            y sus líneas — al estilo Dolibarr.
           </p>
         </div>
         <Link className="btn" to="/ajustes">
+          <ArrowLeft size={16} aria-hidden="true" />
           Volver a Ajustes
         </Link>
       </div>
@@ -80,6 +82,7 @@ export function AjustesCamposLibres() {
 
       <div className="toolbar">
         <button className="btn btn--primary" onClick={() => setCreando(true)}>
+          <Plus size={16} aria-hidden="true" />
           Nuevo campo
         </button>
       </div>
@@ -195,6 +198,7 @@ function NuevoCampo({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onCancelar}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -202,6 +206,7 @@ function NuevoCampo({
           disabled={guardando || clave.trim() === '' || etiqueta.trim() === ''}
           onClick={() => void guardar()}
         >
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Creando…' : 'Crear'}
         </button>
       </div>
@@ -268,9 +273,11 @@ function FilaCampo({
       {definicion.requerido && <span className="badge">obligatorio</span>}
       <Checkbox label="Activo" checked={activo} onChange={setActivo} />
       <button className="btn btn--sm" disabled={!cambiado || guardando} onClick={() => void guardar()}>
+        {!guardando && <Save size={14} aria-hidden="true" />}
         {guardando ? 'Guardando…' : 'Guardar'}
       </button>
       <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
+        <Trash2 size={14} aria-hidden="true" />
         Eliminar
       </button>
     </div>

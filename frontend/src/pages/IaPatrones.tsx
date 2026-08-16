@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowRight, Plus, Sparkles, Trash2 } from 'lucide-react'
 
-import { Field, formatoImporte } from '../components/ui'
+import { Field, Tooltip, formatoImporte } from '../components/ui'
 import { api } from '../lib/api'
 import type { CapituloSugerido, SugerenciaDetalle } from '../lib/api'
 
@@ -142,6 +143,7 @@ export function IaPatrones() {
             disabled={solicitando || tipoObra.trim() === ''}
             onClick={() => void solicitar()}
           >
+            {!solicitando && <Sparkles size={16} aria-hidden="true" />}
             {solicitando ? 'Consultando a DeepSeek…' : 'Sugerir patrón'}
           </button>
         </div>
@@ -176,6 +178,7 @@ export function IaPatrones() {
                     onChange={(e) => editarCapitulo(i, e.target.value)}
                   />
                   <button className="btn btn--sm btn--danger" onClick={() => quitarCapitulo(i)}>
+                    <Trash2 size={14} aria-hidden="true" />
                     Quitar capítulo
                   </button>
                 </div>
@@ -223,12 +226,14 @@ export function IaPatrones() {
                             )}
                           </td>
                           <td className="table__actions">
-                            <button
-                              className="btn btn--sm btn--danger"
-                              onClick={() => quitarPartida(i, j)}
-                            >
-                              ×
-                            </button>
+                            <Tooltip texto="Quitar esta partida">
+                              <button
+                                className="btn btn--sm btn--danger btn--solo-icono"
+                                onClick={() => quitarPartida(i, j)}
+                              >
+                                <Trash2 size={14} aria-hidden="true" />
+                              </button>
+                            </Tooltip>
                           </td>
                         </tr>
                       ))}
@@ -249,7 +254,7 @@ export function IaPatrones() {
           <div className="card" style={{ padding: 'var(--sp-5)' }}>
             <div className="form-section__note">
               Las partidas marcadas "nueva, sin tarifar" se crearán como conceptos reales del
-              cuadro de precios (origen IA, precio 0,00 €): revísalas y ponles precio antes de
+              banco de precios (origen IA, precio 0,00 €): revísalas y ponles precio antes de
               usarlas en una obra real.
             </div>
             <div className="form-grid" style={{ marginTop: 'var(--sp-3)' }}>
@@ -268,6 +273,7 @@ export function IaPatrones() {
                   onClick={() => navegar(`/presupuestos/${plantillaId}`)}
                 >
                   Ver la plantilla creada
+                  <ArrowRight size={16} aria-hidden="true" />
                 </button>
               ) : (
                 <button
@@ -275,6 +281,7 @@ export function IaPatrones() {
                   disabled={creando || capitulos.length === 0 || nombrePlantilla.trim() === ''}
                   onClick={() => void crearPlantilla()}
                 >
+                  {!creando && <Plus size={16} aria-hidden="true" />}
                   {creando ? 'Creando…' : 'Crear plantilla'}
                 </button>
               )}

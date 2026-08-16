@@ -312,6 +312,22 @@ async def eliminar_partida(
     await service.eliminar_partida(session, partida_id)
 
 
+@partidas_router.post("/{partida_id}/integrar-banco-precios", response_model=PartidaOut)
+async def integrar_en_banco_precios(
+    partida_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PartidaOut:
+    await _partida_propia(session, partida_id, alcance, principal)
+    try:
+        partida = await service.integrar_en_banco_precios(session, partida_id)
+    except (service.ConceptoYaVinculado, service.CodigoDuplicado) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    assert partida is not None
+    return PartidaOut.model_validate(partida)
+
+
 @partidas_router.post(
     "/{partida_id}/lineas", response_model=LineaMedicionOut, status_code=status.HTTP_201_CREATED
 )

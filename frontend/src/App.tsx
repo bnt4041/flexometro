@@ -19,6 +19,8 @@ import { AjustesModulo } from './pages/AjustesModulo'
 import { AjustesModulos } from './pages/AjustesModulos'
 import { AjustesMonedas } from './pages/AjustesMonedas'
 import { AjustesTraduccion } from './pages/AjustesTraduccion'
+import { BancoPrecioDetalle } from './pages/BancoPrecioDetalle'
+import { BancoPrecios, ConceptoCrear } from './pages/BancoPrecios'
 import { Certificaciones } from './pages/Certificaciones'
 import { CertificacionDetalle } from './pages/CertificacionDetalle'
 import { Comparador } from './pages/Comparador'
@@ -32,12 +34,8 @@ import { ObraCrear, Obras } from './pages/Obras'
 import { ObraDetalle } from './pages/ObraDetalle'
 import { Personal } from './pages/Personal'
 import { Placeholder } from './pages/Placeholder'
-import { PrecioDetalle } from './pages/PrecioDetalle'
-import { ConceptoCrear, Precios } from './pages/Precios'
 import { PresupuestoCrear, Presupuestos } from './pages/Presupuestos'
 import { PresupuestoDetalle } from './pages/PresupuestoDetalle'
-import { ProductoCrear, Productos } from './pages/Productos'
-import { ProductoDetalle } from './pages/ProductoDetalle'
 import { TerceroCrear, Terceros } from './pages/Terceros'
 import { TerceroDetalle } from './pages/TerceroDetalle'
 import { UsuariosGrupos } from './pages/UsuariosGrupos'
@@ -51,8 +49,7 @@ const PANTALLAS: Record<string, ComponentType> = {
   '/ajustes': Ajustes,
   '/terceros': Terceros,
   '/contactos': Contactos,
-  '/productos': Productos,
-  '/precios': Precios,
+  '/banco-precios': BancoPrecios,
   '/presupuestos': Presupuestos,
   '/importar-bc3': ImportarBC3,
   '/obras': Obras,
@@ -75,13 +72,9 @@ const MODALES: Record<
     { path: 'nuevo', modulo: 'terceros', componente: TerceroCrear },
     { path: ':id', modulo: 'terceros', componente: TerceroDetalle },
   ],
-  '/productos': [
-    { path: 'nuevo', modulo: 'catalogo', componente: ProductoCrear },
-    { path: ':id', modulo: 'catalogo', componente: ProductoDetalle },
-  ],
-  '/precios': [
+  '/banco-precios': [
     { path: 'nuevo', modulo: 'presupuestos', componente: ConceptoCrear },
-    { path: ':id', modulo: 'presupuestos', componente: PrecioDetalle },
+    { path: ':id', modulo: 'presupuestos', componente: BancoPrecioDetalle },
   ],
   '/presupuestos': [
     { path: 'nuevo', modulo: 'presupuestos', componente: PresupuestoCrear },

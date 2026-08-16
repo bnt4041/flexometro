@@ -29,7 +29,7 @@ class ProveedorInvalido(Exception):
     pass
 
 
-class ProductoInvalido(Exception):
+class ConceptoInvalido(Exception):
     pass
 
 
@@ -71,36 +71,36 @@ async def _datos_linea(
     session: AsyncSession, datos: AlbaranLineaCreate
 ) -> tuple[str, str, Decimal]:
     """Resuelve descripción, unidad y precio de una línea a partir del
-    producto de catálogo, si lo tiene; si no, exige que vengan a mano."""
-    if datos.producto_id is not None:
-        from app.modules.catalogo.models import Producto
-        from app.modules.catalogo.service import precio_referencia
+    concepto del banco de precios, si lo tiene; si no, exige que vengan a mano."""
+    if datos.concepto_id is not None:
+        from app.modules.presupuestos.calculo import precio_referencia
+        from app.modules.presupuestos.models import Concepto
 
         org_id = require_organization_id()
-        producto = await session.scalar(
-            select(Producto).where(
-                Producto.id == datos.producto_id, Producto.organization_id == org_id
+        concepto = await session.scalar(
+            select(Concepto).where(
+                Concepto.id == datos.concepto_id, Concepto.organization_id == org_id
             )
         )
-        if producto is None:
-            raise ProductoInvalido("El producto no existe en esta organización")
+        if concepto is None:
+            raise ConceptoInvalido("El concepto no existe en esta organización")
 
         precio = datos.precio_unitario
         if precio is None:
-            precio = await precio_referencia(session, datos.producto_id)
+            precio = await precio_referencia(session, datos.concepto_id)
         if precio is None:
-            raise ProductoInvalido(
-                f"'{producto.resumen}' no tiene tarifa de proveedor ni precio manual"
+            raise ConceptoInvalido(
+                f"'{concepto.resumen}' no tiene tarifa de proveedor ni precio manual"
             )
         return (
-            datos.descripcion or producto.resumen,
-            datos.unidad or producto.unidad,
+            datos.descripcion or concepto.resumen,
+            datos.unidad or concepto.unidad,
             precio,
         )
 
     if not datos.descripcion or datos.precio_unitario is None:
         raise LineaSinDatos(
-            "Sin producto de catálogo hacen falta descripción y precio a mano"
+            "Sin concepto del banco de precios hacen falta descripción y precio a mano"
         )
     return datos.descripcion, datos.unidad or "ud", datos.precio_unitario
 
@@ -109,7 +109,7 @@ def _nueva_linea(org_id: uuid.UUID, albaran_id: uuid.UUID, datos: AlbaranLineaCr
     return AlbaranLinea(
         organization_id=org_id,
         albaran_id=albaran_id,
-        producto_id=datos.producto_id,
+        concepto_id=datos.concepto_id,
         capitulo_id=datos.capitulo_id,
         descripcion=descripcion,
         unidad=unidad,

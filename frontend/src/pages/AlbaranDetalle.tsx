@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Plus, Trash2, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
 import type {
   AlbaranDetalle as Detalle,
+  Concepto,
   EstadoAlbaran,
-  Producto,
 } from '../lib/api'
 import { useContextoAlbaranes } from './Albaranes'
 
@@ -97,9 +98,12 @@ export function AlbaranDetalle() {
               </option>
             ))}
           </select>
-          <button className="btn btn--danger" onClick={() => void eliminar()}>
-            Eliminar
-          </button>
+          <Tooltip texto="Eliminar este albarán">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -108,6 +112,7 @@ export function AlbaranDetalle() {
       <div className="page-head" style={{ marginBottom: 'var(--sp-3)' }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Líneas</h2>
         <button className="btn" onClick={() => setAnadiendo(true)}>
+          <Plus size={16} aria-hidden="true" />
           Añadir línea
         </button>
       </div>
@@ -139,12 +144,14 @@ export function AlbaranDetalle() {
                     <strong>{formatoImporte(l.importe)}</strong>
                   </td>
                   <td className="table__actions">
-                    <button
-                      className="btn btn--sm btn--danger"
-                      onClick={() => void eliminarLinea(l.id)}
-                    >
-                      ×
-                    </button>
+                    <Tooltip texto="Quitar esta línea">
+                      <button
+                        className="btn btn--sm btn--danger btn--solo-icono"
+                        onClick={() => void eliminarLinea(l.id)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                   </td>
                 </tr>
               ))}
@@ -187,10 +194,10 @@ function NuevaLineaModal({
   onClose: () => void
   onAnadida: () => void
 }) {
-  const [modo, setModo] = useState<'catalogo' | 'manual'>('catalogo')
+  const [modo, setModo] = useState<'banco' | 'manual'>('banco')
   const [q, setQ] = useState('')
-  const [productos, setProductos] = useState<Producto[]>([])
-  const [productoId, setProductoId] = useState('')
+  const [conceptos, setConceptos] = useState<Concepto[]>([])
+  const [conceptoId, setConceptoId] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [unidad, setUnidad] = useState('ud')
   const [cantidad, setCantidad] = useState('1')
@@ -198,11 +205,11 @@ function NuevaLineaModal({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (modo !== 'catalogo') return
+    if (modo !== 'banco') return
     const id = setTimeout(() => {
-      void api.productos
+      void api.conceptos
         .list({ q: q || undefined, activo: true, limit: 50 })
-        .then((page) => setProductos(page.items))
+        .then((page) => setConceptos(page.items))
         .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
     }, 250)
     return () => clearTimeout(id)
@@ -213,8 +220,8 @@ function NuevaLineaModal({
     try {
       await api.albaranes.addLinea(
         albaranId,
-        modo === 'catalogo'
-          ? { producto_id: productoId, cantidad, precio_unitario: precio || null }
+        modo === 'banco'
+          ? { concepto_id: conceptoId, cantidad, precio_unitario: precio || null }
           : { descripcion, unidad, cantidad, precio_unitario: precio },
       )
       onAnadida()
@@ -224,8 +231,8 @@ function NuevaLineaModal({
   }
 
   const listo =
-    modo === 'catalogo'
-      ? productoId !== '' && cantidad !== ''
+    modo === 'banco'
+      ? conceptoId !== '' && cantidad !== ''
       : descripcion.trim() !== '' && cantidad !== '' && precio !== ''
 
   return (
@@ -236,17 +243,17 @@ function NuevaLineaModal({
           <select
             className="select"
             value={modo}
-            onChange={(e) => setModo(e.target.value as 'catalogo' | 'manual')}
+            onChange={(e) => setModo(e.target.value as 'banco' | 'manual')}
           >
-            <option value="catalogo">Producto del catálogo</option>
+            <option value="banco">Del banco de precios</option>
             <option value="manual">Descripción manual</option>
           </select>
         </Field>
 
-        {modo === 'catalogo' ? (
+        {modo === 'banco' ? (
           <>
             <div style={{ marginTop: 'var(--sp-4)' }}>
-              <Field label="Buscar producto">
+              <Field label="Buscar en el banco de precios">
                 <input
                   className="input"
                   placeholder="Código o descripción…"
@@ -257,22 +264,22 @@ function NuevaLineaModal({
               </Field>
             </div>
             <div className="lista-seleccion">
-              {productos.length === 0 ? (
+              {conceptos.length === 0 ? (
                 <div className="muted" style={{ padding: 'var(--sp-3)' }}>
                   Sin resultados
                 </div>
               ) : (
-                productos.map((p) => (
+                conceptos.map((c) => (
                   <button
-                    key={p.id}
+                    key={c.id}
                     className={
-                      productoId === p.id ? 'lista-seleccion__item is-activo' : 'lista-seleccion__item'
+                      conceptoId === c.id ? 'lista-seleccion__item is-activo' : 'lista-seleccion__item'
                     }
-                    onClick={() => setProductoId(p.id)}
+                    onClick={() => setConceptoId(c.id)}
                   >
-                    <span className="table__code">{p.codigo}</span>
-                    <span className="lista-seleccion__texto">{p.resumen}</span>
-                    <span className="table__num">{p.unidad}</span>
+                    <span className="table__code">{c.codigo}</span>
+                    <span className="lista-seleccion__texto">{c.resumen}</span>
+                    <span className="table__num">{c.unidad}</span>
                   </button>
                 ))
               )}
@@ -305,7 +312,7 @@ function NuevaLineaModal({
           </Field>
           <Field
             label="Precio unitario"
-            hint={modo === 'catalogo' ? 'Vacío: tarifa del proveedor' : undefined}
+            hint={modo === 'banco' ? 'Vacío: tarifa del proveedor' : undefined}
           >
             <input
               className="input"
@@ -319,9 +326,11 @@ function NuevaLineaModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button className="btn btn--primary" disabled={!listo} onClick={() => void guardar()}>
+          <Plus size={16} aria-hidden="true" />
           Añadir
         </button>
       </div>

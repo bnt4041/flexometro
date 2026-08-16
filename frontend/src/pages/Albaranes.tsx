@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Plus, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
@@ -86,9 +87,12 @@ export function Albaranes() {
           <h1 className="page-title">Albaranes</h1>
           <p className="page-lead">Material recibido en obra desde un proveedor.</p>
         </div>
-        <Link className="btn btn--primary" to="nuevo">
-          Nuevo albarán
-        </Link>
+        <Tooltip texto="Registrar un albarán de proveedor">
+          <Link className="btn btn--primary" to="nuevo">
+            <Plus size={16} aria-hidden="true" />
+            Nuevo albarán
+          </Link>
+        </Tooltip>
       </div>
 
       <ErrorNotice error={error} />
@@ -208,6 +212,7 @@ export function AlbaranCrear() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -215,6 +220,7 @@ export function AlbaranCrear() {
             disabled={obraId === '' || proveedorId === ''}
             onClick={() => void guardar()}
           >
+            <Plus size={16} aria-hidden="true" />
             Crear
           </button>
         </div>

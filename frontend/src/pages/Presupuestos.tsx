@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { ETIQUETA_ESTADO, api } from '../lib/api'
@@ -132,13 +133,16 @@ export function Presupuestos() {
           <p className="page-lead">
             {esPlantillas
               ? 'Estructuras reutilizables por tipo de obra. Instanciar una crea un presupuesto nuevo con sus capítulos y partidas.'
-              : 'Capítulos, partidas y mediciones. En borrador siguen al cuadro de precios; al emitirlos, los precios se congelan.'}
+              : 'Capítulos, partidas y mediciones. En borrador siguen al banco de precios; al emitirlos, los precios se congelan.'}
           </p>
         </div>
         {!esPlantillas && (
-          <Link className="btn btn--primary" to="nuevo">
-            Nuevo presupuesto
-          </Link>
+          <Tooltip texto="Crear un presupuesto nuevo">
+            <Link className="btn btn--primary" to="nuevo">
+              <Plus size={16} aria-hidden="true" />
+              Nuevo presupuesto
+            </Link>
+          </Tooltip>
         )}
       </div>
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Save, X } from 'lucide-react'
 
 import { ErrorNotice, Field, ModalPantalla } from '../components/ui'
 import { api } from '../lib/api'
@@ -124,6 +125,7 @@ export function AdminTarifaDetalle() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cerrar
           </button>
           <button
@@ -131,6 +133,7 @@ export function AdminTarifaDetalle() {
             disabled={guardando || nombre.trim() === ''}
             onClick={() => void guardar()}
           >
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>

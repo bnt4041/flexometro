@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowRight,
+  BarChart3,
+  Check,
+  ClipboardCheck,
+  Plus,
+  Save,
+  Trash2,
+  UserPlus,
+  X,
+} from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, formatoImporte } from '../components/ui'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_CERTIFICACION, ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
 import type {
   AsignacionDetalle,
@@ -129,12 +140,18 @@ export function ObraDetalle() {
           <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <button className="btn btn--primary" onClick={() => navigate(`/obras/${id}/costes`)}>
-            Coste real vs. presupuestado
-          </button>
-          <button className="btn btn--danger" onClick={() => void eliminar()}>
-            Eliminar
-          </button>
+          <Tooltip texto="Comparar coste real frente a lo presupuestado">
+            <button className="btn btn--primary" onClick={() => navigate(`/obras/${id}/costes`)}>
+              <BarChart3 size={16} aria-hidden="true" />
+              Coste real vs. presupuestado
+            </button>
+          </Tooltip>
+          <Tooltip texto="Eliminar esta obra">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -193,6 +210,7 @@ export function ObraDetalle() {
 
         <div className="form-actions">
           <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
+            <X size={16} aria-hidden="true" />
             Descartar
           </button>
           <button
@@ -200,6 +218,7 @@ export function ObraDetalle() {
             disabled={!hayCambios || guardando}
             onClick={() => void guardar()}
           >
+            {!guardando && <Save size={16} aria-hidden="true" />}
             {guardando ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
@@ -209,9 +228,12 @@ export function ObraDetalle() {
 
       <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Personal asignado</h2>
-        <button className="btn" onClick={() => setAsignando(true)}>
-          Asignar trabajador
-        </button>
+        <Tooltip texto="Asignar un trabajador a esta obra">
+          <button className="btn" onClick={() => setAsignando(true)}>
+            <UserPlus size={16} aria-hidden="true" />
+            Asignar trabajador
+          </button>
+        </Tooltip>
       </div>
 
       <div className="table-wrap">
@@ -248,6 +270,7 @@ export function ObraDetalle() {
                   </td>
                   <td className="table__actions">
                     <button className="btn btn--sm" onClick={() => setMidiendoPartes(a)}>
+                      <ClipboardCheck size={14} aria-hidden="true" />
                       Partes de trabajo
                     </button>
                   </td>
@@ -260,9 +283,12 @@ export function ObraDetalle() {
 
       <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Certificaciones</h2>
-        <button className="btn" onClick={() => setCertificando(true)}>
-          Nueva certificación
-        </button>
+        <Tooltip texto="Certificar lo ejecutado hasta la fecha">
+          <button className="btn" onClick={() => setCertificando(true)}>
+            <Plus size={16} aria-hidden="true" />
+            Nueva certificación
+          </button>
+        </Tooltip>
       </div>
 
       <div className="table-wrap">
@@ -293,6 +319,7 @@ export function ObraDetalle() {
                   <td className="table__actions">
                     <Link className="btn btn--sm" to={`/certificaciones/${c.id}`}>
                       Ver certificación nº {c.numero}
+                      <ArrowRight size={14} aria-hidden="true" />
                     </Link>
                   </td>
                 </tr>
@@ -422,6 +449,7 @@ function AsignarModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button
@@ -429,6 +457,7 @@ function AsignarModal({
           disabled={personal.length === 0}
           onClick={() => void guardar()}
         >
+          <Plus size={16} aria-hidden="true" />
           Asignar
         </button>
       </div>
@@ -502,9 +531,14 @@ function PartesModal({
                     <td className="table__num">{formatoImporte(p.horas, 2)}</td>
                     <td className="table__num">{formatoImporte(p.coste)}</td>
                     <td className="table__actions">
-                      <button className="btn btn--sm btn--danger" onClick={() => void eliminar(p.id)}>
-                        ×
-                      </button>
+                      <Tooltip texto="Eliminar este parte">
+                        <button
+                          className="btn btn--sm btn--danger btn--solo-icono"
+                          onClick={() => void eliminar(p.id)}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
                     </td>
                   </tr>
                 ))
@@ -544,6 +578,7 @@ function PartesModal({
         </div>
         <div style={{ marginTop: 'var(--sp-3)' }}>
           <button className="btn" onClick={() => void anadir()}>
+            <Plus size={16} aria-hidden="true" />
             Añadir parte
           </button>
         </div>
@@ -553,6 +588,7 @@ function PartesModal({
 
       <div className="form-actions">
         <button className="btn btn--primary" onClick={onClose}>
+          <Check size={16} aria-hidden="true" />
           Hecho
         </button>
       </div>
@@ -682,9 +718,11 @@ function NuevaCertificacionModal({
       </div>
       <div className="form-actions">
         <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
           Cancelar
         </button>
         <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+          {!guardando && <Plus size={16} aria-hidden="true" />}
           {guardando ? 'Creando…' : 'Crear certificación'}
         </button>
       </div>

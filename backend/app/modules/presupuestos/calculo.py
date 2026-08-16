@@ -14,12 +14,18 @@ redondear al final produce descuadres de céntimos entre el papel y el total.
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import require_organization_id
-from app.modules.presupuestos.models import Concepto, Descomposicion, OrigenPrecio
+from app.modules.presupuestos.models import (
+    Concepto,
+    Descomposicion,
+    HistoricoPrecioConcepto,
+    OrigenPrecio,
+    PrecioSuministro,
+)
 
 # Tope de profundidad del árbol. Existe como red de seguridad: los ciclos se
 # impiden al insertar, pero un dato corrupto no debe colgar una request.
@@ -94,6 +100,39 @@ async def ancestros_en_orden(
     return [fila[0] for fila in filas.all()]
 
 
+async def precio_referencia(
+    session: AsyncSession, concepto_id: uuid.UUID
+) -> Decimal | None:
+    """Precio de suministro que usará el precio básico.
+
+    Preferencia: la tarifa marcada como preferente; en su defecto, la vigente
+    más reciente. Se devuelve neto de descuento y sin redondear.
+
+    Vivía en `catalogo.service` cuando `PrecioSuministro` colgaba de
+    `Producto` (Fase 2); se muda aquí al fusionarse `Producto` en `Concepto`
+    (Fase 25).
+    """
+    org_id = require_organization_id()
+    rows = await session.execute(
+        select(PrecioSuministro)
+        .where(
+            PrecioSuministro.concepto_id == concepto_id,
+            PrecioSuministro.organization_id == org_id,
+            or_(
+                PrecioSuministro.vigente_hasta.is_(None),
+                PrecioSuministro.vigente_hasta >= func.current_date(),
+            ),
+        )
+        .order_by(
+            PrecioSuministro.es_preferente.desc(),
+            PrecioSuministro.vigente_desde.desc(),
+        )
+        .limit(1)
+    )
+    suministro = rows.scalar_one_or_none()
+    return suministro.precio_neto if suministro else None
+
+
 async def calcular_precio(session: AsyncSession, concepto: Concepto) -> Decimal:
     """Precio que le corresponde al concepto según su origen de precio.
 
@@ -104,12 +143,7 @@ async def calcular_precio(session: AsyncSession, concepto: Concepto) -> Decimal:
         return concepto.precio
 
     if concepto.origen_precio == OrigenPrecio.PRODUCTO:
-        if concepto.producto_id is None:
-            return concepto.precio
-        # presupuestos depende de catalogo, así que la importación es legítima.
-        from app.modules.catalogo.service import precio_referencia
-
-        referencia = await precio_referencia(session, concepto.producto_id)
+        referencia = await precio_referencia(session, concepto.id)
         return redondear_precio(referencia) if referencia is not None else Decimal("0.00")
 
     return await _precio_desde_descomposicion(session, concepto)
@@ -133,6 +167,24 @@ async def _precio_desde_descomposicion(
         porcentaje = Decimal("1") + concepto.costes_indirectos / Decimal("100")
         return redondear_precio(coste_directo * porcentaje)
     return redondear_precio(coste_directo)
+
+
+async def registrar_historico(session: AsyncSession, concepto: Concepto) -> None:
+    """Añade una fila al histórico de precios del concepto.
+
+    Append-only: nunca se actualiza ni se borra una fila existente, es lo que
+    permite responder "qué costes ha tenido" en su ficha. Se llama tanto al
+    fijar el precio inicial (alta) como cada vez que la cascada lo cambia de
+    verdad.
+    """
+    session.add(
+        HistoricoPrecioConcepto(
+            organization_id=concepto.organization_id,
+            concepto_id=concepto.id,
+            precio=concepto.precio,
+            origen_precio=concepto.origen_precio,
+        )
+    )
 
 
 async def recalcular_cascada(
@@ -167,6 +219,7 @@ async def recalcular_cascada(
         if nuevo != concepto.precio:
             concepto.precio = nuevo
             modificados.append(cid)
+            await registrar_historico(session, concepto)
             # Se vuelca antes de seguir subiendo: el padre lee el precio del
             # hijo por SQL, no desde el objeto en memoria.
             await session.flush()
@@ -181,45 +234,50 @@ async def recalcular_cascada(
     return modificados
 
 
-async def recalcular_por_producto(
-    session: AsyncSession, producto_id: uuid.UUID
-) -> list[uuid.UUID]:
-    """Punto de entrada de la cascada cuando cambia una tarifa de proveedor.
-
-    Lo invoca el manejador del evento que emite `catalogo`.
-    """
-    org_id = require_organization_id()
-    afectados = (
-        await session.execute(
-            select(Concepto.id).where(
-                Concepto.producto_id == producto_id,
-                Concepto.origen_precio == OrigenPrecio.PRODUCTO,
-                Concepto.organization_id == org_id,
-            )
-        )
-    ).scalars()
-
-    modificados: list[uuid.UUID] = []
-    for concepto_id in afectados:
-        modificados.extend(await recalcular_cascada(session, concepto_id))
-    return modificados
-
-
 async def donde_se_usa(
     session: AsyncSession, concepto_id: uuid.UUID
 ) -> list[tuple[Concepto, Decimal]]:
-    """Conceptos que contienen a este directamente, con su rendimiento.
+    """Conceptos que contienen a este, directa o indirectamente.
 
-    Se consulta antes de borrar y para navegar hacia arriba en el editor.
+    El rendimiento devuelto es el efectivo: cuánto de este concepto entra por
+    cada unidad del ancestro, acumulando `rendimiento x factor` a lo largo de
+    la cadena y sumando entre rutas distintas cuando hay rombos (un auxiliar
+    que entra dos veces en el mismo unitario por caminos diferentes consume el
+    doble, no el mismo rendimiento contado una vez).
     """
     org_id = require_organization_id()
-    filas = await session.execute(
-        select(Concepto, Descomposicion.rendimiento)
-        .join(Descomposicion, Descomposicion.padre_id == Concepto.id)
-        .where(
-            Descomposicion.hijo_id == concepto_id,
-            Concepto.organization_id == org_id,
+    consulta = text(
+        """
+        WITH RECURSIVE subida(id, profundidad, acumulado) AS (
+            SELECT d.padre_id, 1, d.rendimiento * d.factor
+            FROM presupuestos.descomposicion d
+            WHERE d.hijo_id = CAST(:inicio AS uuid)
+          UNION ALL
+            SELECT d.padre_id, s.profundidad + 1, s.acumulado * d.rendimiento * d.factor
+            FROM presupuestos.descomposicion d
+            JOIN subida s ON d.hijo_id = s.id
+            WHERE s.profundidad < :max_prof
         )
-        .order_by(Concepto.codigo)
+        SELECT id, SUM(acumulado)
+        FROM subida
+        GROUP BY id
+        """
     )
-    return [(fila[0], fila[1]) for fila in filas.all()]
+    filas = await session.execute(
+        consulta, {"inicio": str(concepto_id), "max_prof": PROFUNDIDAD_MAXIMA}
+    )
+    acumulado: dict[uuid.UUID, Decimal] = {fila[0]: fila[1] for fila in filas.all()}
+    if not acumulado:
+        return []
+
+    conceptos = (
+        await session.execute(
+            select(Concepto).where(
+                Concepto.id.in_(acumulado), Concepto.organization_id == org_id
+            )
+        )
+    ).scalars()
+    return sorted(
+        ((concepto, acumulado[concepto.id]) for concepto in conceptos),
+        key=lambda par: par[0].codigo,
+    )

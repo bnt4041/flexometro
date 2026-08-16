@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 
-import { Checkbox, ErrorNotice, Field, ModalPantalla, EmptyState } from '../components/ui'
+import { Checkbox, ErrorNotice, Field, ModalPantalla, EmptyState, Tooltip } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { api } from '../lib/api'
@@ -103,9 +104,12 @@ export function Terceros() {
           <h1 className="page-title">{t('terceros.titulo')}</h1>
           <p className="page-lead">{t('terceros.descripcion')}</p>
         </div>
-        <Link className="btn btn--primary" to="nuevo">
-          {t('terceros.nuevo')}
-        </Link>
+        <Tooltip texto={t('terceros.nuevo')}>
+          <Link className="btn btn--primary" to="nuevo">
+            <Plus size={16} aria-hidden="true" />
+            {t('terceros.nuevo')}
+          </Link>
+        </Tooltip>
       </div>
 
       <ErrorNotice error={error} />

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowRight, Upload } from 'lucide-react'
 
 import { Checkbox, EmptyState, ErrorNotice, Field } from '../components/ui'
 import { api } from '../lib/api'
@@ -187,6 +188,7 @@ export function ImportarBC3() {
                 disabled={trabajando}
                 onClick={() => void importar()}
               >
+                {!trabajando && <Upload size={16} aria-hidden="true" />}
                 {trabajando ? 'Importando…' : 'Importar'}
               </button>
             </div>
@@ -228,6 +230,7 @@ export function ImportarBC3() {
                 onClick={() => navegar(`/presupuestos/${resultado.presupuesto_id}`)}
               >
                 Ver el presupuesto importado
+                <ArrowRight size={16} aria-hidden="true" />
               </button>
             )}
           </div>

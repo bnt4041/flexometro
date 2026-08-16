@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
+import { Pencil, Plus, Trash2, X } from 'lucide-react'
 
 import { EmptyState, ErrorNotice, Field, ModalPantalla, formatoImporte } from '../components/ui'
 import { api } from '../lib/api'
@@ -43,6 +44,7 @@ export function AdminTarifas() {
           </p>
         </div>
         <Link className="btn btn--primary" to="nueva">
+          <Plus size={16} aria-hidden="true" />
           Nueva tarifa
         </Link>
       </div>
@@ -82,6 +84,7 @@ export function AdminTarifas() {
                   </td>
                   <td className="table__actions">
                     <Link className="btn btn--sm" to={`${t.id}`}>
+                      <Pencil size={14} aria-hidden="true" />
                       Editar
                     </Link>
                   </td>
@@ -194,8 +197,11 @@ export function FormularioModulos({
                   />
                 </td>
                 <td className="table__actions">
-                  <button className="btn btn--sm btn--danger" onClick={() => quitarFila(i)}>
-                    ×
+                  <button
+                    className="btn btn--sm btn--danger btn--solo-icono"
+                    onClick={() => quitarFila(i)}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
                   </button>
                 </td>
               </tr>
@@ -204,6 +210,7 @@ export function FormularioModulos({
         </table>
       </div>
       <button className="btn btn--sm" style={{ marginTop: 'var(--sp-2)' }} onClick={anadirFila}>
+        <Plus size={14} aria-hidden="true" />
         Añadir módulo
       </button>
     </>
@@ -284,6 +291,7 @@ export function TarifaCrear() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -291,6 +299,7 @@ export function TarifaCrear() {
             disabled={guardando || nombre.trim() === ''}
             onClick={() => void guardar()}
           >
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Creando…' : 'Crear tarifa'}
           </button>
         </div>

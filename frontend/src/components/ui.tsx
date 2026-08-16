@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+
+import { Icon } from './Icon'
+import type { NombreIcono } from './Icon'
 
 export function Field({
   label,
@@ -17,6 +21,90 @@ export function Field({
       {hint && <span className="field__hint">{hint}</span>}
     </label>
   )
+}
+
+/** Popover explicativo al pasar el ratón (o el foco, por teclado) — Fase 26.
+ *  Envuelve el elemento que lo dispara; no captura clics, solo hover/focus,
+ *  así que no interfiere con el botón que rodea. */
+export function Tooltip({
+  texto,
+  posicion = 'arriba',
+  children,
+}: {
+  texto: string
+  posicion?: 'arriba' | 'abajo'
+  children: ReactNode
+}) {
+  const [visible, setVisible] = useState(false)
+  const id = useId()
+
+  return (
+    <span
+      className="tooltip-envoltorio"
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+      onFocus={() => setVisible(true)}
+      onBlur={() => setVisible(false)}
+    >
+      {children}
+      {visible && (
+        <span role="tooltip" id={id} className={`tooltip-globo tooltip-globo--${posicion}`}>
+          {texto}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** Botón con icono + texto, y un tooltip que explica la acción al pasar el
+ *  ratón por encima — Fase 26. `soloIcono` lo reduce a un botón cuadrado
+ *  (para filas de tabla muy densas), pero el tooltip sigue dando el texto
+ *  completo: un icono sin más nunca es autoexplicativo del todo. */
+export function IconButton({
+  icono,
+  texto,
+  tooltip,
+  soloIcono = false,
+  variante,
+  tamano,
+  onClick,
+  disabled,
+  type = 'button',
+}: {
+  icono: NombreIcono
+  texto: string
+  tooltip?: string
+  soloIcono?: boolean
+  variante?: 'primary' | 'danger'
+  tamano?: 'sm'
+  onClick?: () => void
+  disabled?: boolean
+  type?: 'button' | 'submit'
+}) {
+  const clases = [
+    'btn',
+    variante === 'primary' && 'btn--primary',
+    variante === 'danger' && 'btn--danger',
+    tamano === 'sm' && 'btn--sm',
+    soloIcono && 'btn--solo-icono',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  const boton = (
+    <button
+      type={type}
+      className={clases}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={soloIcono ? texto : undefined}
+    >
+      <Icon name={icono} />
+      {!soloIcono && <span>{texto}</span>}
+    </button>
+  )
+
+  return <Tooltip texto={tooltip ?? texto}>{boton}</Tooltip>
 }
 
 export function Checkbox({
@@ -60,9 +148,11 @@ export function Modal({
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="modal__head">
           <span className="modal__title">{title}</span>
-          <button className="modal__close" onClick={onClose} aria-label="Cerrar">
-            ×
-          </button>
+          <Tooltip texto="Cerrar">
+            <button className="modal__close" onClick={onClose} aria-label="Cerrar">
+              <Icon name="cerrar" />
+            </button>
+          </Tooltip>
         </div>
         {children}
       </div>
@@ -103,9 +193,11 @@ export function ModalPantalla({
       >
         <div className="modal-pantalla__head">
           <span className="modal-pantalla__title">{title}</span>
-          <button className="modal-pantalla__close" onClick={onClose} aria-label="Cerrar">
-            ×
-          </button>
+          <Tooltip texto="Cerrar" posicion="abajo">
+            <button className="modal-pantalla__close" onClick={onClose} aria-label="Cerrar">
+              <Icon name="cerrar" />
+            </button>
+          </Tooltip>
         </div>
         <div className="modal-pantalla__body">
           <div className="content__inner">{children}</div>
@@ -154,6 +246,7 @@ export function Pager({
           disabled={offset === 0}
           onClick={() => onChange(Math.max(0, offset - limit))}
         >
+          <ChevronLeft size={14} aria-hidden="true" />
           Anterior
         </button>
         <button
@@ -162,6 +255,7 @@ export function Pager({
           onClick={() => onChange(offset + limit)}
         >
           Siguiente
+          <ChevronRight size={14} aria-hidden="true" />
         </button>
       </div>
     </div>
