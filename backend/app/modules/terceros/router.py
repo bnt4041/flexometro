@@ -11,7 +11,10 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.terceros import service
+from app.modules.terceros.models import EntidadContacto
 from app.modules.terceros.schemas import (
+    ContactoAsociadoCreate,
+    ContactoAsociadoOut,
     ContactoCreate,
     ContactoOut,
     ContactoUpdate,
@@ -193,8 +196,74 @@ async def eliminar_contacto(
     await service.eliminar_contacto(session, contacto_id)
 
 
+# --- Contactos asociados (Fase 28) ---
+
+contactos_asociados_router = APIRouter(
+    prefix="/api/contactos-asociados",
+    tags=["terceros"],
+    dependencies=[Depends(require_module("terceros"))],
+)
+
+
+def _asociado_a_out(asociado) -> ContactoAsociadoOut:
+    contacto = asociado.contacto
+    return ContactoAsociadoOut(
+        id=asociado.id,
+        entidad=asociado.entidad,
+        entidad_id=asociado.entidad_id,
+        contacto_id=asociado.contacto_id,
+        rol=asociado.rol,
+        created_at=asociado.created_at,
+        contacto_nombre=contacto.nombre,
+        contacto_apellidos=contacto.apellidos,
+        contacto_cargo=contacto.cargo,
+        contacto_email=contacto.email,
+        contacto_telefono=contacto.telefono,
+    )
+
+
+@contactos_asociados_router.get("", response_model=list[ContactoAsociadoOut])
+async def listar_asociados(
+    entidad: EntidadContacto,
+    entidad_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[ContactoAsociadoOut]:
+    asociados = await service.listar_asociados(session, entidad, entidad_id)
+    return [_asociado_a_out(a) for a in asociados]
+
+
+@contactos_asociados_router.post(
+    "", response_model=ContactoAsociadoOut, status_code=status.HTTP_201_CREATED
+)
+async def asociar_contacto(
+    entidad: EntidadContacto,
+    entidad_id: uuid.UUID,
+    datos: ContactoAsociadoCreate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+) -> ContactoAsociadoOut:
+    try:
+        asociado = await service.asociar_contacto(session, entidad, entidad_id, datos)
+    except service.AsociacionDuplicada as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _asociado_a_out(asociado)
+
+
+@contactos_asociados_router.delete("/{asociacion_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_asociacion(
+    asociacion_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+) -> None:
+    encontrado = await service.eliminar_asociacion(session, asociacion_id)
+    if not encontrado:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asociación no encontrada")
+
+
 # Router del módulo: FastAPI monta un único router por módulo, así que se
-# agregan aquí los dos grupos de endpoints (prefijos distintos, mismo módulo).
+# agregan aquí los tres grupos de endpoints (prefijos distintos, mismo módulo).
 router = APIRouter()
 router.include_router(terceros_router)
 router.include_router(contactos_router)
+router.include_router(contactos_asociados_router)

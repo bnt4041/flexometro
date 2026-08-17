@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Plus, Save, Star, Trash2, X } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
 import {
   Checkbox,
   EmptyState,
@@ -134,30 +136,8 @@ export function BancoPrecioDetalle() {
     }
   }
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {concepto.resumen} <span className="table__code">{concepto.codigo}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
-      <div className="page-head">
-        <p className="page-lead" style={{ marginBottom: 0 }}>
-          <span className={`chip chip--${concepto.tipo}`}>
-            {ETIQUETA_TIPO_CONCEPTO[concepto.tipo]}
-          </span>{' '}
-          {ETIQUETA_NATURALEZA[concepto.naturaleza]}
-          {concepto.clase && <> · unitario {concepto.clase}</>} · precio{' '}
-          {ETIQUETA_ORIGEN_PRECIO[concepto.origen_precio].toLowerCase()}
-        </p>
-        <div className="precio-cabecera">
-          <div className="precio-cabecera__valor">{formatoImporte(concepto.precio)} €</div>
-          <div className="precio-cabecera__unidad">por {concepto.unidad}</div>
-        </div>
-      </div>
-
+  const pestanaFicha = (
+    <>
       <ErrorNotice error={error} />
 
       <div className="card">
@@ -290,13 +270,6 @@ export function BancoPrecioDetalle() {
         </div>
 
         <div className="form-actions">
-          <Tooltip texto="Eliminar esta ficha del banco de precios">
-            <button className="btn btn--danger" onClick={() => void eliminar()}>
-              <Trash2 size={16} aria-hidden="true" />
-              Eliminar
-            </button>
-          </Tooltip>
-          <span style={{ flex: 1 }} />
           <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
             <X size={16} aria-hidden="true" />
             Descartar
@@ -313,16 +286,16 @@ export function BancoPrecioDetalle() {
       </div>
 
       <CamposLibres entidad="concepto" entidadId={id} />
+    </>
+  )
 
-      {/* --- Descompuesto --- */}
-      <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
-        <div>
-          <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Descompuesto</h2>
-          <p className="page-lead">
-            Cada importe se redondea a dos decimales antes de sumar, como en Presto: así el
-            descompuesto impreso cuadra columna a columna.
-          </p>
-        </div>
+  const pestanaDescompuesto = (
+    <>
+      <div className="page-head">
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          Cada importe se redondea a dos decimales antes de sumar, como en Presto: así el
+          descompuesto impreso cuadra columna a columna.
+        </p>
         <button className="btn" onClick={() => setAnadiendoLinea(true)}>
           <Plus size={16} aria-hidden="true" />
           Añadir línea
@@ -390,15 +363,27 @@ export function BancoPrecioDetalle() {
         )}
       </div>
 
-      {/* --- Tarifas de proveedor --- */}
-      <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
-        <div>
-          <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Tarifas de proveedor</h2>
-          <p className="page-lead">
-            Precio de suministro: proveedor + fecha. Se guarda con cuatro decimales porque las
-            tarifas llegan así; el redondeo a dos se aplica al encadenar conceptos.
-          </p>
-        </div>
+      {anadiendoLinea && (
+        <AnadirLineaModal
+          conceptoId={id}
+          excluir={concepto.id}
+          onClose={() => setAnadiendoLinea(false)}
+          onAnadida={() => {
+            setAnadiendoLinea(false)
+            void cargar()
+          }}
+        />
+      )}
+    </>
+  )
+
+  const pestanaTarifas = (
+    <>
+      <div className="page-head">
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          Precio de suministro: proveedor + fecha. Se guarda con cuatro decimales porque las
+          tarifas llegan así; el redondeo a dos se aplica al encadenar conceptos.
+        </p>
         <button className="btn" onClick={() => setNuevaTarifa(true)}>
           <Plus size={16} aria-hidden="true" />
           Añadir tarifa
@@ -433,10 +418,22 @@ export function BancoPrecioDetalle() {
         )}
       </div>
 
-      {/* --- Dónde participa --- */}
-      <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650, marginTop: 'var(--sp-6)' }}>
-        Dónde participa
-      </h2>
+      {nuevaTarifa && (
+        <NuevaTarifaModal
+          conceptoId={id}
+          onClose={() => setNuevaTarifa(false)}
+          onCreada={() => {
+            setNuevaTarifa(false)
+            void cargar()
+          }}
+        />
+      )}
+    </>
+  )
+
+  const pestanaUso = (
+    <>
+      <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Dónde participa</h2>
       <p className="page-lead">
         Otros conceptos que lo contienen (directa o indirectamente) y partidas de presupuestos
         que lo usan.
@@ -516,7 +513,6 @@ export function BancoPrecioDetalle() {
         )}
       </div>
 
-      {/* --- Ventas --- */}
       {ventasDisponibles && (
         <>
           <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650, marginTop: 'var(--sp-6)' }}>
@@ -544,12 +540,14 @@ export function BancoPrecioDetalle() {
           </div>
         </>
       )}
+    </>
+  )
 
-      {/* --- Histórico de precios --- */}
-      <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650, marginTop: 'var(--sp-6)' }}>
-        Qué costes ha tenido
-      </h2>
-      <p className="page-lead">Cada fila es un precio que este concepto ha llegado a tener.</p>
+  const pestanaHistorico = (
+    <>
+      <p className="page-lead" style={{ marginTop: 0 }}>
+        Cada fila es un precio que este concepto ha llegado a tener.
+      </p>
 
       <div className="table-wrap">
         {historico.length === 0 ? (
@@ -575,30 +573,51 @@ export function BancoPrecioDetalle() {
           </table>
         )}
       </div>
+    </>
+  )
 
-      {anadiendoLinea && (
-        <AnadirLineaModal
-          conceptoId={id}
-          excluir={concepto.id}
-          onClose={() => setAnadiendoLinea(false)}
-          onAnadida={() => {
-            setAnadiendoLinea(false)
-            void cargar()
-          }}
-        />
-      )}
+  const pestanas: PestanaFicha[] = [
+    { id: 'ficha', etiqueta: 'Ficha', icono: 'datos', contenido: pestanaFicha },
+    { id: 'descompuesto', etiqueta: 'Descompuesto', icono: 'layers', contenido: pestanaDescompuesto },
+    { id: 'tarifas', etiqueta: 'Tarifas', icono: 'truck', contenido: pestanaTarifas },
+    { id: 'uso', etiqueta: 'Dónde participa', icono: 'buscar', contenido: pestanaUso },
+    { id: 'historico', etiqueta: 'Histórico', icono: 'recalcular', contenido: pestanaHistorico },
+  ]
 
-      {nuevaTarifa && (
-        <NuevaTarifaModal
-          conceptoId={id}
-          onClose={() => setNuevaTarifa(false)}
-          onCreada={() => {
-            setNuevaTarifa(false)
-            void cargar()
-          }}
-        />
-      )}
-    </ModalPantalla>
+  return (
+    <FichaDetalle
+      titulo={
+        <>
+          {concepto.resumen} <span className="table__code">{concepto.codigo}</span>
+        </>
+      }
+      subtitulo={
+        <div className="page-head" style={{ marginBottom: 0 }}>
+          <p className="page-lead" style={{ marginBottom: 0 }}>
+            <span className={`chip chip--${concepto.tipo}`}>
+              {ETIQUETA_TIPO_CONCEPTO[concepto.tipo]}
+            </span>{' '}
+            {ETIQUETA_NATURALEZA[concepto.naturaleza]}
+            {concepto.clase && <> · unitario {concepto.clase}</>} · precio{' '}
+            {ETIQUETA_ORIGEN_PRECIO[concepto.origen_precio].toLowerCase()}
+          </p>
+          <div className="precio-cabecera">
+            <div className="precio-cabecera__valor">{formatoImporte(concepto.precio)} €</div>
+            <div className="precio-cabecera__unidad">por {concepto.unidad}</div>
+          </div>
+        </div>
+      }
+      acciones={
+        <Tooltip texto="Eliminar esta ficha del banco de precios">
+          <button className="btn btn--danger" onClick={() => void eliminar()}>
+            <Trash2 size={16} aria-hidden="true" />
+            Eliminar
+          </button>
+        </Tooltip>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
   )
 }
 

@@ -214,9 +214,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Tooltip>
           </div>
         </header>
-        <main className="content">
-          <div className="content__inner">{children}</div>
-        </main>
+        <main className="content">{children}</main>
       </div>
     </div>
   )

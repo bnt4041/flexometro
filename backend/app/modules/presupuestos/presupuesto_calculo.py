@@ -3,12 +3,13 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TIPO_IVA_PORCENTAJE
 from app.core.redondeo import redondear_medicion, redondear_precio
 from app.core.tenancy import require_organization_id
+from app.modules.presupuestos.calculo import PROFUNDIDAD_MAXIMA
 from app.modules.presupuestos.models import Concepto
 from app.modules.presupuestos.models_presupuesto import (
     Capitulo,
@@ -243,6 +244,63 @@ def importes_por_capitulo(
     for capitulo in capitulos:
         sumar(capitulo)
     return acumulado
+
+
+async def explosion_recursos(
+    session: AsyncSession, presupuesto_id: uuid.UUID
+) -> list[tuple[Concepto, Decimal]]:
+    """Explota hacia abajo el árbol de descomposición de TODAS las partidas de
+    un presupuesto, para saber cuánto se necesita de cada recurso (material,
+    mano de obra...) en total. Dirección inversa de `calculo.donde_se_usa`
+    (que sube desde un concepto hasta quién lo contiene); aquí se baja desde
+    cada partida hasta sus componentes, acumulando `rendimiento x factor` a lo
+    largo de cada cadena y multiplicando por la medición de la partida de
+    origen. Mismo criterio de suma que `donde_se_usa` para resolver rombos: un
+    material que entra dos veces en el mismo unitario por caminos distintos
+    consume el doble, no el mismo una vez.
+
+    Devuelve TODOS los conceptos alcanzados en la descomposición (no solo
+    materiales o mano de obra) — filtrar por `naturaleza` es cosa de quien
+    llama, esta función no sabe para qué se va a usar el resultado.
+    """
+    org_id = require_organization_id()
+    consulta = text(
+        """
+        WITH RECURSIVE bajada(hijo_id, acumulado, profundidad) AS (
+            SELECT d.hijo_id, d.rendimiento * d.factor * p.medicion, 1
+            FROM presupuestos.partida p
+            JOIN presupuestos.descomposicion d ON d.padre_id = p.concepto_id
+            WHERE p.presupuesto_id = CAST(:presupuesto_id AS uuid)
+              AND p.concepto_id IS NOT NULL
+          UNION ALL
+            SELECT d.hijo_id, b.acumulado * d.rendimiento * d.factor, b.profundidad + 1
+            FROM presupuestos.descomposicion d
+            JOIN bajada b ON d.padre_id = b.hijo_id
+            WHERE b.profundidad < :max_prof
+        )
+        SELECT hijo_id, SUM(acumulado)
+        FROM bajada
+        GROUP BY hijo_id
+        """
+    )
+    filas = await session.execute(
+        consulta, {"presupuesto_id": str(presupuesto_id), "max_prof": PROFUNDIDAD_MAXIMA}
+    )
+    acumulado: dict[uuid.UUID, Decimal] = {fila[0]: fila[1] for fila in filas.all()}
+    if not acumulado:
+        return []
+
+    conceptos = (
+        await session.execute(
+            select(Concepto).where(
+                Concepto.id.in_(acumulado), Concepto.organization_id == org_id
+            )
+        )
+    ).scalars()
+    return sorted(
+        ((concepto, acumulado[concepto.id]) for concepto in conceptos),
+        key=lambda par: par[0].codigo,
+    )
 
 
 def pem_de(capitulos: list[Capitulo], acumulado: dict[uuid.UUID, Decimal]) -> Decimal:

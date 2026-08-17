@@ -16,10 +16,12 @@ import {
   Layers,
   ListPlus,
   Minus,
+  MoreVertical,
   Pencil,
   Plus,
   Receipt,
   RefreshCw,
+  Repeat,
   Ruler,
   Save,
   Search,
@@ -27,6 +29,7 @@ import {
   Settings,
   Sparkles,
   Star,
+  StickyNote,
   Trash2,
   Truck,
   Upload,
@@ -54,6 +57,8 @@ const ICONOS: Record<string, LucideIcon> = {
   sparkles: Sparkles,
   'hard-hat': HardHat,
   'list-plus': ListPlus,
+  'sticky-note': StickyNote,
+  'file-text': FileText,
 
   // Acciones genéricas de formulario/listado
   nuevo: Plus,
@@ -79,6 +84,8 @@ const ICONOS: Record<string, LucideIcon> = {
   columnas: Columns3,
   confirmar: Check,
   aviso: CircleAlert,
+  'mas-vertical': MoreVertical,
+  estado: Repeat,
 
   // Pestañas de la ficha genérica (Fase 27)
   datos: FileText,

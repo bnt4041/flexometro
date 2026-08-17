@@ -141,3 +141,54 @@ class Contacto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMi
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     tercero: Mapped[Tercero | None] = relationship(back_populates="contactos")
+
+
+class EntidadContacto(StrEnum):
+    """Qué tipo de registro puede llevar contactos asociados — Fase 28.
+    Deliberadamente una lista corta y cerrada (no la reutiliza de
+    `EntidadCampoLibre`, que es mucho más amplia): solo tiene sentido un
+    interlocutor humano en los objetos "grandes" del negocio, no en sus
+    líneas."""
+
+    PRESUPUESTO = "presupuesto"
+    OBRA = "obra"
+    CERTIFICACION = "certificacion"
+    FACTURA = "factura"
+
+
+class ContactoAsociado(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
+    """Vínculo entre un `Contacto` y cualquier otro registro del negocio
+    (presupuesto, obra, certificación, factura...) — Fase 28.
+
+    `Contacto` no cambia: sigue siendo, opcionalmente, de un `Tercero`. Esto
+    es una asociación aparte, N a N, para poder decir "esta persona está
+    involucrada en este presupuesto" sin necesitar una columna nueva en cada
+    tabla que quiera tener contactos — mismo motivo que `CampoLibreValor`
+    guarda `entidad`/`entidad_id` sueltos en vez de una FK por tabla.
+    """
+
+    __tablename__ = "contacto_asociado"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "entidad", "entidad_id", "contacto_id",
+            name="contacto_asociado_unique",
+        ),
+        Index("ix_terceros_contacto_asociado_entidad", "organization_id", "entidad", "entidad_id"),
+        {"schema": SCHEMA},
+    )
+
+    entidad: Mapped[EntidadContacto] = mapped_column(
+        enum_column(EntidadContacto, "entidad_contacto"), nullable=False
+    )
+    entidad_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    contacto_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.contacto.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Libre, para matizar el porqué del vínculo ("decisor", "técnico de
+    # obra"...) — no es un enum porque no hay un vocabulario cerrado que
+    # tenga sentido igual en un presupuesto que en una factura.
+    rol: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    contacto: Mapped[Contacto] = relationship()

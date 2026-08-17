@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Ban, FileDown, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 
+import { ContactosAsociados } from '../components/ContactosAsociados'
+import { Documentos } from '../components/Documentos'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
+import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
+import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_FACTURA, ETIQUETA_SITUACION_COBRO, api, descargar } from '../lib/api'
 import type { FacturaDetalle as Detalle } from '../lib/api'
 import { useContextoFacturas } from './Facturas'
@@ -76,53 +82,8 @@ export function FacturaDetalle() {
     ? `${factura.serie}/${String(factura.numero).padStart(5, '0')}`
     : `${factura.serie} · borrador`
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {factura.cliente_razon_social} <span className="table__code">{numeroFiscal}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
-      <div className="page-head">
-        <p className="page-lead" style={{ marginBottom: 0 }}>
-          {factura.concepto}
-          {factura.fecha_emision && <> · emitida {factura.fecha_emision}</>}
-        </p>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <Tooltip texto="Descargar el PDF de esta factura">
-            <button
-              className="btn"
-              onClick={() =>
-                void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
-                  abrir: true,
-                }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-              }
-            >
-              <FileDown size={16} aria-hidden="true" />
-              PDF
-            </button>
-          </Tooltip>
-          {factura.estado === 'borrador' && (
-            <Tooltip texto="Emitir: asigna número fiscal definitivo">
-              <button className="btn btn--primary" onClick={() => void emitir()}>
-                <Send size={16} aria-hidden="true" />
-                Emitir
-              </button>
-            </Tooltip>
-          )}
-          {factura.estado === 'emitida' && (
-            <Tooltip texto="Anular esta factura (conserva su número)">
-              <button className="btn btn--danger" onClick={() => setAnulando(true)}>
-                <Ban size={16} aria-hidden="true" />
-                Anular
-              </button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
-
+  const pestanaDatos = (
+    <>
       <ErrorNotice error={error} />
       {aviso && <div className="notice notice--ok">{aviso}</div>}
 
@@ -152,83 +113,111 @@ export function FacturaDetalle() {
         </div>
       )}
 
-      <div className="card resumen-totales">
-        <div className="resumen-totales__fila">
-          <span>Base imponible</span>
-          <span className="resumen-totales__valor">{formatoImporte(factura.base_imponible)} €</span>
-        </div>
-        <div className="resumen-totales__fila is-suave">
-          <span>{factura.inversion_sujeto_pasivo ? 'IVA — inversión del sujeto pasivo' : 'IVA'}</span>
-          <span className="resumen-totales__valor">{formatoImporte(factura.cuota_iva)} €</span>
-        </div>
-        <div className="resumen-totales__fila is-total">
-          <span>Total</span>
-          <span className="resumen-totales__valor">{formatoImporte(factura.total)} €</span>
-        </div>
-      </div>
-
-      {factura.estado === 'emitida' && (
-        <>
-          <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
-            <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Cobros</h2>
-            {factura.situacion_cobro !== 'cobrada' && (
-              <Tooltip texto="Registrar un cobro para esta factura">
-                <button className="btn" onClick={() => setCobrando(true)}>
-                  <Plus size={16} aria-hidden="true" />
-                  Registrar cobro
-                </button>
-              </Tooltip>
-            )}
-          </div>
-
-          <div className="table-wrap">
-            {factura.cobros.length === 0 ? (
-              <EmptyState title="Sin cobros registrados" />
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Forma de pago</th>
-                    <th className="table__num">Importe</th>
-                    <th className="table__actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {factura.cobros.map((c) => (
-                    <tr key={c.id}>
-                      <td>{c.fecha}</td>
-                      <td>{c.forma_pago ?? <span className="muted">—</span>}</td>
-                      <td className="table__num">{formatoImporte(c.importe)}</td>
-                      <td className="table__actions">
-                        <Tooltip texto="Eliminar este cobro">
-                          <button
-                            className="btn btn--sm btn--danger btn--solo-icono"
-                            onClick={() => void eliminarCobro(c.id)}
-                          >
-                            <Trash2 size={14} aria-hidden="true" />
-                          </button>
-                        </Tooltip>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="fila-total">
-                    <td colSpan={2} className="table__num total-label">
-                      Pendiente
-                    </td>
-                    <td className="table__num">
-                      <strong>{formatoImporte(factura.pendiente)}</strong>
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            )}
-          </div>
-        </>
-      )}
+      <WidgetGrid
+        id="factura-datos"
+        widgets={[
+          ...(factura.estado === 'emitida'
+            ? [
+                {
+                  id: 'cobros',
+                  titulo: 'Cobros',
+                  x: 0,
+                  y: 0,
+                  w: 8,
+                  h: 10,
+                  minW: 4,
+                  minH: 5,
+                  contenido: (
+                    <>
+                      {factura.situacion_cobro !== 'cobrada' && (
+                        <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
+                          <Tooltip texto="Registrar un cobro para esta factura">
+                            <button className="btn btn--sm" onClick={() => setCobrando(true)}>
+                              <Plus size={14} aria-hidden="true" />
+                              Registrar cobro
+                            </button>
+                          </Tooltip>
+                        </div>
+                      )}
+                      <div className="table-wrap">
+                        {factura.cobros.length === 0 ? (
+                          <EmptyState title="Sin cobros registrados" />
+                        ) : (
+                          <table className="table">
+                            <thead>
+                              <tr>
+                                <th>Fecha</th>
+                                <th>Forma de pago</th>
+                                <th className="table__num">Importe</th>
+                                <th className="table__actions" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {factura.cobros.map((c) => (
+                                <tr key={c.id}>
+                                  <td>{c.fecha}</td>
+                                  <td>{c.forma_pago ?? <span className="muted">—</span>}</td>
+                                  <td className="table__num">{formatoImporte(c.importe)}</td>
+                                  <td className="table__actions">
+                                    <Tooltip texto="Eliminar este cobro">
+                                      <button
+                                        className="btn btn--sm btn--danger btn--solo-icono"
+                                        onClick={() => void eliminarCobro(c.id)}
+                                      >
+                                        <Trash2 size={14} aria-hidden="true" />
+                                      </button>
+                                    </Tooltip>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="fila-total">
+                                <td colSpan={2} className="table__num total-label">
+                                  Pendiente
+                                </td>
+                                <td className="table__num">
+                                  <strong>{formatoImporte(factura.pendiente)}</strong>
+                                </td>
+                                <td />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        )}
+                      </div>
+                    </>
+                  ),
+                },
+              ]
+            : []),
+          {
+            id: 'resumen',
+            titulo: 'Resumen',
+            x: 8,
+            y: 0,
+            w: 4,
+            h: 10,
+            minW: 3,
+            minH: 5,
+            contenido: (
+              <div className="resumen-totales">
+                <div className="resumen-totales__fila">
+                  <span>Base imponible</span>
+                  <span className="resumen-totales__valor">{formatoImporte(factura.base_imponible)} €</span>
+                </div>
+                <div className="resumen-totales__fila is-suave">
+                  <span>{factura.inversion_sujeto_pasivo ? 'IVA — inversión del sujeto pasivo' : 'IVA'}</span>
+                  <span className="resumen-totales__valor">{formatoImporte(factura.cuota_iva)} €</span>
+                </div>
+                <div className="resumen-totales__fila is-total">
+                  <span>Total</span>
+                  <span className="resumen-totales__valor">{formatoImporte(factura.total)} €</span>
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      />
 
       {anulando && (
         <AnularModal
@@ -253,7 +242,80 @@ export function FacturaDetalle() {
           }}
         />
       )}
-    </ModalPantalla>
+    </>
+  )
+
+  const pestanas: PestanaFicha[] = [
+    { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    {
+      id: 'contactos',
+      etiqueta: 'Contactos',
+      icono: 'contactos',
+      contenido: <ContactosAsociados entidad="factura" entidadId={id} />,
+    },
+    {
+      id: 'crm',
+      etiqueta: 'CRM',
+      icono: 'crm',
+      contenido: <NotasCrm entidad="factura" entidadId={id} />,
+    },
+    {
+      id: 'documentos',
+      etiqueta: 'Documentos',
+      icono: 'documentos',
+      contenido: <Documentos entidad="factura" entidadId={id} />,
+    },
+  ]
+
+  return (
+    <FichaDetalle
+      titulo={
+        <>
+          {factura.cliente_razon_social} <span className="table__code">{numeroFiscal}</span>
+        </>
+      }
+      subtitulo={
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          {factura.concepto}
+          {factura.fecha_emision && <> · emitida {factura.fecha_emision}</>}
+        </p>
+      }
+      acciones={
+        <>
+          <Tooltip texto="Descargar el PDF de esta factura">
+            <button
+              className="btn"
+              onClick={() =>
+                void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
+                  abrir: true,
+                }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+              }
+            >
+              <FileDown size={16} aria-hidden="true" />
+              PDF
+            </button>
+          </Tooltip>
+          {factura.estado === 'borrador' && (
+            <Tooltip texto="Emitir: asigna número fiscal definitivo">
+              <button className="btn btn--primary" onClick={() => void emitir()}>
+                <Send size={16} aria-hidden="true" />
+                Emitir
+              </button>
+            </Tooltip>
+          )}
+          {factura.estado === 'emitida' && (
+            <Tooltip texto="Anular esta factura (conserva su número)">
+              <button className="btn btn--danger" onClick={() => setAnulando(true)}>
+                <Ban size={16} aria-hidden="true" />
+                Anular
+              </button>
+            </Tooltip>
+          )}
+        </>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
   )
 }
 

@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,8 +62,22 @@ class PartidaUpdate(BaseModel):
     texto: str | None = None
     unidad: str | None = Field(default=None, max_length=10)
     precio: Decimal | None = Field(default=None, ge=0)
+    # Solo se admite en partidas SIN líneas de medición: con líneas, la
+    # medición es la suma de sus parciales y escribirla a mano sería una
+    # mentira que el siguiente recálculo borraría. Ver `actualizar_partida`.
+    medicion: Decimal | None = Field(default=None, ge=0)
     orden: int | None = None
     capitulo_id: uuid.UUID | None = None
+    # Ponerlo a null suelta la partida del banco de precios (pasa a alzada):
+    # conserva su copia de código/descripción/precio, pero deja de seguir la
+    # cascada del cuadro.
+    concepto_id: uuid.UUID | None = None
+
+
+class ConvertirLinea(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: Literal["capitulo", "partida"]
 
 
 class PartidaOut(BaseModel):
@@ -79,6 +94,9 @@ class PartidaOut(BaseModel):
     medicion: Decimal
     importe: Decimal
     orden: int
+    # Si tiene líneas de medición, la medición es su suma y no se puede
+    # teclear directamente en la rejilla (Fase 33).
+    tiene_desglose: bool = False
 
 
 class PartidaDetalle(PartidaOut):
@@ -161,7 +179,10 @@ class PresupuestoUpdate(BaseModel):
     tipo_iva: TipoIVA | None = None
     inversion_sujeto_pasivo: bool | None = None
     precios_bloqueados: bool | None = None
+    tipo_obra: str | None = Field(default=None, max_length=120)
     notas: str | None = None
+    responsable_subject: str | None = Field(default=None, max_length=120)
+    responsable_nombre: str | None = Field(default=None, max_length=200)
 
 
 class PresupuestoOut(PresupuestoBase):
@@ -178,6 +199,8 @@ class PresupuestoOut(PresupuestoBase):
     created_at: datetime
     updated_at: datetime
     creado_por_nombre: str | None = None
+    responsable_subject: str | None = None
+    responsable_nombre: str | None = None
 
 
 class PresupuestoResumen(PresupuestoOut):
@@ -197,6 +220,60 @@ class PresupuestoDetalle(PresupuestoOut):
 
 class ResultadoSincronizacion(BaseModel):
     partidas_actualizadas: int
+
+
+# --- Edición por lotes (Fase 33: rejilla por teclado) ---
+
+
+class CambioLinea(BaseModel):
+    """Un cambio de celda sobre una línea del presupuesto.
+
+    Los campos no enviados no se tocan (`exclude_unset`), así que la rejilla
+    puede mandar solo lo que el usuario ha editado de verdad.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    tipo: Literal["capitulo", "partida"]
+    codigo: str | None = Field(default=None, max_length=32)
+    resumen: str | None = Field(default=None, max_length=250)
+    texto: str | None = None
+    unidad: str | None = Field(default=None, max_length=10)
+    precio: Decimal | None = Field(default=None, ge=0)
+    medicion: Decimal | None = Field(default=None, ge=0)
+
+
+class LoteLineas(BaseModel):
+    """Varios cambios de celda en una sola petición.
+
+    Escribir cientos de líneas a mano son cientos de ediciones de celda; una
+    petición (y una cascada de recálculo) por cada una haría la rejilla
+    inusable. El cliente acumula y manda por tandas.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    cambios: list[CambioLinea] = Field(default_factory=list)
+
+
+# --- Recursos agregados (Fase 31: widgets "Precios básicos" y "Recursos humanos") ---
+
+
+class RecursoAgregado(BaseModel):
+    concepto_id: uuid.UUID
+    codigo: str
+    resumen: str
+    unidad: str
+    cantidad: Decimal
+    precio: Decimal
+    importe: Decimal
+
+
+class RecursosPresupuesto(BaseModel):
+    materiales: list[RecursoAgregado] = Field(default_factory=list)
+    mano_obra: list[RecursoAgregado] = Field(default_factory=list)
+    horas_totales: Decimal
 
 
 # --- Versiones y plantillas ---

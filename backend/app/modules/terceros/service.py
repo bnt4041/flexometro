@@ -26,8 +26,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.core.visibilidad import organizaciones_visibles
-from app.modules.terceros.models import Contacto, Tercero
+from app.modules.terceros.models import Contacto, ContactoAsociado, EntidadContacto, Tercero
 from app.modules.terceros.schemas import (
+    ContactoAsociadoCreate,
     ContactoBase,
     ContactoCreate,
     ContactoUpdate,
@@ -40,6 +41,10 @@ _RE_CODIGO = re.compile(rf"^{PREFIJO_CODIGO}(\d+)$")
 
 
 class CodigoDuplicado(Exception):
+    pass
+
+
+class AsociacionDuplicada(Exception):
     pass
 
 
@@ -260,5 +265,71 @@ async def eliminar_contacto(session: AsyncSession, contacto_id: uuid.UUID) -> bo
     if contacto is None:
         return False
     await session.delete(contacto)
+    await session.flush()
+    return True
+
+
+# --- Contactos asociados (Fase 28) ---
+
+
+async def listar_asociados(
+    session: AsyncSession, entidad: EntidadContacto, entidad_id: uuid.UUID
+) -> list[ContactoAsociado]:
+    org_id = require_organization_id()
+    filas = await session.execute(
+        select(ContactoAsociado)
+        .options(selectinload(ContactoAsociado.contacto))
+        .where(
+            ContactoAsociado.organization_id == org_id,
+            ContactoAsociado.entidad == entidad,
+            ContactoAsociado.entidad_id == entidad_id,
+        )
+        .order_by(ContactoAsociado.created_at)
+    )
+    return list(filas.scalars())
+
+
+async def asociar_contacto(
+    session: AsyncSession,
+    entidad: EntidadContacto,
+    entidad_id: uuid.UUID,
+    datos: ContactoAsociadoCreate,
+) -> ContactoAsociado:
+    org_id = require_organization_id()
+    existe = await session.scalar(
+        select(ContactoAsociado.id).where(
+            ContactoAsociado.organization_id == org_id,
+            ContactoAsociado.entidad == entidad,
+            ContactoAsociado.entidad_id == entidad_id,
+            ContactoAsociado.contacto_id == datos.contacto_id,
+        )
+    )
+    if existe:
+        raise AsociacionDuplicada("Ese contacto ya está asociado a este registro")
+
+    asociado = ContactoAsociado(
+        organization_id=org_id,
+        entidad=entidad,
+        entidad_id=entidad_id,
+        contacto_id=datos.contacto_id,
+        rol=datos.rol,
+        **datos_autoria(),
+    )
+    session.add(asociado)
+    await session.flush()
+    await session.refresh(asociado, attribute_names=["contacto"])
+    return asociado
+
+
+async def eliminar_asociacion(session: AsyncSession, asociacion_id: uuid.UUID) -> bool:
+    org_id = require_organization_id()
+    asociado = await session.scalar(
+        select(ContactoAsociado).where(
+            ContactoAsociado.id == asociacion_id, ContactoAsociado.organization_id == org_id
+        )
+    )
+    if asociado is None:
+        return False
+    await session.delete(asociado)
     await session.flush()
     return True

@@ -19,11 +19,13 @@ from app.modules.presupuestos.presupuesto_schemas import (
     CapituloCreate,
     CapituloUpdate,
     ComparacionOut,
+    ConvertirLinea,
     GuardarComoPlantilla,
     InstanciarPlantilla,
     LineaMedicionCreate,
     LineaMedicionOut,
     LineaMedicionUpdate,
+    LoteLineas,
     PartidaCreate,
     PartidaDetalle,
     PartidaOut,
@@ -33,6 +35,7 @@ from app.modules.presupuestos.presupuesto_schemas import (
     PresupuestoOut,
     PresupuestoResumen,
     PresupuestoUpdate,
+    RecursosPresupuesto,
     ResultadoSincronizacion,
     VersionOut,
 )
@@ -127,6 +130,52 @@ async def detalle(
         totales=totales,
         partidas_desactualizadas=len(desfasadas),
     )
+
+
+@presupuestos_router.patch("/{presupuesto_id}/lineas", response_model=PresupuestoDetalle)
+async def actualizar_lineas_en_lote(
+    presupuesto_id: uuid.UUID,
+    datos: LoteLineas,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PresupuestoDetalle:
+    """Varios cambios de celda de la rejilla en una sola petición (Fase 33).
+
+    Devuelve el presupuesto entero recalculado: la rejilla necesita resincronizar
+    los importes y totales, que el servidor rehace por su cuenta.
+    """
+    presupuesto = await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    await service.actualizar_lineas_en_lote(session, presupuesto_id, datos.cambios)
+    capitulos, totales = await service.arbol_y_totales(session, presupuesto)
+    desfasadas = await calc.partidas_desactualizadas(session, presupuesto_id)
+    return PresupuestoDetalle(
+        **PresupuestoOut.model_validate(presupuesto).model_dump(),
+        capitulos=capitulos,
+        totales=totales,
+        partidas_desactualizadas=len(desfasadas),
+    )
+
+
+@presupuestos_router.post("/{presupuesto_id}/lineas/{linea_id}/convertir")
+async def convertir_linea(
+    presupuesto_id: uuid.UUID,
+    linea_id: uuid.UUID,
+    datos: ConvertirLinea,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict[str, str]:
+    """Cambia una línea de capítulo a partida o al revés (Fase 33)."""
+    await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    try:
+        resultado = await service.convertir_linea(session, linea_id, datos.tipo)
+    except service.ConversionImposible as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if resultado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Línea no encontrada")
+    tipo, id_nuevo = resultado
+    return {"tipo": tipo, "id": str(id_nuevo)}
 
 
 @presupuestos_router.patch("/{presupuesto_id}", response_model=PresupuestoOut)
@@ -395,6 +444,19 @@ async def versiones(
     except versionado.PresupuestoNoEncontrado as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return [VersionOut.model_validate(v) for v in filas]
+
+
+@presupuestos_router.get("/{presupuesto_id}/recursos", response_model=RecursosPresupuesto)
+async def recursos(
+    presupuesto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> RecursosPresupuesto:
+    """Materiales y mano de obra agregados de todo el presupuesto — widgets
+    "Precios básicos" y "Recursos humanos" (Fase 31)."""
+    await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    return await service.recursos(session, presupuesto_id)
 
 
 @presupuestos_router.post(

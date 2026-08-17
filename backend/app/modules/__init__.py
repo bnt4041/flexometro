@@ -22,13 +22,17 @@ from app.core.modules import registry
 from app.modules.campos_libres import SPEC as CAMPOS_LIBRES
 from app.modules.compras import SPEC as COMPRAS
 from app.modules.core import SPEC as CORE
+from app.modules.crm import SPEC as CRM
+from app.modules.documentos import SPEC as DOCUMENTOS
 from app.modules.facturacion import SPEC as FACTURACION
 from app.modules.ia import SPEC as IA
 from app.modules.obras import SPEC as OBRAS
 from app.modules.presupuestos import SPEC as PRESUPUESTOS
 from app.modules.terceros import SPEC as TERCEROS
 
-ALL_SPECS = (CORE, CAMPOS_LIBRES, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA)
+ALL_SPECS = (
+    CORE, CAMPOS_LIBRES, CRM, DOCUMENTOS, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA,
+)
 
 
 def register_all() -> None:
@@ -41,6 +45,8 @@ def import_models() -> None:
     """Puebla Base.metadata. Lo usa el env.py de Alembic."""
     from app.modules.campos_libres import models as _campos_libres_models  # noqa: F401
     from app.modules.compras import models as _compras_models  # noqa: F401
+    from app.modules.crm import models as _crm_models  # noqa: F401
+    from app.modules.documentos import models as _documentos_models  # noqa: F401
     from app.modules.core import billing_models as _core_billing_models  # noqa: F401
     from app.modules.core import diccionario_models as _core_diccionario_models  # noqa: F401
     from app.modules.core import models as _core_models  # noqa: F401

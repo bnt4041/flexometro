@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Mail, Pencil, Plus, Power, Trash2, X } from 'lucide-react'
 
 import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
@@ -124,6 +124,7 @@ export function AdminPersonalPlataforma() {
                   </td>
                   <td className="table__actions">
                     <Link className="btn btn--sm" to={`${u.id}`}>
+                      <Pencil size={14} aria-hidden="true" />
                       Editar
                     </Link>
                     <button
@@ -131,9 +132,11 @@ export function AdminPersonalPlataforma() {
                       disabled={busy === u.id}
                       onClick={() => void toggleHabilitado(u)}
                     >
+                      <Power size={14} aria-hidden="true" />
                       {u.enabled ? 'Deshabilitar' : 'Habilitar'}
                     </button>
                     <button className="btn btn--sm" disabled={busy === u.id} onClick={() => void reenviar(u)}>
+                      <Mail size={14} aria-hidden="true" />
                       Reenviar invitación
                     </button>
                     <button
@@ -141,6 +144,7 @@ export function AdminPersonalPlataforma() {
                       disabled={busy === u.id}
                       onClick={() => void eliminar(u)}
                     >
+                      <Trash2 size={14} aria-hidden="true" />
                       Eliminar
                     </button>
                   </td>
@@ -209,6 +213,7 @@ export function PersonalPlataformaCrear() {
         </div>
         <div className="form-actions">
           <button className="btn" onClick={cerrar}>
+            <X size={16} aria-hidden="true" />
             Cancelar
           </button>
           <button
@@ -216,6 +221,7 @@ export function PersonalPlataformaCrear() {
             disabled={guardando || !username || !email || !nombre || !apellidos}
             onClick={() => void crear()}
           >
+            {!guardando && <Plus size={16} aria-hidden="true" />}
             {guardando ? 'Creando…' : 'Crear'}
           </button>
         </div>

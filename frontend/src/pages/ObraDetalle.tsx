@@ -13,6 +13,11 @@ import {
 } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import { ContactosAsociados } from '../components/ContactosAsociados'
+import { Documentos } from '../components/Documentos'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
+import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_CERTIFICACION, ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
 import type {
@@ -125,36 +130,8 @@ export function ObraDetalle() {
     }
   }
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {obra.nombre} <span className="table__code">{obra.codigo}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
-      <div className="page-head">
-        <p className="page-lead" style={{ marginBottom: 0 }}>
-          Presupuesto{' '}
-          <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
-        </p>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <Tooltip texto="Comparar coste real frente a lo presupuestado">
-            <button className="btn btn--primary" onClick={() => navigate(`/obras/${id}/costes`)}>
-              <BarChart3 size={16} aria-hidden="true" />
-              Coste real vs. presupuestado
-            </button>
-          </Tooltip>
-          <Tooltip texto="Eliminar esta obra">
-            <button className="btn btn--danger" onClick={() => void eliminar()}>
-              <Trash2 size={16} aria-hidden="true" />
-              Eliminar
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-
+  const pestanaDatos = (
+    <>
       <ErrorNotice error={error} />
 
       <div className="card">
@@ -356,7 +333,63 @@ export function ObraDetalle() {
           onCambio={cargar}
         />
       )}
-    </ModalPantalla>
+    </>
+  )
+
+  const pestanas: PestanaFicha[] = [
+    { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    {
+      id: 'contactos',
+      etiqueta: 'Contactos',
+      icono: 'contactos',
+      contenido: <ContactosAsociados entidad="obra" entidadId={id} />,
+    },
+    {
+      id: 'crm',
+      etiqueta: 'CRM',
+      icono: 'crm',
+      contenido: <NotasCrm entidad="obra" entidadId={id} />,
+    },
+    {
+      id: 'documentos',
+      etiqueta: 'Documentos',
+      icono: 'documentos',
+      contenido: <Documentos entidad="obra" entidadId={id} />,
+    },
+  ]
+
+  return (
+    <FichaDetalle
+      titulo={
+        <>
+          {obra.nombre} <span className="table__code">{obra.codigo}</span>
+        </>
+      }
+      subtitulo={
+        <p className="page-lead" style={{ marginBottom: 0 }}>
+          Presupuesto{' '}
+          <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
+        </p>
+      }
+      acciones={
+        <>
+          <Tooltip texto="Comparar coste real frente a lo presupuestado">
+            <button className="btn btn--primary" onClick={() => navigate(`/obras/${id}/costes`)}>
+              <BarChart3 size={16} aria-hidden="true" />
+              Coste real vs. presupuestado
+            </button>
+          </Tooltip>
+          <Tooltip texto="Eliminar esta obra">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
+        </>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
   )
 }
 

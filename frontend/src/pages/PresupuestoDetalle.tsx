@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Check,
+  ChevronDown,
   Copy,
   Download,
   FileDown,
-  FolderPlus,
   Layers,
   Plus,
   RefreshCw,
-  Ruler,
   Save,
   Scan,
   Trash2,
@@ -17,21 +16,46 @@ import {
 } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
-import { ETIQUETA_ESTADO, api, descargar } from '../lib/api'
+import { ContactosAsociados } from '../components/ContactosAsociados'
+import { Documentos } from '../components/Documentos'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
+import { NotasCrm } from '../components/NotasCrm'
+import type { FilaPresupuesto } from '../components/RejillaPresupuesto'
+import { RejillaPresupuesto } from '../components/RejillaPresupuesto'
+import {
+  Checkbox,
+  EmptyState,
+  ErrorNotice,
+  Field,
+  MenuAcciones,
+  Modal,
+  ModalPantalla,
+  Tooltip,
+  formatoImporte,
+} from '../components/ui'
+import { WidgetGrid } from '../components/WidgetGrid'
+import { ETIQUETA_ESTADO, ETIQUETA_IVA, api, descargar } from '../lib/api'
 import type {
   Concepto,
   EstadoPresupuesto,
   LecturaPlanoDetalle,
   LineaSugerida,
-  NodoCapitulo,
   Partida,
   PresupuestoDetalle as Detalle,
+  RecursosPresupuesto,
+  Tercero,
+  TipoIVA,
+  UsuarioKeycloak,
   Version,
 } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
 import { useContextoPresupuestos } from './Presupuestos'
 import { useWorkspace } from '../workspace'
+
+function formatoFecha(iso: string): string {
+  return new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
+}
 
 export function PresupuestoDetalle() {
   const { id = '' } = useParams()
@@ -44,16 +68,27 @@ export function PresupuestoDetalle() {
   const [nuevaPartidaEn, setNuevaPartidaEn] = useState<string | null>(null)
   const [midiendo, setMidiendo] = useState<Partida | null>(null)
   const [versiones, setVersiones] = useState<Version[]>([])
+  const [recursos, setRecursos] = useState<RecursosPresupuesto | null>(null)
+  const [cliente, setCliente] = useState<Tercero | null>(null)
+  const [cabeceraExpandida, setCabeceraExpandida] = useState(false)
   const [guardandoPlantilla, setGuardandoPlantilla] = useState(false)
+  const [editando, setEditando] = useState(false)
+  const [cambiandoEstado, setCambiandoEstado] = useState(false)
+  const [seleccion, setSeleccion] = useState<
+    { tipo: 'partida'; partida: Partida } | { tipo: 'capitulo'; fila: FilaPresupuesto } | null
+  >(null)
 
   const cargar = useCallback(async () => {
     try {
-      const [detalle, lineaVersiones] = await Promise.all([
+      const [detalle, lineaVersiones, datosRecursos] = await Promise.all([
         api.presupuestos.get(id),
         api.presupuestos.versiones(id),
+        api.presupuestos.recursos(id),
       ])
       setPresupuesto(detalle)
       setVersiones(lineaVersiones)
+      setRecursos(datosRecursos)
+      setCliente(detalle.cliente_id ? await api.terceros.get(detalle.cliente_id) : null)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -77,16 +112,6 @@ export function PresupuestoDetalle() {
   }
   if (!presupuesto) return null
 
-  async function cambiarEstado(estado: EstadoPresupuesto) {
-    try {
-      await api.presupuestos.update(id, { estado })
-      await cargar()
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    }
-  }
-
   async function sincronizar() {
     const { partidas_actualizadas } = await api.presupuestos.sincronizarPrecios(id)
     setAviso(
@@ -104,6 +129,23 @@ export function PresupuestoDetalle() {
     cerrar()
   }
 
+  async function integrarBancoPrecios(partida: Partida) {
+    if (
+      !window.confirm(
+        `¿Dar de alta «${partida.resumen}» como concepto nuevo del banco de precios? A partir de ` +
+          'ahora esta partida seguirá su precio.',
+      )
+    ) {
+      return
+    }
+    try {
+      await api.partidas.integrarBancoPrecios(partida.id)
+      await cargar()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
   async function crearVersion() {
     try {
       const nueva = await api.presupuestos.nuevaVersion(id)
@@ -115,48 +157,15 @@ export function PresupuestoDetalle() {
   }
 
   const t = presupuesto.totales
+  const seleccionId =
+    seleccion?.tipo === 'partida'
+      ? seleccion.partida.id
+      : seleccion?.tipo === 'capitulo'
+        ? seleccion.fila.id
+        : null
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {presupuesto.nombre} <span className="table__code">{presupuesto.codigo}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
-      <div className="page-head">
-        <div>
-          <p className="page-lead" style={{ marginBottom: 0 }}>
-            {presupuesto.emplazamiento && <>{presupuesto.emplazamiento} · </>}
-            {presupuesto.fecha && <>{presupuesto.fecha} · </>}
-            {presupuesto.precios_bloqueados && (
-              <> <span className="badge">precios congelados</span></>
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-start' }}>
-          <select
-            className="select"
-            style={{ width: 'auto' }}
-            value={presupuesto.estado}
-            onChange={(e) => void cambiarEstado(e.target.value as EstadoPresupuesto)}
-          >
-            {Object.entries(ETIQUETA_ESTADO).map(([clave, etiqueta]) => (
-              <option key={clave} value={clave}>
-                {etiqueta}
-              </option>
-            ))}
-          </select>
-          <Tooltip texto="Eliminar este presupuesto">
-            <button className="btn btn--danger" onClick={() => void eliminar()}>
-              <Trash2 size={16} aria-hidden="true" />
-              Eliminar
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-
+  const pestanaDatos = (
+    <>
       <div className="barra-acciones">
         <span className="barra-acciones__grupo">
           <span className="barra-acciones__etiqueta">Descargar</span>
@@ -249,74 +258,205 @@ export function PresupuestoDetalle() {
 
       <CamposLibres entidad="presupuesto" entidadId={id} />
 
-      <div className="page-head" style={{ marginBottom: 'var(--sp-3)' }}>
-        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Capítulos y partidas</h2>
-        <Tooltip texto="Añadir un capítulo en la raíz">
-          <button className="btn" onClick={() => setNuevoCapituloEn(null)}>
-            <FolderPlus size={16} aria-hidden="true" />
-            Añadir capítulo
-          </button>
-        </Tooltip>
-      </div>
-
-      <div className="table-wrap">
-        {presupuesto.capitulos.length === 0 ? (
-          <EmptyState title="Presupuesto vacío">
-            Empieza creando un capítulo; dentro irán las partidas con su medición.
-          </EmptyState>
-        ) : (
-          <table className="table tabla-presupuesto">
-            <thead>
-              <tr>
-                <th>Código</th>
-                <th>Descripción</th>
-                <th className="table__num">Medición</th>
-                <th className="table__num">Precio</th>
-                <th className="table__num">Importe</th>
-                <th className="table__actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {presupuesto.capitulos.map((c) => (
-                <FilasCapitulo
-                  key={c.id}
-                  nodo={c}
-                  nivel={0}
-                  onAnadirCapitulo={setNuevoCapituloEn}
-                  onAnadirPartida={setNuevaPartidaEn}
-                  onMedir={setMidiendo}
-                  onCambio={cargar}
+      <WidgetGrid
+        id="presupuesto-datos"
+        widgets={[
+          {
+            id: 'lineas',
+            titulo: 'Capítulos y partidas',
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 12,
+            minW: 4,
+            minH: 6,
+            contenido: (
+              <RejillaPresupuesto
+                presupuesto={presupuesto}
+                onCambio={cargar}
+                onMedir={setMidiendo}
+                onIntegrarBanco={(partida) => void integrarBancoPrecios(partida)}
+                seleccionadaId={seleccionId}
+                onSeleccionar={(fila) => {
+                  if (!fila) return setSeleccion(null)
+                  if (fila.tipo === 'partida' && fila.partida) {
+                    setSeleccion({ tipo: 'partida', partida: fila.partida })
+                  } else {
+                    setSeleccion({ tipo: 'capitulo', fila })
+                  }
+                }}
+              />
+            ),
+          },
+          {
+            id: 'resumen',
+            titulo: 'Resumen',
+            x: 8,
+            y: 0,
+            w: 4,
+            h: 12,
+            minW: 3,
+            minH: 6,
+            contenido: (
+              <div className="resumen-totales">
+                <Fila etiqueta="Presupuesto de ejecución material (PEM)" valor={t.pem} />
+                <Fila
+                  etiqueta={`Gastos generales ${formatoImporte(presupuesto.gastos_generales)} %`}
+                  valor={t.gastos_generales}
+                  suave
                 />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card resumen-totales">
-        <Fila etiqueta="Presupuesto de ejecución material (PEM)" valor={t.pem} />
-        <Fila
-          etiqueta={`Gastos generales ${formatoImporte(presupuesto.gastos_generales)} %`}
-          valor={t.gastos_generales}
-          suave
-        />
-        <Fila
-          etiqueta={`Beneficio industrial ${formatoImporte(presupuesto.beneficio_industrial)} %`}
-          valor={t.beneficio_industrial}
-          suave
-        />
-        <Fila etiqueta="Presupuesto de ejecución por contrata (sin IVA)" valor={t.pec_sin_iva} />
-        <Fila
-          etiqueta={
-            presupuesto.inversion_sujeto_pasivo
-              ? 'IVA — inversión del sujeto pasivo'
-              : `IVA ${formatoImporte(t.porcentaje_iva, 0)} %`
-          }
-          valor={t.iva}
-          suave
-        />
-        <Fila etiqueta="Total" valor={t.total} destacado />
-      </div>
+                <Fila
+                  etiqueta={`Beneficio industrial ${formatoImporte(presupuesto.beneficio_industrial)} %`}
+                  valor={t.beneficio_industrial}
+                  suave
+                />
+                <Fila etiqueta="Presupuesto de ejecución por contrata (sin IVA)" valor={t.pec_sin_iva} />
+                <Fila
+                  etiqueta={
+                    presupuesto.inversion_sujeto_pasivo
+                      ? 'IVA — inversión del sujeto pasivo'
+                      : `IVA ${formatoImporte(t.porcentaje_iva, 0)} %`
+                  }
+                  valor={t.iva}
+                  suave
+                />
+                <Fila etiqueta="Total" valor={t.total} destacado />
+              </div>
+            ),
+          },
+          {
+            id: 'mediciones',
+            titulo: 'Mediciones',
+            x: 0,
+            y: 12,
+            w: 12,
+            h: 11,
+            minW: 5,
+            minH: 5,
+            contenido:
+              seleccion === null ? (
+                <EmptyState title="Nada seleccionado">
+                  Selecciona una partida en el listado para ver y editar su medición aquí.
+                </EmptyState>
+              ) : seleccion.tipo === 'capitulo' ? (
+                <div className="ficha-datos">
+                  <div>
+                    <div className="barra-acciones__etiqueta">Capítulo</div>
+                    <div className="ficha-datos__valor">
+                      {seleccion.fila.codigo} — {seleccion.fila.resumen}
+                    </div>
+                    <p className="muted">
+                      Un capítulo no se mide por sí mismo: selecciona una partida dentro de él
+                      para ver su medición.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="barra-acciones__etiqueta">Importe</div>
+                    <div className="ficha-datos__valor">{formatoImporte(seleccion.fila.importe)} €</div>
+                  </div>
+                </div>
+              ) : (
+                <MedicionesPanel partida={seleccion.partida} onCambio={cargar} />
+              ),
+          },
+          {
+            id: 'materiales',
+            titulo: 'Precios básicos',
+            x: 0,
+            y: 23,
+            w: 8,
+            h: 10,
+            minW: 4,
+            minH: 5,
+            contenido: (
+              <div className="table-wrap">
+                {(recursos?.materiales.length ?? 0) === 0 ? (
+                  <EmptyState title="Sin materiales">
+                    Los materiales que compongan las partidas por descomposición aparecerán aquí.
+                  </EmptyState>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Código</th>
+                        <th>Descripción</th>
+                        <th className="table__num">Cantidad</th>
+                        <th className="table__num">Precio</th>
+                        <th className="table__num">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recursos?.materiales.map((m) => (
+                        <tr key={m.concepto_id}>
+                          <td className="table__code">{m.codigo}</td>
+                          <td>{m.resumen}</td>
+                          <td className="table__num">
+                            {formatoImporte(m.cantidad, 3)} <span className="muted">{m.unidad}</span>
+                          </td>
+                          <td className="table__num">{formatoImporte(m.precio)}</td>
+                          <td className="table__num">
+                            <strong>{formatoImporte(m.importe)}</strong>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ),
+          },
+          {
+            id: 'mano-obra',
+            titulo: 'Recursos humanos',
+            x: 8,
+            y: 23,
+            w: 4,
+            h: 10,
+            minW: 3,
+            minH: 5,
+            contenido: (
+              <>
+                <div className="ficha-datos" style={{ marginBottom: 'var(--sp-4)' }}>
+                  <div>
+                    <div className="barra-acciones__etiqueta">Horas presupuestadas</div>
+                    <div className="ficha-datos__valor">
+                      {formatoImporte(recursos?.horas_totales ?? '0', 1)} h
+                    </div>
+                  </div>
+                </div>
+                {(recursos?.mano_obra.length ?? 0) === 0 ? (
+                  <EmptyState title="Sin mano de obra">
+                    Los recursos de mano de obra que compongan las partidas aparecerán aquí.
+                  </EmptyState>
+                ) : (
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Código</th>
+                          <th>Descripción</th>
+                          <th className="table__num">Cantidad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recursos?.mano_obra.map((m) => (
+                          <tr key={m.concepto_id}>
+                            <td className="table__code">{m.codigo}</td>
+                            <td>{m.resumen}</td>
+                            <td className="table__num">
+                              {formatoImporte(m.cantidad, 3)} <span className="muted">{m.unidad}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
 
       {nuevoCapituloEn !== undefined && (
         <NuevoCapituloModal
@@ -360,7 +500,485 @@ export function PresupuestoDetalle() {
           }}
         />
       )}
-    </ModalPantalla>
+    </>
+  )
+
+  const pestanas: PestanaFicha[] = [
+    { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    {
+      id: 'contactos',
+      etiqueta: 'Contactos',
+      icono: 'contactos',
+      contenido: <ContactosAsociados entidad="presupuesto" entidadId={id} />,
+    },
+    {
+      id: 'crm',
+      etiqueta: 'CRM',
+      icono: 'crm',
+      contenido: <NotasCrm entidad="presupuesto" entidadId={id} />,
+    },
+    {
+      id: 'documentos',
+      etiqueta: 'Documentos',
+      icono: 'documentos',
+      contenido: <Documentos entidad="presupuesto" entidadId={id} />,
+    },
+  ]
+
+  return (
+    <>
+    <FichaDetalle
+      titulo={
+        <>
+          {presupuesto.nombre} <span className="table__code">{presupuesto.codigo}</span>
+        </>
+      }
+      subtitulo={
+        <div className="ficha-cabecera-extra">
+          <div className="ficha-cabecera-extra__resumen">
+            <p className="page-lead" style={{ marginBottom: 0 }}>
+              {presupuesto.emplazamiento && <>{presupuesto.emplazamiento} · </>}
+              {presupuesto.fecha && <>{presupuesto.fecha} · </>}
+              {presupuesto.precios_bloqueados && (
+                <> <span className="badge">precios congelados</span></>
+              )}
+            </p>
+            <Tooltip texto={cabeceraExpandida ? 'Mostrar menos' : 'Mostrar todos los datos'}>
+              <button
+                className="ficha-cabecera-extra__toggle"
+                onClick={() => setCabeceraExpandida((v) => !v)}
+              >
+                <ChevronDown
+                  size={16}
+                  aria-hidden="true"
+                  style={{
+                    transition: 'transform 150ms ease',
+                    transform: cabeceraExpandida ? 'rotate(180deg)' : undefined,
+                  }}
+                />
+              </button>
+            </Tooltip>
+          </div>
+
+          {cabeceraExpandida && (
+            <div className="ficha-datos ficha-cabecera-extra__datos">
+              <div>
+                <div className="barra-acciones__etiqueta">Cliente</div>
+                <div>{cliente?.razon_social ?? <span className="muted">Sin cliente</span>}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Tipo de obra</div>
+                <div>{presupuesto.tipo_obra ?? <span className="muted">—</span>}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Validez</div>
+                <div>
+                  {presupuesto.validez_dias ? (
+                    `${presupuesto.validez_dias} días`
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Tipo de IVA</div>
+                <div>{ETIQUETA_IVA[presupuesto.tipo_iva]}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Gastos generales</div>
+                <div>{formatoImporte(presupuesto.gastos_generales)} %</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Beneficio industrial</div>
+                <div>{formatoImporte(presupuesto.beneficio_industrial)} %</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Inversión del sujeto pasivo</div>
+                <div>{presupuesto.inversion_sujeto_pasivo ? 'Sí' : 'No'}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Origen del dato</div>
+                <div>{presupuesto.origen_dato}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Responsable</div>
+                <div>{presupuesto.responsable_nombre ?? <span className="muted">Sin asignar</span>}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Creado</div>
+                <div>
+                  {formatoFecha(presupuesto.created_at)}
+                  {presupuesto.creado_por_nombre && ` · ${presupuesto.creado_por_nombre}`}
+                </div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Última modificación</div>
+                <div>{formatoFecha(presupuesto.updated_at)}</div>
+              </div>
+              {presupuesto.descripcion && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="barra-acciones__etiqueta">Descripción</div>
+                  <div>{presupuesto.descripcion}</div>
+                </div>
+              )}
+              {presupuesto.notas && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="barra-acciones__etiqueta">Notas</div>
+                  <div>{presupuesto.notas}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      }
+      acciones={
+        <>
+          <span className={`chip chip--estado-${presupuesto.estado}`}>
+            {ETIQUETA_ESTADO[presupuesto.estado]}
+          </span>
+          <MenuAcciones
+            acciones={[
+              { id: 'editar', etiqueta: 'Editar', icono: 'editar', onClick: () => setEditando(true) },
+              {
+                id: 'estado',
+                etiqueta: 'Cambiar estado',
+                icono: 'estado',
+                onClick: () => setCambiandoEstado(true),
+              },
+              {
+                id: 'eliminar',
+                etiqueta: 'Eliminar',
+                icono: 'eliminar',
+                peligroso: true,
+                onClick: () => void eliminar(),
+              },
+            ]}
+          />
+        </>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
+
+    {editando && (
+      <EditarPresupuestoModal
+        presupuesto={presupuesto}
+        onClose={() => setEditando(false)}
+        onGuardado={() => {
+          setEditando(false)
+          void cargar()
+          onCambio()
+        }}
+      />
+    )}
+
+    {cambiandoEstado && (
+      <CambiarEstadoModal
+        presupuestoId={id}
+        estadoActual={presupuesto.estado}
+        onClose={() => setCambiandoEstado(false)}
+        onGuardado={() => {
+          setCambiandoEstado(false)
+          void cargar()
+          onCambio()
+        }}
+      />
+    )}
+    </>
+  )
+}
+
+function EditarPresupuestoModal({
+  presupuesto,
+  onClose,
+  onGuardado,
+}: {
+  presupuesto: Detalle
+  onClose: () => void
+  onGuardado: () => void
+}) {
+  const [nombre, setNombre] = useState(presupuesto.nombre)
+  const [descripcion, setDescripcion] = useState(presupuesto.descripcion ?? '')
+  const [clienteId, setClienteId] = useState(presupuesto.cliente_id ?? '')
+  const [emplazamiento, setEmplazamiento] = useState(presupuesto.emplazamiento ?? '')
+  const [fecha, setFecha] = useState(presupuesto.fecha ?? '')
+  const [validezDias, setValidezDias] = useState(presupuesto.validez_dias?.toString() ?? '')
+  const [tipoObra, setTipoObra] = useState(presupuesto.tipo_obra ?? '')
+  const [tipoIva, setTipoIva] = useState(presupuesto.tipo_iva)
+  const [gastosGenerales, setGastosGenerales] = useState(presupuesto.gastos_generales)
+  const [beneficioIndustrial, setBeneficioIndustrial] = useState(presupuesto.beneficio_industrial)
+  const [inversionSujetoPasivo, setInversionSujetoPasivo] = useState(
+    presupuesto.inversion_sujeto_pasivo,
+  )
+  const [notas, setNotas] = useState(presupuesto.notas ?? '')
+  const [responsableSubject, setResponsableSubject] = useState(
+    presupuesto.responsable_subject ?? '',
+  )
+  const [responsableNombre, setResponsableNombre] = useState(presupuesto.responsable_nombre ?? '')
+  const [clientes, setClientes] = useState<Tercero[]>([])
+  const [usuarios, setUsuarios] = useState<UsuarioKeycloak[]>([])
+  const [usuariosDisponibles, setUsuariosDisponibles] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    void api.terceros
+      .list({ rol: 'cliente', activo: true, limit: 500 })
+      .then((page) => setClientes(page.items))
+      .catch(() => {
+        /* si falla, el campo cliente simplemente se queda sin opciones nuevas */
+      })
+    // Listar usuarios de la organización exige ser administrador: para
+    // cualquier otro perfil, el campo se muestra de solo lectura en vez de
+    // romper el formulario entero.
+    void api.usuariosYGrupos.usuarios
+      .list()
+      .then(setUsuarios)
+      .catch(() => setUsuariosDisponibles(false))
+  }, [])
+
+  async function guardar() {
+    setGuardando(true)
+    setError(null)
+    try {
+      await api.presupuestos.update(presupuesto.id, {
+        nombre,
+        descripcion: descripcion || null,
+        cliente_id: clienteId || null,
+        emplazamiento: emplazamiento || null,
+        fecha: fecha || null,
+        validez_dias: validezDias === '' ? null : Number(validezDias),
+        tipo_obra: tipoObra || null,
+        tipo_iva: tipoIva,
+        gastos_generales: gastosGenerales,
+        beneficio_industrial: beneficioIndustrial,
+        inversion_sujeto_pasivo: inversionSujetoPasivo,
+        notas: notas || null,
+        responsable_subject: responsableSubject || null,
+        responsable_nombre: responsableSubject ? responsableNombre : null,
+      })
+      onGuardado()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Modal title="Editar presupuesto" onClose={onClose}>
+      <div className="form-section">
+        <ErrorNotice error={error} />
+        <div className="form-grid">
+          <Field label="Nombre">
+            <input
+              className="input"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <Field label="Cliente">
+            <select className="select" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+              <option value="">Sin cliente</option>
+              {clientes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.razon_social}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Emplazamiento">
+            <input
+              className="input"
+              value={emplazamiento}
+              onChange={(e) => setEmplazamiento(e.target.value)}
+            />
+          </Field>
+          <Field label="Fecha">
+            <input
+              className="input"
+              type="date"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+            />
+          </Field>
+          <Field label="Validez (días)">
+            <input
+              className="input"
+              type="number"
+              value={validezDias}
+              onChange={(e) => setValidezDias(e.target.value)}
+            />
+          </Field>
+          <Field label="Tipo de obra">
+            <input className="input" value={tipoObra} onChange={(e) => setTipoObra(e.target.value)} />
+          </Field>
+          <Field label="Tipo de IVA">
+            <select
+              className="select"
+              value={tipoIva}
+              onChange={(e) => setTipoIva(e.target.value as TipoIVA)}
+            >
+              {Object.entries(ETIQUETA_IVA).map(([clave, etiqueta]) => (
+                <option key={clave} value={clave}>
+                  {etiqueta}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Gastos generales (%)">
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={gastosGenerales}
+              onChange={(e) => setGastosGenerales(e.target.value)}
+            />
+          </Field>
+          <Field label="Beneficio industrial (%)">
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={beneficioIndustrial}
+              onChange={(e) => setBeneficioIndustrial(e.target.value)}
+            />
+          </Field>
+          <Field label="Responsable">
+            {usuariosDisponibles ? (
+              <select
+                className="select"
+                value={responsableSubject}
+                onChange={(e) => {
+                  const usuario = usuarios.find((u) => u.id === e.target.value)
+                  setResponsableSubject(e.target.value)
+                  setResponsableNombre(
+                    usuario
+                      ? [usuario.firstName, usuario.lastName].filter(Boolean).join(' ') ||
+                          usuario.username
+                      : '',
+                  )
+                }}
+              >
+                <option value="">Sin asignar</option>
+                {usuarios.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {[u.firstName, u.lastName].filter(Boolean).join(' ') || u.username}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="field__hint" style={{ marginTop: 0 }}>
+                {responsableNombre || 'Sin asignar'} — hace falta ser administrador de la
+                organización para reasignarlo.
+              </p>
+            )}
+          </Field>
+        </div>
+
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          <Checkbox
+            label="Inversión del sujeto pasivo"
+            checked={inversionSujetoPasivo}
+            onChange={setInversionSujetoPasivo}
+          />
+        </div>
+
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          <Field label="Descripción">
+            <textarea
+              className="input"
+              value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          <Field label="Notas">
+            <textarea className="input" value={notas} onChange={(e) => setNotas(e.target.value)} />
+          </Field>
+        </div>
+      </div>
+      <div className="form-actions">
+        <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
+          Cancelar
+        </button>
+        <button
+          className="btn btn--primary"
+          disabled={nombre.trim() === '' || guardando}
+          onClick={() => void guardar()}
+        >
+          {!guardando && <Save size={16} aria-hidden="true" />}
+          {guardando ? 'Guardando…' : 'Guardar cambios'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function CambiarEstadoModal({
+  presupuestoId,
+  estadoActual,
+  onClose,
+  onGuardado,
+}: {
+  presupuestoId: string
+  estadoActual: EstadoPresupuesto
+  onClose: () => void
+  onGuardado: () => void
+}) {
+  const [estado, setEstado] = useState(estadoActual)
+  const [error, setError] = useState<string | null>(null)
+  const [guardando, setGuardando] = useState(false)
+
+  async function guardar() {
+    setGuardando(true)
+    setError(null)
+    try {
+      await api.presupuestos.update(presupuestoId, { estado })
+      onGuardado()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Modal title="Cambiar estado" onClose={onClose}>
+      <div className="form-section">
+        <ErrorNotice error={error} />
+        <Field label="Nuevo estado" hint="Salir de borrador congela los precios de las partidas">
+          <select
+            className="select"
+            value={estado}
+            onChange={(e) => setEstado(e.target.value as EstadoPresupuesto)}
+            autoFocus
+          >
+            {Object.entries(ETIQUETA_ESTADO).map(([clave, etiqueta]) => (
+              <option key={clave} value={clave}>
+                {etiqueta}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="form-actions">
+        <button className="btn" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
+          Cancelar
+        </button>
+        <button
+          className="btn btn--primary"
+          disabled={estado === estadoActual || guardando}
+          onClick={() => void guardar()}
+        >
+          {!guardando && <Save size={16} aria-hidden="true" />}
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -467,161 +1085,6 @@ function Fila({
       <span>{etiqueta}</span>
       <span className="resumen-totales__valor">{formatoImporte(valor)} €</span>
     </div>
-  )
-}
-
-function FilasCapitulo({
-  nodo,
-  nivel,
-  onAnadirCapitulo,
-  onAnadirPartida,
-  onMedir,
-  onCambio,
-}: {
-  nodo: NodoCapitulo
-  nivel: number
-  onAnadirCapitulo: (parentId: string) => void
-  onAnadirPartida: (capituloId: string) => void
-  onMedir: (partida: Partida) => void
-  onCambio: () => void
-}) {
-  async function eliminarCapitulo() {
-    if (!window.confirm(`¿Eliminar el capítulo «${nodo.resumen}» y su contenido?`)) return
-    await api.capitulos.remove(nodo.id)
-    onCambio()
-  }
-
-  return (
-    <>
-      <tr className="fila-capitulo">
-        <td className="table__code" style={{ paddingLeft: `calc(var(--sp-4) + ${nivel} * 20px)` }}>
-          {nodo.codigo}
-        </td>
-        <td colSpan={3}>
-          <strong>{nodo.resumen}</strong>
-        </td>
-        <td className="table__num">
-          <strong>{formatoImporte(nodo.importe)}</strong>
-        </td>
-        <td className="table__actions">
-          <button className="btn btn--sm" onClick={() => onAnadirPartida(nodo.id)}>
-            <Plus size={14} aria-hidden="true" />
-            partida
-          </button>{' '}
-          <button className="btn btn--sm" onClick={() => onAnadirCapitulo(nodo.id)}>
-            <FolderPlus size={14} aria-hidden="true" />
-            subcapítulo
-          </button>{' '}
-          <Tooltip texto="Eliminar este capítulo y su contenido">
-            <button
-              className="btn btn--sm btn--danger btn--solo-icono"
-              onClick={() => void eliminarCapitulo()}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        </td>
-      </tr>
-
-      {nodo.partidas.map((partida) => (
-        <FilaPartida
-          key={partida.id}
-          partida={partida}
-          nivel={nivel + 1}
-          onMedir={onMedir}
-          onCambio={onCambio}
-        />
-      ))}
-
-      {nodo.hijos.map((hijo) => (
-        <FilasCapitulo
-          key={hijo.id}
-          nodo={hijo}
-          nivel={nivel + 1}
-          onAnadirCapitulo={onAnadirCapitulo}
-          onAnadirPartida={onAnadirPartida}
-          onMedir={onMedir}
-          onCambio={onCambio}
-        />
-      ))}
-    </>
-  )
-}
-
-function FilaPartida({
-  partida,
-  nivel,
-  onMedir,
-  onCambio,
-}: {
-  partida: Partida
-  nivel: number
-  onMedir: (partida: Partida) => void
-  onCambio: () => void
-}) {
-  const [error, setError] = useState<string | null>(null)
-
-  async function eliminar() {
-    if (!window.confirm(`¿Eliminar la partida «${partida.resumen}»?`)) return
-    await api.partidas.remove(partida.id)
-    onCambio()
-  }
-
-  async function integrarBancoPrecios() {
-    if (
-      !window.confirm(
-        `¿Dar de alta «${partida.resumen}» como concepto nuevo del banco de precios? A partir de ` +
-          'ahora esta partida seguirá su precio.',
-      )
-    ) {
-      return
-    }
-    setError(null)
-    try {
-      await api.partidas.integrarBancoPrecios(partida.id)
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    }
-  }
-
-  return (
-    <tr>
-      <td className="table__code" style={{ paddingLeft: `calc(var(--sp-4) + ${nivel} * 20px)` }}>
-        {partida.codigo}
-      </td>
-      <td>
-        {partida.resumen}{' '}
-        <span className="muted">({partida.unidad})</span>
-        {partida.concepto_id === null && <span className="badge"> alzada</span>}
-        {error && <div className="muted">{error}</div>}
-      </td>
-      <td className="table__num">{formatoImporte(partida.medicion, 3)}</td>
-      <td className="table__num">{formatoImporte(partida.precio)}</td>
-      <td className="table__num">{formatoImporte(partida.importe)}</td>
-      <td className="table__actions">
-        {partida.concepto_id === null && (
-          <>
-            <button className="btn btn--sm" onClick={() => void integrarBancoPrecios()}>
-              <Layers size={14} aria-hidden="true" />
-              Añadir al banco
-            </button>{' '}
-          </>
-        )}
-        <button className="btn btn--sm" onClick={() => onMedir(partida)}>
-          <Ruler size={14} aria-hidden="true" />
-          Medir
-        </button>{' '}
-        <Tooltip texto="Eliminar esta partida">
-          <button
-            className="btn btn--sm btn--danger btn--solo-icono"
-            onClick={() => void eliminar()}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </td>
-    </tr>
   )
 }
 
@@ -842,6 +1305,33 @@ function MedicionModal({
   onClose: () => void
   onCambio: () => void
 }) {
+  return (
+    <Modal title={`Medición · ${partida.codigo}`} onClose={onClose}>
+      <div className="form-section">
+        <MedicionesPanel partida={partida} onCambio={onCambio} />
+      </div>
+
+      <div className="form-actions">
+        <button className="btn btn--primary" onClick={onClose}>
+          <Check size={16} aria-hidden="true" />
+          Hecho
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+/** Tabla de mediciones de una partida + acciones (añadir línea, leer plano
+ *  con IA, campos libres) — sin cabecera modal propia, para poder vivir
+ *  tanto dentro de `MedicionModal` como del widget "Mediciones" (Fase 31),
+ *  que la muestra inline según la fila seleccionada en el listado. */
+function MedicionesPanel({
+  partida,
+  onCambio,
+}: {
+  partida: Partida
+  onCambio: () => void
+}) {
   const { modules } = useWorkspace()
   const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
   const [detalle, setDetalle] = useState<Awaited<
@@ -872,79 +1362,72 @@ function MedicionModal({
   }
 
   return (
-    <Modal title={`Medición · ${partida.codigo}`} onClose={onClose}>
-      <div className="form-section">
-        <p className="form-section__note">
-          {partida.resumen}. El parcial es el producto de lo que esté informado: una línea con
-          solo unidades mide esas unidades. Un valor negativo deduce, que es como se descuentan
-          los huecos.
-        </p>
-        <ErrorNotice error={error} />
+    <>
+      <p className="form-section__note">
+        {partida.resumen}. El parcial es el producto de lo que esté informado: una línea con
+        solo unidades mide esas unidades. Un valor negativo deduce, que es como se descuentan
+        los huecos.
+      </p>
+      <ErrorNotice error={error} />
 
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Comentario</th>
-                <th className="table__num">Uds</th>
-                <th className="table__num">Longitud</th>
-                <th className="table__num">Anchura</th>
-                <th className="table__num">Altura</th>
-                <th className="table__num">Parcial</th>
-                <th className="table__actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {(detalle?.lineas ?? []).map((linea) => (
-                <FilaMedicion key={linea.id} linea={linea} onCambio={recargar} />
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="fila-total">
-                <td colSpan={5} className="table__num total-label">
-                  Medición total
-                </td>
-                <td className="table__num">
-                  <strong>{formatoImporte(detalle?.medicion ?? '0', 3)}</strong>
-                </td>
-                <td />
-              </tr>
-              <tr>
-                <td colSpan={5} className="table__num total-label">
-                  × {formatoImporte(detalle?.precio ?? '0')} €/{partida.unidad}
-                </td>
-                <td className="table__num">
-                  <strong>{formatoImporte(detalle?.importe ?? '0')} €</strong>
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-
-        <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
-          <button className="btn" onClick={() => void anadir()}>
-            <Plus size={16} aria-hidden="true" />
-            Añadir línea
-          </button>
-          {iaActiva && (
-            <Tooltip texto="Extraer mediciones de un plano acotado con IA">
-              <button className="btn" onClick={() => setLeyendoPlano(true)}>
-                <Scan size={16} aria-hidden="true" />
-                Leer plano (IA)
-              </button>
-            </Tooltip>
-          )}
-        </div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Comentario</th>
+              <th className="table__num">Uds</th>
+              <th className="table__num">Longitud</th>
+              <th className="table__num">Anchura</th>
+              <th className="table__num">Altura</th>
+              <th className="table__num">Parcial</th>
+              <th className="table__actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {(detalle?.lineas ?? []).map((linea) => (
+              <FilaMedicion key={linea.id} linea={linea} onCambio={recargar} />
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="fila-total">
+              <td colSpan={5} className="table__num total-label">
+                Medición total
+              </td>
+              <td className="table__num">
+                <strong>{formatoImporte(detalle?.medicion ?? '0', 3)}</strong>
+              </td>
+              <td />
+            </tr>
+            <tr>
+              <td colSpan={5} className="table__num total-label">
+                × {formatoImporte(detalle?.precio ?? '0')} €/{partida.unidad}
+              </td>
+              <td className="table__num">
+                <strong>{formatoImporte(detalle?.importe ?? '0')} €</strong>
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
       </div>
 
-      <CamposLibres entidad="partida" entidadId={partida.id} />
-
-      <div className="form-actions">
-        <button className="btn btn--primary" onClick={onClose}>
-          <Check size={16} aria-hidden="true" />
-          Hecho
+      <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
+        <button className="btn" onClick={() => void anadir()}>
+          <Plus size={16} aria-hidden="true" />
+          Añadir línea
         </button>
+        {iaActiva && (
+          <Tooltip texto="Extraer mediciones de un plano acotado con IA">
+            <button className="btn" onClick={() => setLeyendoPlano(true)}>
+              <Scan size={16} aria-hidden="true" />
+              Leer plano (IA)
+            </button>
+          </Tooltip>
+        )}
+      </div>
+
+      <div style={{ marginTop: 'var(--sp-4)' }}>
+        <CamposLibres entidad="partida" entidadId={partida.id} />
       </div>
 
       {leyendoPlano && (
@@ -957,7 +1440,7 @@ function MedicionModal({
           }}
         />
       )}
-    </Modal>
+    </>
   )
 }
 

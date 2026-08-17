@@ -49,6 +49,27 @@ services:
       start_period: 40s
     networks: [obras]
 
+  # Almacén de objetos compatible con S3 para el gestor documental (Fase 30).
+  # Self-hosted, como el resto del stack — mismo criterio que DeepSeek/Gemini
+  # para IA: un proveedor fijo, no una abstracción multi-nube.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-obras}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [obras]
+
   # Servicio de un solo uso: aplica todas las ramas de migración y termina.
   # La API no arranca hasta que este contenedor sale con código 0.
   #
@@ -112,6 +133,11 @@ services:
       # del contenedor de Keycloak.
       KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Gestor documental (Fase 30): MinIO dentro de la red de Docker.
+      MINIO_ENDPOINT_URL: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-obras}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-documentos}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -123,6 +149,8 @@ services:
       migrate:
         condition: service_completed_successfully
       keycloak:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
@@ -182,6 +210,7 @@ services:
 
 volumes:
   pgdata:
+  miniodata:
 
 networks:
   obras:

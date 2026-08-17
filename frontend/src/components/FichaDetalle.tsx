@@ -92,9 +92,7 @@ export function FichaDetalle({
           ))}
         </div>
 
-        <div className="modal-pantalla__body">
-          <div className="content__inner">{activa?.contenido}</div>
-        </div>
+        <div className="modal-pantalla__body">{activa?.contenido}</div>
       </div>
     </div>
   )

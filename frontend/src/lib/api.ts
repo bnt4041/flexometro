@@ -448,6 +448,62 @@ export interface TerceroDetalle extends Tercero {
   contactos: Contacto[]
 }
 
+// --- Contactos asociados (Fase 28) ---
+//
+// Vínculo N a N entre un Contacto y cualquier objeto "grande" del negocio
+// (presupuesto, obra, certificación, factura) — no requiere que el contacto
+// pertenezca a un Tercero.
+
+export type EntidadContacto = 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+
+export interface ContactoAsociado {
+  id: string
+  entidad: EntidadContacto
+  entidad_id: string
+  contacto_id: string
+  rol: string | null
+  created_at: string
+  contacto_nombre: string
+  contacto_apellidos: string | null
+  contacto_cargo: string | null
+  contacto_email: string | null
+  contacto_telefono: string | null
+}
+
+// --- CRM / notas (Fase 29) ---
+//
+// Cuaderno de bitácora del equipo sobre un objeto grande del negocio —
+// mismo alcance de entidades que `EntidadContacto`, más 'tercero'.
+
+export type EntidadNota = 'tercero' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+
+export interface Nota {
+  id: string
+  entidad: EntidadNota
+  entidad_id: string
+  contenido: string
+  created_at: string
+  creado_por_nombre: string | null
+}
+
+// --- Gestor documental (Fase 30) ---
+//
+// Ficheros subidos sobre un objeto grande del negocio, guardados en MinIO —
+// mismo alcance de entidades que `EntidadNota`.
+
+export type EntidadDocumento = 'tercero' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+
+export interface Documento {
+  id: string
+  entidad: EntidadDocumento
+  entidad_id: string
+  nombre_archivo: string
+  content_type: string
+  tamano_bytes: number
+  created_at: string
+  creado_por_nombre: string | null
+}
+
 export interface Familia {
   id: string
   codigo: string
@@ -591,6 +647,9 @@ export interface Partida {
   medicion: string
   importe: string
   orden: number
+  /** Con desglose, la medición es la suma de sus parciales y no se teclea
+   *  directamente en la rejilla (Fase 33). */
+  tiene_desglose: boolean
 }
 
 export interface PartidaDetalle extends Partida {
@@ -627,6 +686,35 @@ export interface Version {
   estado: EstadoPresupuesto
   fecha: string | null
   created_at: string
+}
+
+/** Un cambio de celda de la rejilla del presupuesto (Fase 33). Solo se mandan
+ *  los campos realmente editados; el resto no se toca en el servidor. */
+export interface CambioLinea {
+  id: string
+  tipo: 'capitulo' | 'partida'
+  codigo?: string
+  resumen?: string
+  texto?: string | null
+  unidad?: string
+  precio?: string
+  medicion?: string
+}
+
+export interface RecursoAgregado {
+  concepto_id: string
+  codigo: string
+  resumen: string
+  unidad: string
+  cantidad: string
+  precio: string
+  importe: string
+}
+
+export interface RecursosPresupuesto {
+  materiales: RecursoAgregado[]
+  mano_obra: RecursoAgregado[]
+  horas_totales: string
 }
 
 export interface Cambio {
@@ -675,6 +763,11 @@ export interface Presupuesto {
   precios_bloqueados: boolean
   notas: string | null
   origen_dato: OrigenDato
+  created_at: string
+  updated_at: string
+  creado_por_nombre: string | null
+  responsable_subject: string | null
+  responsable_nombre: string | null
 }
 
 export interface PresupuestoResumen extends Presupuesto {
@@ -1582,6 +1675,36 @@ export const api = {
     remove: (id: string) => del(`/api/contactos/${id}`),
   },
 
+  contactosAsociados: {
+    list: (entidad: EntidadContacto, entidadId: string) =>
+      request<ContactoAsociado[]>(`/api/contactos-asociados${query({ entidad, entidad_id: entidadId })}`),
+    create: (entidad: EntidadContacto, entidadId: string, datos: { contacto_id: string; rol?: string | null }) =>
+      post<ContactoAsociado>(`/api/contactos-asociados${query({ entidad, entidad_id: entidadId })}`, datos),
+    remove: (id: string) => del(`/api/contactos-asociados/${id}`),
+  },
+
+  notas: {
+    list: (entidad: EntidadNota, entidadId: string) =>
+      request<Nota[]>(`/api/notas${query({ entidad, entidad_id: entidadId })}`),
+    create: (entidad: EntidadNota, entidadId: string, contenido: string) =>
+      post<Nota>(`/api/notas${query({ entidad, entidad_id: entidadId })}`, { contenido }),
+    remove: (id: string) => del(`/api/notas/${id}`),
+  },
+
+  documentos: {
+    list: (entidad: EntidadDocumento, entidadId: string) =>
+      request<Documento[]>(`/api/documentos${query({ entidad, entidad_id: entidadId })}`),
+    upload: (entidad: EntidadDocumento, entidadId: string, fichero: File) => {
+      const formulario = new FormData()
+      formulario.append('entidad', entidad)
+      formulario.append('entidad_id', entidadId)
+      formulario.append('fichero', fichero)
+      return subir<Documento>('/api/documentos', formulario)
+    },
+    descargarUrl: (id: string) => `/api/documentos/${id}/descargar`,
+    remove: (id: string) => del(`/api/documentos/${id}`),
+  },
+
   familias: {
     list: () => request<Familia[]>('/api/familias'),
     create: (datos: Partial<Familia>) => post<Familia>('/api/familias', datos),
@@ -1670,11 +1793,22 @@ export const api = {
         `/api/presupuestos/${id}/sincronizar-precios`,
         {},
       ),
+    recursos: (id: string) => request<RecursosPresupuesto>(`/api/presupuestos/${id}/recursos`),
+    /** Varios cambios de celda de la rejilla en una sola petición (Fase 33). */
+    actualizarLineas: (id: string, cambios: CambioLinea[]) =>
+      patch<PresupuestoDetalle>(`/api/presupuestos/${id}/lineas`, { cambios }),
+    convertirLinea: (id: string, lineaId: string, tipo: 'capitulo' | 'partida') =>
+      post<{ tipo: 'capitulo' | 'partida'; id: string }>(
+        `/api/presupuestos/${id}/lineas/${lineaId}/convertir`,
+        { tipo },
+      ),
   },
 
   capitulos: {
-    update: (id: string, datos: { resumen?: string; orden?: number }) =>
-      patch<{ id: string }>(`/api/capitulos/${id}`, datos),
+    update: (
+      id: string,
+      datos: { codigo?: string; resumen?: string; orden?: number; parent_id?: string | null },
+    ) => patch<{ id: string }>(`/api/capitulos/${id}`, datos),
     remove: (id: string) => del(`/api/capitulos/${id}`),
     addPartida: (
       id: string,

@@ -124,6 +124,66 @@ export function Checkbox({
   )
 }
 
+export interface AccionMenu {
+  id: string
+  etiqueta: string
+  icono: NombreIcono
+  onClick: () => void
+  peligroso?: boolean
+}
+
+/** Botón "Acciones" con un desplegable de opciones — para agrupar
+ *  editar/cambiar estado/eliminar (y lo que se añada después) en un solo
+ *  sitio de la cabecera de una ficha, en vez de ir sumando botones sueltos.
+ *  Se cierra al elegir una opción, al pulsar fuera o con Escape. */
+export function MenuAcciones({ acciones }: { acciones: AccionMenu[] }) {
+  const [abierto, setAbierto] = useState(false)
+
+  useEffect(() => {
+    if (!abierto) return
+    function alPulsarFuera(e: MouseEvent) {
+      const nodo = e.target as Node
+      if (!(nodo instanceof Element) || !nodo.closest('.menu-acciones')) setAbierto(false)
+    }
+    function alPulsarTecla(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAbierto(false)
+    }
+    document.addEventListener('mousedown', alPulsarFuera)
+    document.addEventListener('keydown', alPulsarTecla)
+    return () => {
+      document.removeEventListener('mousedown', alPulsarFuera)
+      document.removeEventListener('keydown', alPulsarTecla)
+    }
+  }, [abierto])
+
+  return (
+    <div className="menu-acciones">
+      <button className="btn" onClick={() => setAbierto((v) => !v)} aria-haspopup="menu" aria-expanded={abierto}>
+        <Icon name="mas-vertical" />
+        Acciones
+      </button>
+      {abierto && (
+        <div className="menu-acciones__lista" role="menu">
+          {acciones.map((a) => (
+            <button
+              key={a.id}
+              role="menuitem"
+              className={a.peligroso ? 'menu-acciones__item is-peligroso' : 'menu-acciones__item'}
+              onClick={() => {
+                setAbierto(false)
+                a.onClick()
+              }}
+            >
+              <Icon name={a.icono} size={16} />
+              {a.etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Modal({
   title,
   onClose,
@@ -199,9 +259,7 @@ export function ModalPantalla({
             </button>
           </Tooltip>
         </div>
-        <div className="modal-pantalla__body">
-          <div className="content__inner">{children}</div>
-        </div>
+        <div className="modal-pantalla__body">{children}</div>
       </div>
     </div>
   )

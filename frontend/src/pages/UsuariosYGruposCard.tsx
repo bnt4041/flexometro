@@ -737,6 +737,7 @@ function GrupoGestionarModal({
           disabled={!miembroId || busyMiembro === 'nuevo'}
           onClick={() => void anadirMiembro()}
         >
+          <UserPlus size={14} aria-hidden="true" />
           Añadir
         </button>
       </div>

@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_model: str = "gemini-flash-latest"
 
+    # Gestor documental (Fase 30): MinIO self-hosted, compatible con la API S3
+    # — mismo motivo que DeepSeek/Gemini para elegir proveedor fijo en vez de
+    # soportar varios: es el que corre en este stack. Vacío por defecto: sin
+    # endpoint, el módulo `documentos` responde 503 en vez de fallar a medias.
+    minio_endpoint_url: str = "http://minio:9000"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "documentos"
+
     @property
     def database_url(self) -> str:
         return (

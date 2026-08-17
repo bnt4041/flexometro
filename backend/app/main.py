@@ -8,6 +8,7 @@ from app.core.auth import build_auth_backend
 from app.core.config import get_settings
 from app.core.middleware import TenancyMiddleware
 from app.core.modules import registry
+from app.core.storage import asegurar_bucket
 from app.modules import register_all
 
 settings = get_settings()
@@ -20,6 +21,10 @@ async def lifespan(app: FastAPI):
     logger.info(
         "Módulos registrados: %s", ", ".join(sorted(spec.code for spec in registry.all()))
     )
+    try:
+        await asegurar_bucket()
+    except Exception:
+        logger.warning("No se pudo preparar el bucket de MinIO; el gestor documental fallará", exc_info=True)
     yield
 
 

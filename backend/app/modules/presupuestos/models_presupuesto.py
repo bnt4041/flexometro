@@ -131,6 +131,14 @@ class Presupuesto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Autori
         enum_column(OrigenDato, "origen_dato"), nullable=False, default=OrigenDato.MANUAL
     )
 
+    # Quién lleva el presupuesto — a diferencia de `creado_por_subject`
+    # (`AutoriaMixin`, fijado una vez al crear), esto es reasignable en
+    # cualquier momento. Mismo patrón subject+nombre desnormalizado que
+    # `AutoriaMixin`: no hay FK a Keycloak, así que se guardan ambos para no
+    # tener que resolverlo en cada lectura.
+    responsable_subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    responsable_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     capitulos: Mapped[list["Capitulo"]] = relationship(
         back_populates="presupuesto", cascade="all, delete-orphan"
     )

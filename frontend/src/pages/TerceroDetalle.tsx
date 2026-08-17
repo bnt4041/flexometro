@@ -3,8 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Plus, Save, Trash2, X } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { NotasCrm } from '../components/NotasCrm'
 import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, EmptyState, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
 import type { Contacto, FormaPago, TerceroDetalle as Detalle } from '../lib/api'
@@ -395,6 +397,13 @@ export function TerceroDetalle() {
   const pestanas: PestanaFicha[] = [
     { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
     { id: 'contactos', etiqueta: 'Contactos', icono: 'contactos', contenido: pestanaContactos },
+    { id: 'crm', etiqueta: 'CRM', icono: 'crm', contenido: <NotasCrm entidad="tercero" entidadId={id} /> },
+    {
+      id: 'documentos',
+      etiqueta: 'Documentos',
+      icono: 'documentos',
+      contenido: <Documentos entidad="tercero" entidadId={id} />,
+    },
   ]
 
   return (

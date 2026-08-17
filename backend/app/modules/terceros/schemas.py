@@ -5,7 +5,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.enums import OrigenDato, TipoPersona
-from app.modules.terceros.models import FormaPago
+from app.modules.terceros.models import EntidadContacto, FormaPago
 from app.modules.terceros.nif import normalizar, validar_nif
 
 
@@ -155,3 +155,26 @@ class TerceroOut(TerceroBase):
 
 class TerceroDetalle(TerceroOut):
     contactos: list[ContactoOut] = Field(default_factory=list)
+
+
+class ContactoAsociadoCreate(BaseModel):
+    contacto_id: uuid.UUID
+    rol: str | None = Field(default=None, max_length=80)
+
+
+class ContactoAsociadoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    entidad: EntidadContacto
+    entidad_id: uuid.UUID
+    contacto_id: uuid.UUID
+    rol: str | None
+    created_at: datetime
+    # Desnormalizado en la respuesta para no obligar al cliente a una
+    # segunda llamada solo para pintar el nombre en una lista.
+    contacto_nombre: str
+    contacto_apellidos: str | None = None
+    contacto_cargo: str | None = None
+    contacto_email: str | None = None
+    contacto_telefono: str | None = None
