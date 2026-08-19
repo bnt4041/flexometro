@@ -633,6 +633,10 @@ export interface LineaMedicion {
   altura: string | null
   parcial: string
   orden: number
+  /** Con fórmula (Fase 37), el parcial sale de la expresión y de estos valores. */
+  formula_id: string | null
+  formula_expresion: string | null
+  formula_valores: Record<string, string>
 }
 
 export interface Partida {
@@ -647,9 +651,21 @@ export interface Partida {
   medicion: string
   importe: string
   orden: number
+  /** --- Venta (Fase 35) --- */
+  precio_venta: string
+  venta_bloqueada: boolean
+  importe_venta: string
+  /** Semáforo: `perdida` (va por debajo del coste), `bajo` (gana menos de lo
+   *  previsto por el método) u `ok`. */
+  estado_venta: 'perdida' | 'bajo' | 'ok'
+  /** Solo lo llevan las partidas con descompuesto propio (Fase 34). */
+  costes_indirectos: string | null
   /** Con desglose, la medición es la suma de sus parciales y no se teclea
    *  directamente en la rejilla (Fase 33). */
   tiene_desglose: boolean
+  /** Se ha independizado del banco: su precio sale de su propio descompuesto
+   *  (Fase 34). */
+  descomposicion_propia: boolean
 }
 
 export interface PartidaDetalle extends Partida {
@@ -669,13 +685,23 @@ export interface NodoCapitulo {
 }
 
 export interface Totales {
+  metodo: MetodoCalculo
+  porcentaje_metodo: string
+  coste: string
   pem: string
   gastos_generales: string
   beneficio_industrial: string
+  /** Diferencia entre el encadenado teórico y la venta real, por las partidas
+   *  con la venta bloqueada a mano (Fase 35). */
+  ajuste_manual: string
+  incremento: string
+  venta_sin_iva: string
   pec_sin_iva: string
   porcentaje_iva: string
   iva: string
   total: string
+  margen: string
+  margen_pct: string
 }
 
 export interface Version {
@@ -699,6 +725,79 @@ export interface CambioLinea {
   unidad?: string
   precio?: string
   medicion?: string
+  precio_venta?: string
+  venta_bloqueada?: boolean
+}
+
+/** Una línea del descompuesto de una partida (Fase 34). */
+export interface LineaDescomposicion {
+  id: string
+  hijo_id: string | null
+  codigo: string
+  resumen: string
+  unidad: string
+  rendimiento: string
+  factor: string
+  precio: string
+  importe: string
+}
+
+export interface DescomposicionPartida {
+  /** `false` = todavía hereda el descompuesto del banco (solo lectura). */
+  propia: boolean
+  lineas: LineaDescomposicion[]
+}
+
+export type AlcancePrecio = 'partida' | 'presupuesto'
+
+export interface FormulaMedicion {
+  id: string
+  nombre: string
+  expresion: string
+  descripcion: string | null
+  orden: number
+  activa: boolean
+  /** Deducidas de la expresión en el servidor. */
+  variables: string[]
+}
+
+export type TipoReajuste = 'importe' | 'margen'
+
+export interface LineaReajuste {
+  partida_id: string
+  codigo: string
+  resumen: string
+  bloqueada: boolean
+  coste: string
+  venta_antes: string
+  venta_despues: string
+  importe_antes: string
+  importe_despues: string
+}
+
+export interface Reajuste {
+  aplicado: boolean
+  objetivo_venta: string
+  coste: string
+  venta_antes: string
+  venta_despues: string
+  /** Lo que se queda cerca del objetivo por el redondeo de precios unitarios. */
+  diferencia: string
+  margen_antes: string
+  margen_despues: string
+  factor: string
+  partidas_afectadas: number
+  partidas_bloqueadas: number
+  partidas_bajo_coste: number
+  lineas: LineaReajuste[]
+}
+
+export type MetodoCalculo = 'clasico' | 'incremento_sobre_coste' | 'beneficio_final'
+
+export const ETIQUETA_METODO: Record<MetodoCalculo, string> = {
+  clasico: 'Clásico (PEM + %GG + %BI)',
+  incremento_sobre_coste: 'Coste + % de incremento sobre el coste',
+  beneficio_final: 'Coste + % de beneficio final (sobre la venta)',
 }
 
 export interface RecursoAgregado {
@@ -760,6 +859,8 @@ export interface Presupuesto {
   beneficio_industrial: string
   tipo_iva: TipoIVA
   inversion_sujeto_pasivo: boolean
+  metodo_calculo: MetodoCalculo
+  porcentaje_metodo: string
   precios_bloqueados: boolean
   notas: string | null
   origen_dato: OrigenDato
@@ -1209,7 +1310,9 @@ const post = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 const patch = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
-const del = (path: string) => request<void>(path, { method: 'DELETE' })
+// Genérico porque algún DELETE devuelve el estado ya recalculado en vez de un
+// 204 (ver `quitarComponente`); `request` ya distingue el 204 sin cuerpo.
+const del = <T = void,>(path: string) => request<T>(path, { method: 'DELETE' })
 
 export const api = {
   me: () => request<Principal>('/api/me'),
@@ -1783,7 +1886,10 @@ export const api = {
     update: (id: string, datos: Partial<Presupuesto>) =>
       patch<Presupuesto>(`/api/presupuestos/${id}`, datos),
     remove: (id: string) => del(`/api/presupuestos/${id}`),
-    addCapitulo: (id: string, datos: { resumen: string; parent_id?: string | null }) =>
+    addCapitulo: (
+      id: string,
+      datos: { resumen: string; parent_id?: string | null; orden?: number },
+    ) =>
       post<{ id: string; codigo: string; resumen: string }>(
         `/api/presupuestos/${id}/capitulos`,
         datos,
@@ -1794,6 +1900,9 @@ export const api = {
         {},
       ),
     recursos: (id: string) => request<RecursosPresupuesto>(`/api/presupuestos/${id}/recursos`),
+    /** `aplicar: false` solo simula: es lo que alimenta la vista previa (Fase 36). */
+    reajustar: (id: string, datos: { tipo: TipoReajuste; valor: string; aplicar: boolean }) =>
+      post<Reajuste>(`/api/presupuestos/${id}/reajuste`, datos),
     /** Varios cambios de celda de la rejilla en una sola petición (Fase 33). */
     actualizarLineas: (id: string, cambios: CambioLinea[]) =>
       patch<PresupuestoDetalle>(`/api/presupuestos/${id}/lineas`, { cambios }),
@@ -1802,6 +1911,21 @@ export const api = {
         `/api/presupuestos/${id}/lineas/${lineaId}/convertir`,
         { tipo },
       ),
+  },
+
+  formulasMedicion: {
+    list: () => request<FormulaMedicion[]>('/api/formulas-medicion'),
+    create: (datos: { nombre: string; expresion: string; descripcion?: string | null }) =>
+      post<FormulaMedicion>('/api/formulas-medicion', datos),
+    update: (id: string, datos: { nombre?: string; expresion?: string; activa?: boolean }) =>
+      patch<FormulaMedicion>(`/api/formulas-medicion/${id}`, datos),
+    remove: (id: string) => del(`/api/formulas-medicion/${id}`),
+    /** Valida y calcula sin guardar, para ver el resultado al escribirla. */
+    probar: (expresion: string, valores: Record<string, string>) =>
+      post<{ variables: string[]; resultado: string }>('/api/formulas-medicion/probar', {
+        expresion,
+        valores,
+      }),
   },
 
   capitulos: {
@@ -1818,6 +1942,7 @@ export const api = {
         resumen?: string
         unidad?: string
         precio?: string
+        orden?: number
       },
     ) => post<Partida>(`/api/capitulos/${id}/partidas`, datos),
   },
@@ -1828,6 +1953,24 @@ export const api = {
     remove: (id: string) => del(`/api/partidas/${id}`),
     integrarBancoPrecios: (id: string) =>
       post<Partida>(`/api/partidas/${id}/integrar-banco-precios`, {}),
+    descomposicion: (id: string) =>
+      request<DescomposicionPartida>(`/api/partidas/${id}/descomposicion`),
+    anadirComponente: (
+      id: string,
+      datos: { hijo_id: string; rendimiento?: string; factor?: string },
+    ) => post<DescomposicionPartida>(`/api/partidas/${id}/descomposicion`, datos),
+    quitarComponente: (id: string, lineaId: string) =>
+      del<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/${lineaId}`),
+    cambiarPrecioComponente: (
+      id: string,
+      datos: { hijo_id: string; precio: string; alcance: AlcancePrecio },
+    ) =>
+      patch<{ partidas_afectadas: number; descomposicion: DescomposicionPartida }>(
+        `/api/partidas/${id}/descomposicion/precio`,
+        datos,
+      ),
+    cambiarRendimientoComponente: (id: string, datos: { hijo_id: string; rendimiento: string }) =>
+      patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/rendimiento`, datos),
     addLinea: (
       id: string,
       datos: {
@@ -1836,13 +1979,17 @@ export const api = {
         longitud?: string | null
         anchura?: string | null
         altura?: string | null
+        formula_id?: string | null
+        formula_valores?: Record<string, string>
       },
     ) => post<LineaMedicion>(`/api/partidas/${id}/lineas`, datos),
   },
 
   mediciones: {
-    update: (id: string, datos: Partial<LineaMedicion>) =>
-      patch<LineaMedicion>(`/api/mediciones/${id}`, datos),
+    update: (
+      id: string,
+      datos: Partial<LineaMedicion> & { formula_valores?: Record<string, string> },
+    ) => patch<LineaMedicion>(`/api/mediciones/${id}`, datos),
     remove: (id: string) => del(`/api/mediciones/${id}`),
   },
 

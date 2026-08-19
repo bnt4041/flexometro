@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 export interface OpcionCelda {
   valor: string
@@ -25,6 +26,10 @@ export interface ColumnaRejilla<F> {
   buscar?: (q: string, fila: F) => Promise<OpcionCelda[]>
   /** Sangra el contenido según el nivel de la fila (columna de código). */
   sangrada?: boolean
+  /** Adorno a la izquierda del valor cuando la celda no se está editando —
+   *  el desplegable de replegar el árbol, por ejemplo. Recibe los clics por su
+   *  cuenta, así que debe frenar la propagación si no quiere mover el cursor. */
+  prefijo?: (fila: F) => ReactNode
 }
 
 interface Props<F> {
@@ -35,7 +40,9 @@ interface Props<F> {
   claseDe?: (fila: F) => string | undefined
   /** Se llama al confirmar una celda. `opcion` viene relleno en select/autocompletado. */
   onEditar: (fila: F, columnaId: string, valor: string, opcion?: OpcionCelda) => void
-  onNuevaFila?: (filaActual: F | null) => void
+  /** Puede devolver una promesa: la rejilla espera a que la fila exista para
+   *  bajar el cursor a ella, y evita crear dos si se insiste con la tecla. */
+  onNuevaFila?: (filaActual: F | null) => void | Promise<void>
   onEliminarFila?: (fila: F) => void
   /** +1 indenta (Alt+→), -1 desindenta (Alt+←). */
   onIndentar?: (fila: F, direccion: 1 | -1) => void
@@ -43,6 +50,11 @@ interface Props<F> {
   seleccionadaId?: string | null
   acciones?: (fila: F) => ReactNode
   vacia?: ReactNode
+  /** Abre esta celda en edición desde fuera (un botón "+ Línea" que crea una
+   *  fila fuera del teclado, por ejemplo) — id de fila y de columna, o `null`
+   *  para no forzar nada. Cambiar de columna con la misma fila reabre. */
+  filaAEditarId?: string | null
+  columnaAEditarId?: string | null
 }
 
 const TECLAS_CONTROL = new Set([
@@ -75,23 +87,75 @@ export function RejillaEditable<F>({
   seleccionadaId,
   acciones,
   vacia,
+  filaAEditarId,
+  columnaAEditarId,
 }: Props<F>) {
   const [activa, setActiva] = useState<{ f: number; c: number } | null>(null)
   const [editando, setEditando] = useState(false)
   const [borrador, setBorrador] = useState('')
   const [sugerencias, setSugerencias] = useState<OpcionCelda[]>([])
   const [sugerenciaActiva, setSugerenciaActiva] = useState(0)
+  const [posicionSugerencias, setPosicionSugerencias] = useState<{
+    top: number
+    left: number
+    width: number
+  } | null>(null)
   const contenedorRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const editorRef = useRef<HTMLSpanElement>(null)
+  // Al salir de edición React desmonta el input, y eso dispara su `blur`. Sin
+  // esta marca, cancelar con Escape acabaría guardando por la puerta de atrás.
+  const cancelando = useRef(false)
+  const confirmando = useRef(false)
+  // Crear una fila es un viaje al servidor: sin esta marca, mantener pulsada
+  // la flecha abajo al final de la tabla dispararía varias altas seguidas.
+  const creando = useRef(false)
+  // Adónde llevar el cursor en cuanto la fila recién creada aparezca.
+  const destinoTrasCrear = useRef<{ f: number; c: number } | null>(null)
+  const seleccionarAlEditar = useRef(false)
+  // Qué combinación fila+columna de `filaAEditarId`/`columnaAEditarId` ya se
+  // abrió, para no reabrirla en cada render (esas props llegan como valores
+  // nuevos cada vez que el padre recalcula `filas`/`columnas`).
+  const aEditarProcesada = useRef<string | null>(null)
 
   const esEditable = useCallback(
     (fila: F, columna: ColumnaRejilla<F>) => columna.editable?.(fila) ?? false,
     [],
   )
 
+  // Con `acciones`, hay una columna más al final (sin dato editable, con los
+  // botones de la fila) que también se puede alcanzar con flechas/Tab.
+  const maxCol = columnas.length - 1 + (acciones ? 1 : 0)
+  const esColumnaAcciones = (c: number) => acciones !== undefined && c === columnas.length
+  // Referencia a la celda de acciones activa, para poder pulsar su primer
+  // botón con Enter sin que `acciones` tenga que exponer un callback aparte.
+  const celdaAccionesRef = useRef<HTMLTableCellElement>(null)
+
+  // `columna.valor()` es para mostrar (con el punto de los miles y la coma
+  // decimal de `formatoImporte`), pero un `<input type="number">` solo acepta
+  // el punto como separador — con una coma dentro se queda en blanco. F2 (o
+  // esta misma rejilla abriendo una celda desde fuera) necesitan la versión
+  // sin formatear para precargar el campo.
+  const valorParaEditar = useCallback(
+    (fila: F, columna: ColumnaRejilla<F>) => {
+      const texto = columna.valor(fila)
+      return columna.tipo === 'numero' ? texto.replaceAll('.', '').replace(',', '.') : texto
+    },
+    [],
+  )
+
   // Si la fila activa desaparece (se borró, o cambió el filtro), no dejar el
-  // cursor apuntando a un índice que ya no existe.
+  // cursor apuntando a un índice que ya no existe. Y si veníamos de crear una
+  // fila, bajar a ella en cuanto llegue del servidor.
   useEffect(() => {
+    const destino = destinoTrasCrear.current
+    if (destino && destino.f < filas.length) {
+      destinoTrasCrear.current = null
+      setActiva(destino)
+      setEditando(false)
+      contenedorRef.current?.focus()
+      return
+    }
     if (activa && activa.f >= filas.length) {
       setActiva(filas.length > 0 ? { f: filas.length - 1, c: activa.c } : null)
       setEditando(false)
@@ -99,16 +163,64 @@ export function RejillaEditable<F>({
   }, [filas.length, activa])
 
   useEffect(() => {
-    if (editando) inputRef.current?.focus()
+    if (!filaAEditarId || !columnaAEditarId) {
+      aEditarProcesada.current = null
+      return
+    }
+    const clave = `${filaAEditarId}:${columnaAEditarId}`
+    if (aEditarProcesada.current === clave) return
+    const f = filas.findIndex((fila) => idDe(fila) === filaAEditarId)
+    const c = columnas.findIndex((col) => col.id === columnaAEditarId)
+    if (f < 0 || c < 0) return
+    const fila = filas[f]
+    const columna = columnas[c]
+    if (!fila || !columna || !esEditable(fila, columna)) return
+    aEditarProcesada.current = clave
+    setActiva({ f, c })
+    cancelando.current = false
+    seleccionarAlEditar.current = true
+    setBorrador(valorParaEditar(fila, columna))
+    setSugerencias([])
+    setSugerenciaActiva(0)
+    setEditando(true)
+  }, [filaAEditarId, columnaAEditarId, filas, columnas, idDe, esEditable, valorParaEditar])
+
+  useEffect(() => {
+    if (!editando) return
+    inputRef.current?.focus()
+    // Al abrir la celda con F2/Enter el contenido queda seleccionado, para
+    // poder reemplazarlo escribiendo sin tener que borrarlo antes. Si se ha
+    // entrado tecleando, el borrador ya es esa tecla y no hay nada que marcar.
+    if (seleccionarAlEditar.current) {
+      inputRef.current?.select()
+      seleccionarAlEditar.current = false
+    }
   }, [editando])
 
   function irA(f: number, c: number) {
     const filaDestino = Math.max(0, Math.min(filas.length - 1, f))
-    const colDestino = Math.max(0, Math.min(columnas.length - 1, c))
+    const colDestino = Math.max(0, Math.min(maxCol, c))
     setActiva({ f: filaDestino, c: colDestino })
     setEditando(false)
     onSeleccionar?.(filas[filaDestino] ?? null)
     contenedorRef.current?.focus()
+  }
+
+  /** Baja a la fila siguiente y, si no hay ninguna debajo, crea una. Es lo que
+   *  se espera al ir tecleando seguido: la tabla crece sola por abajo. */
+  async function bajarOCrear(f: number, c: number) {
+    if (f + 1 < filas.length) {
+      irA(f + 1, c)
+      return
+    }
+    if (!onNuevaFila || creando.current) return
+    creando.current = true
+    destinoTrasCrear.current = { f: f + 1, c }
+    try {
+      await onNuevaFila(filas[f] ?? null)
+    } finally {
+      creando.current = false
+    }
   }
 
   function empezarEdicion(valorInicial?: string) {
@@ -116,23 +228,36 @@ export function RejillaEditable<F>({
     const fila = filas[activa.f]
     const columna = columnas[activa.c]
     if (!fila || !columna || !esEditable(fila, columna)) return
-    setBorrador(valorInicial ?? columna.valor(fila))
+    cancelando.current = false
+    seleccionarAlEditar.current = valorInicial === undefined
+    setBorrador(valorInicial ?? valorParaEditar(fila, columna))
     setSugerencias([])
     setSugerenciaActiva(0)
     setEditando(true)
   }
 
   function confirmar(opcion?: OpcionCelda) {
-    if (!activa) return
-    const fila = filas[activa.f]
-    const columna = columnas[activa.c]
-    if (fila && columna) onEditar(fila, columna.id, opcion?.valor ?? borrador, opcion)
-    setEditando(false)
-    setSugerencias([])
-    contenedorRef.current?.focus()
+    if (!activa || cancelando.current || confirmando.current) return
+    // El `focus()` de aquí abajo quita el foco del input todavía montado, y
+    // eso dispara su `blur` de forma síncrona — que llama a este mismo
+    // `confirmar()` otra vez (sin `opcion`, desde `onBlur`) ANTES de que esta
+    // llamada termine. Sin el guard, un `onEditar` que reacciona a la opción
+    // elegida (crear/enlazar algo) se pisa con una segunda llamada vacía.
+    confirmando.current = true
+    try {
+      const fila = filas[activa.f]
+      const columna = columnas[activa.c]
+      if (fila && columna) onEditar(fila, columna.id, opcion?.valor ?? borrador, opcion)
+      setEditando(false)
+      setSugerencias([])
+      contenedorRef.current?.focus()
+    } finally {
+      confirmando.current = false
+    }
   }
 
   function cancelar() {
+    cancelando.current = true
     setEditando(false)
     setSugerencias([])
     contenedorRef.current?.focus()
@@ -172,7 +297,7 @@ export function RejillaEditable<F>({
         return
       case 'ArrowDown':
         e.preventDefault()
-        irA(activa.f + 1, activa.c)
+        void bajarOCrear(activa.f, activa.c)
         return
       case 'ArrowLeft':
         e.preventDefault()
@@ -188,15 +313,18 @@ export function RejillaEditable<F>({
         return
       case 'End':
         e.preventDefault()
-        irA(activa.f, columnas.length - 1)
+        irA(activa.f, maxCol)
         return
       case 'Tab':
         e.preventDefault()
         if (e.shiftKey) {
-          if (activa.c === 0) irA(activa.f - 1, columnas.length - 1)
+          if (activa.c === 0) irA(activa.f - 1, maxCol)
           else irA(activa.f, activa.c - 1)
         } else {
-          if (activa.c === columnas.length - 1) irA(activa.f + 1, 0)
+          // Al pasar del último campo se salta a la fila siguiente, y si no
+          // hay ninguna, se crea. La columna de acciones (si la hay) cuenta
+          // como el último campo, igual que con las flechas.
+          if (activa.c === maxCol) void bajarOCrear(activa.f, 0)
           else irA(activa.f, activa.c + 1)
         }
         return
@@ -206,10 +334,13 @@ export function RejillaEditable<F>({
         return
       case 'Enter': {
         e.preventDefault()
+        if (esColumnaAcciones(activa.c)) {
+          celdaAccionesRef.current?.querySelector('button')?.click()
+          return
+        }
         const columna = columnas[activa.c]
         if (fila && columna && esEditable(fila, columna)) empezarEdicion()
-        else if (activa.f === filas.length - 1 && onNuevaFila) onNuevaFila(fila ?? null)
-        else irA(activa.f + 1, activa.c)
+        else void bajarOCrear(activa.f, activa.c)
         return
       }
       case 'Delete': {
@@ -251,28 +382,54 @@ export function RejillaEditable<F>({
         } else {
           confirmar()
         }
-        if (activa) {
-          if (activa.f === filas.length - 1 && onNuevaFila) onNuevaFila(filas[activa.f] ?? null)
-          else irA(activa.f + 1, activa.c)
-        }
+        if (activa) void bajarOCrear(activa.f, activa.c)
         return
       case 'Tab':
         e.preventDefault()
         confirmar(hayLista ? sugerencias[sugerenciaActiva] : undefined)
         if (activa) {
           if (e.shiftKey) irA(activa.f, activa.c - 1)
-          else if (activa.c === columnas.length - 1) irA(activa.f + 1, 0)
+          else if (activa.c === maxCol) void bajarOCrear(activa.f, 0)
           else irA(activa.f, activa.c + 1)
         }
         return
       case 'Escape':
         e.preventDefault()
+        // La ficha que envuelve la rejilla cierra con Escape (ver
+        // `FichaDetalle`). Mientras se edita una celda, Escape solo descarta
+        // esa celda: dejarlo subir cerraría el presupuesto entero a media
+        // captura de datos.
+        e.stopPropagation()
         cancelar()
         return
       default:
         break
     }
   }
+
+  // La celda vive dentro de una `<td>` con `overflow: hidden` (para el
+  // truncado con puntos suspensivos del valor sin editar) y a veces dentro de
+  // un widget con zoom (`transform: scale()`, ver `WidgetGrid`), que recorta
+  // cualquier hijo posicionado. El listado de sugerencias se posiciona en
+  // coordenadas de ventana y se saca por portal (más abajo) para flotar por
+  // encima de todo eso en vez de quedar cortado contra esos bordes.
+  useEffect(() => {
+    if (!editando || sugerencias.length === 0 || !editorRef.current) {
+      setPosicionSugerencias(null)
+      return
+    }
+    function recalcular() {
+      const r = editorRef.current?.getBoundingClientRect()
+      if (r) setPosicionSugerencias({ top: r.bottom + 2, left: r.left, width: r.width })
+    }
+    recalcular()
+    window.addEventListener('scroll', recalcular, true)
+    window.addEventListener('resize', recalcular)
+    return () => {
+      window.removeEventListener('scroll', recalcular, true)
+      window.removeEventListener('resize', recalcular)
+    }
+  }, [editando, sugerencias])
 
   // Búsqueda del autocompletado, con un respiro para no consultar por tecla.
   useEffect(() => {
@@ -380,7 +537,7 @@ export function RejillaEditable<F>({
                             ))}
                           </select>
                         ) : (
-                          <span className="rejilla__editor">
+                          <span className="rejilla__editor" ref={editorRef}>
                             <input
                               ref={inputRef}
                               className="input input--celda"
@@ -391,41 +548,69 @@ export function RejillaEditable<F>({
                               onKeyDown={alPulsarEditando}
                               onBlur={() => confirmar()}
                             />
-                            {col.tipo === 'autocompletado' && sugerencias.length > 0 && (
-                              <div className="rejilla__sugerencias">
-                                {sugerencias.map((s, i) => (
-                                  <button
-                                    key={s.valor}
-                                    type="button"
-                                    className={
-                                      i === sugerenciaActiva
-                                        ? 'rejilla__sugerencia is-activa'
-                                        : 'rejilla__sugerencia'
-                                    }
-                                    // mousedown, no click: el blur del input
-                                    // llegaría antes y cerraría la lista.
-                                    onMouseDown={(e) => {
-                                      e.preventDefault()
-                                      confirmar(s)
-                                    }}
-                                  >
-                                    <span className={s.esAccion ? 'rejilla__sugerencia-accion' : undefined}>
-                                      {s.etiqueta}
-                                    </span>
-                                    {s.detalle && <span className="muted">{s.detalle}</span>}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
+                            {col.tipo === 'autocompletado' &&
+                              sugerencias.length > 0 &&
+                              posicionSugerencias &&
+                              createPortal(
+                                <div
+                                  className="rejilla__sugerencias"
+                                  style={{
+                                    top: posicionSugerencias.top,
+                                    left: posicionSugerencias.left,
+                                    minWidth: Math.max(320, posicionSugerencias.width),
+                                  }}
+                                >
+                                  {sugerencias.map((s, i) => (
+                                    <button
+                                      key={s.valor}
+                                      type="button"
+                                      className={
+                                        i === sugerenciaActiva
+                                          ? 'rejilla__sugerencia is-activa'
+                                          : 'rejilla__sugerencia'
+                                      }
+                                      // mousedown, no click: el blur del input
+                                      // llegaría antes y cerraría la lista.
+                                      onMouseDown={(e) => {
+                                        e.preventDefault()
+                                        confirmar(s)
+                                      }}
+                                    >
+                                      <span
+                                        className={s.esAccion ? 'rejilla__sugerencia-accion' : undefined}
+                                      >
+                                        {s.etiqueta}
+                                      </span>
+                                      {s.detalle && <span className="muted">{s.detalle}</span>}
+                                    </button>
+                                  ))}
+                                </div>,
+                                document.body,
+                              )}
                           </span>
                         )
                       ) : (
-                        col.valor(fila) || <span className="muted">—</span>
+                        <>
+                          {col.prefijo?.(fila)}
+                          {col.valor(fila) || <span className="muted">—</span>}
+                        </>
                       )}
                     </td>
                   )
                 })}
-                {acciones && <td className="table__actions">{acciones(fila)}</td>}
+                {acciones &&
+                  (() => {
+                    const activaAqui = activa?.f === f && esColumnaAcciones(activa.c)
+                    return (
+                      <td
+                        ref={activaAqui ? celdaAccionesRef : undefined}
+                        className={activaAqui ? 'table__actions is-activa' : 'table__actions'}
+                        onMouseDown={() => irA(f, columnas.length)}
+                      >
+                        {acciones(fila)}
+                      </td>
+                    )
+                  })()}
               </tr>
             )
           })}

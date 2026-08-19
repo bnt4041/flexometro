@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderPlus, Layers, Plus, Ruler, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FolderPlus,
+  Layers,
+  Lock,
+  LockOpen,
+  Plus,
+  Ruler,
+  Trash2,
+} from 'lucide-react'
 
+import { BotonAtajos } from './AtajosTeclado'
 import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
@@ -24,7 +37,12 @@ export interface FilaPresupuesto {
   conceptoId: string | null
   /** Capítulo contenedor (de la partida) o capítulo padre (del capítulo). */
   padreId: string | null
+  orden: number
   tieneDesglose: boolean
+  precioVenta: string
+  ventaBloqueada: boolean
+  importeVenta: string
+  estadoVenta: 'perdida' | 'bajo' | 'ok'
   partida?: Partida
 }
 
@@ -43,7 +61,12 @@ function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = 
       importe: capitulo.importe,
       conceptoId: null,
       padreId,
+      orden: capitulo.orden,
       tieneDesglose: false,
+      precioVenta: '',
+      ventaBloqueada: false,
+      importeVenta: '',
+      estadoVenta: 'ok',
     })
     for (const partida of capitulo.partidas) {
       filas.push({
@@ -58,7 +81,12 @@ function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = 
         importe: partida.importe,
         conceptoId: partida.concepto_id,
         padreId: capitulo.id,
+        orden: partida.orden,
         tieneDesglose: partida.tiene_desglose,
+        precioVenta: partida.precio_venta,
+        ventaBloqueada: partida.venta_bloqueada,
+        importeVenta: partida.importe_venta,
+        estadoVenta: partida.estado_venta,
         partida,
       })
     }
@@ -89,10 +117,42 @@ export function RejillaPresupuesto({
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [pendiente, setPendiente] = useState(false)
+  const [replegados, setReplegados] = useState<Set<string>>(new Set())
   const cambios = useRef<Map<string, CambioLinea>>(new Map())
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const filasDelServidor = useMemo(() => aplanar(presupuesto.capitulos), [presupuesto])
+
+  // Un capítulo se puede replegar para no perderse en un presupuesto largo. Se
+  // oculta todo lo que cuelgue de él, a cualquier profundidad: se sube por la
+  // cadena de padres y basta con que uno esté replegado.
+  const porId = useMemo(() => new Map(filas.map((f) => [f.id, f])), [filas])
+  const conHijos = useMemo(
+    () => new Set(filas.map((f) => f.padreId).filter((x): x is string => Boolean(x))),
+    [filas],
+  )
+  const ocultaPorAncestro = (fila: FilaPresupuesto) => {
+    let padre = fila.padreId
+    while (padre) {
+      if (replegados.has(padre)) return true
+      padre = porId.get(padre)?.padreId ?? null
+    }
+    return false
+  }
+  const filasVisibles = filas.filter((f) => !ocultaPorAncestro(f))
+
+  function alternarReplegado(id: string) {
+    setReplegados((previos) => {
+      const nuevos = new Set(previos)
+      if (nuevos.has(id)) nuevos.delete(id)
+      else nuevos.add(id)
+      return nuevos
+    })
+  }
+
+  const replegarTodo = () =>
+    setReplegados(new Set(filas.filter((f) => conHijos.has(f.id)).map((f) => f.id)))
+  const expandirTodo = () => setReplegados(new Set())
 
   // El servidor manda la verdad (códigos renumerados, importes, totales). Solo
   // se pisa el estado local si no hay nada por guardar: si no, se perdería lo
@@ -128,7 +188,7 @@ export function RejillaPresupuesto({
     }
   }, [volcar])
 
-  function encolar(fila: FilaPresupuesto, campo: keyof CambioLinea, valor: string) {
+  function encolar(fila: FilaPresupuesto, campo: keyof CambioLinea, valor: string | boolean) {
     const clave = `${fila.tipo}:${fila.id}`
     const previo = cambios.current.get(clave) ?? { id: fila.id, tipo: fila.tipo }
     cambios.current.set(clave, { ...previo, [campo]: valor })
@@ -168,6 +228,15 @@ export function RejillaPresupuesto({
 
     if (columnaId === 'resumen' && opcion?.esAccion && fila.tipo === 'partida') {
       await crearEnBanco(fila, opcion.valor)
+      return
+    }
+
+    if (columnaId === 'precio_venta') {
+      // Escribir una venta a mano la da por pactada: se bloquea sola, que es
+      // lo que evita que el siguiente reajuste de porcentajes la borre.
+      editarLocal(fila.id, { precioVenta: valor, ventaBloqueada: true })
+      encolar(fila, 'precio_venta', valor)
+      encolar(fila, 'venta_bloqueada', true)
       return
     }
 
@@ -225,6 +294,12 @@ export function RejillaPresupuesto({
     }
   }
 
+  /** Orden para colocar una línea nueva al final de su contenedor. */
+  function siguienteOrden(padreId: string | null, tipo: 'capitulo' | 'partida'): number {
+    const hermanos = filas.filter((f) => f.padreId === padreId && f.tipo === tipo)
+    return hermanos.reduce((maximo, f) => Math.max(maximo, f.orden), -1) + 1
+  }
+
   async function nuevaFila(actual: FilaPresupuesto | null) {
     setError(null)
     try {
@@ -236,7 +311,13 @@ export function RejillaPresupuesto({
       }
       const capituloId = actual.tipo === 'capitulo' ? actual.id : actual.padreId
       if (!capituloId) return
-      await api.capitulos.addPartida(capituloId, { resumen: '' })
+      // Va al final del capítulo: sin esto todas nacerían con orden 0 y la
+      // línea nueva aparecería arriba, no debajo de donde estabas.
+      const orden = siguienteOrden(capituloId, 'partida')
+      // El backend no admite partidas sin descripción (una alzada sin texto no
+      // se puede identificar). Se crea con un texto de arranque que el usuario
+      // sobrescribe: al entrar en la celda queda seleccionado entero.
+      await api.capitulos.addPartida(capituloId, { resumen: 'Nueva partida', orden })
       onCambio()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -246,15 +327,22 @@ export function RejillaPresupuesto({
   async function nuevoCapitulo(actual: FilaPresupuesto | null) {
     setError(null)
     try {
-      const parentId = actual
-        ? actual.tipo === 'capitulo'
-          ? actual.padreId
-          : actual.padreId
-        : null
+      const parentId = actual?.padreId ?? null
       await api.presupuestos.addCapitulo(presupuesto.id, {
         resumen: 'Nuevo capítulo',
         parent_id: parentId,
+        orden: siguienteOrden(parentId, 'capitulo'),
       })
+      onCambio()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  async function alternarCandado(fila: FilaPresupuesto) {
+    setError(null)
+    try {
+      await api.partidas.update(fila.id, { venta_bloqueada: !fila.ventaBloqueada })
       onCambio()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -321,10 +409,30 @@ export function RejillaPresupuesto({
     {
       id: 'codigo',
       etiqueta: 'Código',
-      ancho: '150px',
+      ancho: '170px',
       valor: (f) => f.codigo,
       editable: () => true,
       sangrada: true,
+      prefijo: (f) =>
+        f.tipo === 'capitulo' && conHijos.has(f.id) ? (
+          <button
+            className="rejilla__plegar"
+            aria-label={replegados.has(f.id) ? `Expandir ${f.resumen}` : `Replegar ${f.resumen}`}
+            // El clic es del desplegable, no de la celda: sin esto el cursor
+            // saltaría aquí y encima entraría en edición al segundo clic.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              alternarReplegado(f.id)
+            }}
+          >
+            {replegados.has(f.id) ? (
+              <ChevronRight size={14} aria-hidden="true" />
+            ) : (
+              <ChevronDown size={14} aria-hidden="true" />
+            )}
+          </button>
+        ) : null,
     },
     {
       id: 'resumen',
@@ -375,20 +483,57 @@ export function RejillaPresupuesto({
     },
     {
       id: 'importe',
-      etiqueta: 'Importe',
-      ancho: '120px',
+      etiqueta: 'Coste',
+      ancho: '110px',
       tipo: 'numero',
       valor: (f) => formatoImporte(f.importe),
+    },
+    {
+      id: 'precio_venta',
+      etiqueta: 'Venta',
+      ancho: '120px',
+      tipo: 'numero',
+      valor: (f) => (f.tipo === 'partida' ? formatoImporte(f.precioVenta) : ''),
+      editable: (f) => f.tipo === 'partida',
+    },
+    {
+      id: 'importe_venta',
+      etiqueta: 'Importe venta',
+      ancho: '130px',
+      tipo: 'numero',
+      valor: (f) => (f.tipo === 'partida' ? formatoImporte(f.importeVenta) : ''),
     },
   ]
 
   return (
     <>
       <div className="rejilla-barra">
-        <span className="rejilla-barra__ayuda muted">
-          Enter edita y baja · Tab pasa de celda · Ctrl+Enter nueva partida · Alt+→/← sangra ·
-          Ctrl+Supr borra
-        </span>
+        <BotonAtajos
+          conAutocompletado
+          extra={[{ teclas: 'Alt+→ / Alt+←', hace: 'Meter o sacar la línea de un capítulo' }]}
+        />
+        {conHijos.size > 0 && (
+          <>
+            <Tooltip texto="Replegar todos los capítulos">
+              <button
+                className="btn btn--sm btn--solo-icono"
+                aria-label="Replegar todos los capítulos"
+                onClick={replegarTodo}
+              >
+                <ChevronsDownUp size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            <Tooltip texto="Expandir todos los capítulos">
+              <button
+                className="btn btn--sm btn--solo-icono"
+                aria-label="Expandir todos los capítulos"
+                onClick={expandirTodo}
+              >
+                <ChevronsUpDown size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          </>
+        )}
         <span className="rejilla-barra__estado">
           {guardando ? (
             <span className="muted">Guardando…</span>
@@ -409,13 +554,15 @@ export function RejillaPresupuesto({
       <ErrorNotice error={error} />
 
       <RejillaEditable
-        filas={filas}
+        filas={filasVisibles}
         columnas={columnas}
         idDe={(f) => f.id}
         nivelDe={(f) => f.nivel}
-        claseDe={(f) => (f.tipo === 'capitulo' ? 'fila-capitulo' : undefined)}
+        claseDe={(f) =>
+          f.tipo === 'capitulo' ? 'fila-capitulo' : `venta-${f.estadoVenta}`
+        }
         onEditar={(f, col, valor, opcion) => void alEditar(f, col, valor, opcion)}
-        onNuevaFila={(f) => void nuevaFila(f)}
+        onNuevaFila={nuevaFila}
         onEliminarFila={(f) => void eliminarFila(f)}
         onIndentar={(f, d) => void indentar(f, d)}
         onSeleccionar={onSeleccionar}
@@ -439,6 +586,7 @@ export function RejillaPresupuesto({
                   <Tooltip texto="Dar de alta esta partida en el banco de precios">
                     <button
                       className="btn btn--sm btn--solo-icono"
+                      aria-label="Añadir al banco de precios"
                       onClick={() => onIntegrarBanco(f.partida!)}
                     >
                       <Layers size={14} aria-hidden="true" />
@@ -446,9 +594,33 @@ export function RejillaPresupuesto({
                   </Tooltip>{' '}
                 </>
               )}
+              <Tooltip
+                texto={
+                  f.ventaBloqueada
+                    ? 'Venta bloqueada: un reajuste no la moverá. Pulsa para desbloquear'
+                    : 'Venta calculada. Pulsa para bloquearla'
+                }
+              >
+                <button
+                  className={
+                    f.ventaBloqueada
+                      ? 'btn btn--sm btn--solo-icono is-bloqueada'
+                      : 'btn btn--sm btn--solo-icono'
+                  }
+                  aria-label={f.ventaBloqueada ? 'Desbloquear la venta' : 'Bloquear la venta'}
+                  onClick={() => void alternarCandado(f)}
+                >
+                  {f.ventaBloqueada ? (
+                    <Lock size={14} aria-hidden="true" />
+                  ) : (
+                    <LockOpen size={14} aria-hidden="true" />
+                  )}
+                </button>
+              </Tooltip>{' '}
               <Tooltip texto="Desglosar la medición">
                 <button
                   className="btn btn--sm btn--solo-icono"
+                  aria-label="Desglosar la medición"
                   onClick={() => onMedir(f.partida!)}
                 >
                   <Ruler size={14} aria-hidden="true" />
@@ -457,6 +629,7 @@ export function RejillaPresupuesto({
               <Tooltip texto="Eliminar esta partida">
                 <button
                   className="btn btn--sm btn--danger btn--solo-icono"
+                  aria-label="Eliminar esta partida"
                   onClick={() => void eliminarFila(f)}
                 >
                   <Trash2 size={14} aria-hidden="true" />
@@ -466,13 +639,18 @@ export function RejillaPresupuesto({
           ) : (
             <>
               <Tooltip texto="Añadir una partida en este capítulo">
-                <button className="btn btn--sm btn--solo-icono" onClick={() => void nuevaFila(f)}>
+                <button
+                  className="btn btn--sm btn--solo-icono"
+                  aria-label="Añadir una partida en este capítulo"
+                  onClick={() => void nuevaFila(f)}
+                >
                   <Plus size={14} aria-hidden="true" />
                 </button>
               </Tooltip>{' '}
               <Tooltip texto="Eliminar este capítulo y su contenido">
                 <button
                   className="btn btn--sm btn--danger btn--solo-icono"
+                  aria-label="Eliminar este capítulo"
                   onClick={() => void eliminarFila(f)}
                 >
                   <Trash2 size={14} aria-hidden="true" />

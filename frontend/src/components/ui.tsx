@@ -1,9 +1,42 @@
 import type { ReactNode } from 'react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Icon } from './Icon'
 import type { NombreIcono } from './Icon'
+
+/** Pila de capas superpuestas (fichas y modales) para repartir el Escape.
+ *
+ *  Sin esto, una ficha y el modal que ella misma abre escuchan los dos el
+ *  Escape en `window` y actúan a la vez: cierras el modal y de paso te echa de
+ *  la ficha. Aquí solo responde la capa de arriba, y al cerrarse le devuelve el
+ *  turno a la de debajo. */
+const capas: object[] = []
+
+export function useEscapeCierra(onClose: () => void): void {
+  // El callback se guarda en una referencia para poder registrar la capa una
+  // sola vez por montaje: si el efecto dependiera de `onClose`, un simple
+  // repintado del padre reordenaría la pila y la capa de abajo robaría el turno.
+  const alCerrar = useRef(onClose)
+  alCerrar.current = onClose
+
+  useEffect(() => {
+    const capa = {}
+    capas.push(capa)
+    const alPulsar = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (capas[capas.length - 1] !== capa) return
+      alCerrar.current()
+    }
+    window.addEventListener('keydown', alPulsar)
+    return () => {
+      window.removeEventListener('keydown', alPulsar)
+      const i = capas.lastIndexOf(capa)
+      if (i >= 0) capas.splice(i, 1)
+    }
+  }, [])
+}
 
 export function Field({
   label,
@@ -194,16 +227,16 @@ export function Modal({
   children: ReactNode
 }) {
   // Escape cierra el diálogo: en una pantalla de alta densidad, obligar a
-  // apuntar a la equis para descartar un formulario molesta.
-  useEffect(() => {
-    const alPulsar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', alPulsar)
-    return () => window.removeEventListener('keydown', alPulsar)
-  }, [onClose])
+  // apuntar a la equis para descartar un formulario molesta. Va por la pila de
+  // capas para no cerrar además la ficha que hay debajo.
+  useEscapeCierra(onClose)
 
-  return (
+  // Portal a `document.body`: un widget con zoom (Fase 32) pone `transform:
+  // scale()` en su contenido, y eso convierte a ese `div` en el "containing
+  // block" de cualquier `position: fixed` de dentro — el backdrop deja de
+  // cubrir la pantalla y el modal se recorta contra el borde del widget. El
+  // portal saca el modal de esa jerarquía por completo.
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="modal__head">
@@ -216,7 +249,8 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -235,15 +269,12 @@ export function ModalPantalla({
   onClose: () => void
   children: ReactNode
 }) {
-  useEffect(() => {
-    const alPulsar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', alPulsar)
-    return () => window.removeEventListener('keydown', alPulsar)
-  }, [onClose])
+  useEscapeCierra(onClose)
 
-  return (
+  // Mismo motivo que en `Modal`: sacarlo de la jerarquía de un widget con
+  // zoom (que pone `transform`) para que el `position: fixed` cubra la
+  // pantalla entera y no se recorte contra el borde del widget.
+  return createPortal(
     <div className="modal-pantalla-backdrop" onClick={onClose}>
       <div
         className="modal-pantalla"
@@ -261,7 +292,8 @@ export function ModalPantalla({
         </div>
         <div className="modal-pantalla__body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

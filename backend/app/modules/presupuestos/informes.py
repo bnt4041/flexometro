@@ -239,4 +239,4 @@ async def _totales(session: AsyncSession, presupuesto: Presupuesto):
     capitulos, partidas = await calc.cargar_estructura(session, presupuesto.id)
     acumulado = calc.importes_por_capitulo(capitulos, partidas)
     pem = calc.pem_de(capitulos, acumulado)
-    return pem, calc.Totales(presupuesto, pem).como_dict()
+    return pem, calc.Totales(presupuesto, pem, calc.venta_total(partidas)).como_dict()

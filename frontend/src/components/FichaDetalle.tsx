@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { Icon } from './Icon'
 import type { NombreIcono } from './Icon'
-import { Tooltip } from './ui'
+import { Tooltip, useEscapeCierra } from './ui'
 
 export interface PestanaFicha {
   id: string
@@ -42,13 +42,9 @@ export function FichaDetalle({
   const [activaId, setActivaId] = useState(pestanas[0]?.id)
   const activa = pestanas.find((p) => p.id === activaId) ?? pestanas[0]
 
-  useEffect(() => {
-    const alPulsar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', alPulsar)
-    return () => window.removeEventListener('keydown', alPulsar)
-  }, [onClose])
+  // Por la pila de capas: si esta ficha tiene un modal abierto, el Escape es
+  // suyo, no de la ficha (ver `useEscapeCierra`).
+  useEscapeCierra(onClose)
 
   return (
     <div className="modal-pantalla-backdrop" onClick={onClose}>

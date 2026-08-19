@@ -40,20 +40,48 @@
 </table>
 
 <table class="totales">
+  {# El encadenado impreso depende del método elegido (Fase 35): enseñar
+     "Gastos generales 13 %" a cero en un presupuesto con margen comercial
+     sería sencillamente falso. #}
+  {% if totales.metodo == 'clasico' %}
+    <tr>
+      <td>Presupuesto de ejecución material</td>
+      <td class="num">{{ totales.pem | eur }}</td>
+    </tr>
+    <tr class="suave">
+      <td>Gastos generales {{ presupuesto.gastos_generales | num(2) }} %</td>
+      <td class="num">{{ totales.gastos_generales | eur }}</td>
+    </tr>
+    <tr class="suave">
+      <td>Beneficio industrial {{ presupuesto.beneficio_industrial | num(2) }} %</td>
+      <td class="num">{{ totales.beneficio_industrial | eur }}</td>
+    </tr>
+  {% else %}
+    <tr>
+      <td>Coste</td>
+      <td class="num">{{ totales.coste | eur }}</td>
+    </tr>
+    <tr class="suave">
+      {% if totales.metodo == 'incremento_sobre_coste' %}
+        <td>Incremento {{ totales.porcentaje_metodo | num(2) }} % sobre el coste</td>
+      {% else %}
+        <td>Beneficio {{ totales.porcentaje_metodo | num(2) }} % sobre la venta</td>
+      {% endif %}
+      <td class="num">{{ totales.incremento | eur }}</td>
+    </tr>
+  {% endif %}
+  {% if totales.ajuste_manual %}
+    <tr class="suave">
+      <td>Ajuste sobre el cálculo teórico</td>
+      <td class="num">{{ totales.ajuste_manual | eur }}</td>
+    </tr>
+  {% endif %}
   <tr>
-    <td>Presupuesto de ejecución material</td>
-    <td class="num">{{ totales.pem | eur }}</td>
-  </tr>
-  <tr class="suave">
-    <td>Gastos generales {{ presupuesto.gastos_generales | num(2) }} %</td>
-    <td class="num">{{ totales.gastos_generales | eur }}</td>
-  </tr>
-  <tr class="suave">
-    <td>Beneficio industrial {{ presupuesto.beneficio_industrial | num(2) }} %</td>
-    <td class="num">{{ totales.beneficio_industrial | eur }}</td>
-  </tr>
-  <tr>
-    <td>Presupuesto de ejecución por contrata</td>
+    {% if totales.metodo == 'clasico' %}
+      <td>Presupuesto de ejecución por contrata</td>
+    {% else %}
+      <td>Venta (sin IVA)</td>
+    {% endif %}
     <td class="num">{{ totales.pec_sin_iva | eur }}</td>
   </tr>
   <tr class="suave">

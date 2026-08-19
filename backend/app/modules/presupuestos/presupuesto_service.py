@@ -8,21 +8,32 @@ from sqlalchemy.orm import aliased, selectinload
 from app.core.numeracion import siguiente_referencia
 from app.core.redondeo import redondear_medicion, redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
-from app.modules.presupuestos import calculo
+from app.modules.presupuestos import calculo, formulas
 from app.modules.presupuestos import presupuesto_calculo as calc
-from app.modules.presupuestos.models import Concepto, NaturalezaConcepto, OrigenPrecio, TipoConcepto
+from app.modules.presupuestos.models import (
+    Concepto,
+    Descomposicion,
+    NaturalezaConcepto,
+    OrigenPrecio,
+    TipoConcepto,
+)
 from app.modules.presupuestos.models_presupuesto import (
     ESTADOS_BLOQUEADOS,
     Capitulo,
     EstadoPresupuesto,
+    FormulaMedicion,
     LineaMedicion,
+    MetodoCalculo,
     Partida,
+    PartidaDescomposicion,
     Presupuesto,
 )
 from app.modules.presupuestos.presupuesto_schemas import (
     CambioLinea,
     CapituloCreate,
     CapituloUpdate,
+    FormulaMedicionCreate,
+    FormulaMedicionUpdate,
     LineaMedicionCreate,
     LineaMedicionUpdate,
     NodoCapitulo,
@@ -49,6 +60,10 @@ class PartidaSinDatos(Exception):
 
 
 class ConceptoYaVinculado(Exception):
+    pass
+
+
+class FormulaNoEncontrada(Exception):
     pass
 
 
@@ -166,6 +181,17 @@ async def actualizar(
         presupuesto.precios_bloqueados = presupuesto.estado in ESTADOS_BLOQUEADOS
 
     await session.flush()
+
+    # Tocar el método o cualquiera de sus porcentajes cambia la venta de todas
+    # las partidas que no estén bloqueadas (Fase 35).
+    if cambios.keys() & {
+        "metodo_calculo",
+        "porcentaje_metodo",
+        "gastos_generales",
+        "beneficio_industrial",
+    }:
+        await calc.recalcular_ventas(session, presupuesto)
+
     return presupuesto
 
 
@@ -319,6 +345,10 @@ async def crear_partida(
         session.add(_nueva_linea(org_id, partida.id, linea))
     await session.flush()
     await calc.recalcular_partida(session, partida)
+    presupuesto = await obtener(session, capitulo.presupuesto_id)
+    if presupuesto is not None:
+        calc.aplicar_venta(presupuesto, partida)
+        await session.flush()
     return partida
 
 
@@ -344,7 +374,7 @@ async def actualizar_partida(
     # sobrescribiría de todas formas, así que se ignora en silencio en vez de
     # aceptar un valor que va a durar hasta el siguiente flush.
     medicion_manual = cambios.pop("medicion", None)
-    sin_desglose = len(partida.lineas) == 0
+    sin_desglose = not await _tiene_desglose(session, partida.id)
 
     for campo, valor in cambios.items():
         setattr(partida, campo, valor)
@@ -354,12 +384,39 @@ async def actualizar_partida(
     if medicion_manual is not None and sin_desglose:
         partida.medicion = redondear_medicion(medicion_manual)
         partida.importe = redondear_precio(partida.medicion * partida.precio)
-        await session.flush()
+        await _refrescar_venta(session, partida)
         return partida
 
     await session.flush()
     await calc.recalcular_partida(session, partida)
+    await _refrescar_venta(session, partida)
     return partida
+
+
+async def _tiene_desglose(session: AsyncSession, partida_id: uuid.UUID) -> bool:
+    """¿La partida tiene líneas de medición?
+
+    Se consulta a la base de datos en vez de mirar `partida.lineas`: si el
+    objeto ya estaba en la sesión con la colección cargada, `selectinload` no
+    la refresca al volver a pedirlo, y quedarían líneas fantasma tras un
+    borrado. Con una sola edición por request casi nunca se nota, pero cuando
+    se nota el síntoma es desconcertante.
+    """
+    total = await session.scalar(
+        select(func.count())
+        .select_from(LineaMedicion)
+        .where(LineaMedicion.partida_id == partida_id)
+    )
+    return bool(total)
+
+
+async def _refrescar_venta(session: AsyncSession, partida: Partida) -> None:
+    """Rehace la venta de la partida tras cambiarle coste o medición (Fase 35).
+    Si está bloqueada solo se refresca el importe, no el precio."""
+    presupuesto = await obtener(session, partida.presupuesto_id)
+    if presupuesto is not None:
+        calc.aplicar_venta(presupuesto, partida)
+    await session.flush()
 
 
 async def eliminar_partida(session: AsyncSession, partida_id: uuid.UUID) -> bool:
@@ -420,17 +477,123 @@ async def integrar_en_banco_precios(session: AsyncSession, partida_id: uuid.UUID
     return partida
 
 
+# --- Fórmulas de medición (Fase 37) ---
+
+
+async def listar_formulas(
+    session: AsyncSession, cuenta_id: uuid.UUID, *, solo_activas: bool = False
+) -> list[FormulaMedicion]:
+    condiciones = [FormulaMedicion.cuenta_id == cuenta_id]
+    if solo_activas:
+        condiciones.append(FormulaMedicion.activa.is_(True))
+    filas = await session.execute(
+        select(FormulaMedicion)
+        .where(*condiciones)
+        .order_by(FormulaMedicion.orden, FormulaMedicion.nombre)
+    )
+    return list(filas.scalars())
+
+
+async def crear_formula(
+    session: AsyncSession, cuenta_id: uuid.UUID, datos: FormulaMedicionCreate
+) -> FormulaMedicion:
+    # Se valida antes de guardar: una fórmula que no se puede evaluar no sirve
+    # de nada y daría error más tarde, al medir, lejos de donde se escribió.
+    formulas.validar(datos.expresion)
+    existe = await session.scalar(
+        select(FormulaMedicion.id).where(
+            FormulaMedicion.cuenta_id == cuenta_id, FormulaMedicion.nombre == datos.nombre
+        )
+    )
+    if existe:
+        raise CodigoDuplicado(f"Ya hay una fórmula llamada '{datos.nombre}'")
+    formula = FormulaMedicion(cuenta_id=cuenta_id, **datos.model_dump())
+    session.add(formula)
+    await session.flush()
+    return formula
+
+
+async def actualizar_formula(
+    session: AsyncSession, cuenta_id: uuid.UUID, formula_id: uuid.UUID, datos: FormulaMedicionUpdate
+) -> FormulaMedicion | None:
+    formula = await session.scalar(
+        select(FormulaMedicion).where(
+            FormulaMedicion.id == formula_id, FormulaMedicion.cuenta_id == cuenta_id
+        )
+    )
+    if formula is None:
+        return None
+    cambios = datos.model_dump(exclude_unset=True)
+    if "expresion" in cambios and cambios["expresion"]:
+        formulas.validar(cambios["expresion"])
+    for campo, valor in cambios.items():
+        setattr(formula, campo, valor)
+    await session.flush()
+    return formula
+
+
+async def eliminar_formula(
+    session: AsyncSession, cuenta_id: uuid.UUID, formula_id: uuid.UUID
+) -> bool:
+    formula = await session.scalar(
+        select(FormulaMedicion).where(
+            FormulaMedicion.id == formula_id, FormulaMedicion.cuenta_id == cuenta_id
+        )
+    )
+    if formula is None:
+        return False
+    # Las líneas que la usaban conservan su copia congelada de la expresión
+    # (`formula_expresion`), así que borrar el catálogo no altera mediciones ya
+    # hechas: solo deja de ofrecerse para las nuevas.
+    await session.delete(formula)
+    await session.flush()
+    return True
+
+
 # --- Líneas de medición ---
 
 
+async def _expresion_de(session: AsyncSession, formula_id: uuid.UUID | None) -> str | None:
+    """Expresión de la fórmula elegida, para congelarla en la línea (Fase 37)."""
+    if formula_id is None:
+        return None
+    formula = await session.scalar(
+        select(FormulaMedicion).where(FormulaMedicion.id == formula_id)
+    )
+    if formula is None:
+        raise FormulaNoEncontrada("La fórmula no existe")
+    return formula.expresion
+
+
+def _valores_json(valores: dict | None) -> dict[str, str]:
+    """Los valores de la fórmula van a una columna JSONB, y `Decimal` no es
+    serializable a JSON. Se guardan como texto —igual que viajan todos los
+    decimales por la API— y el evaluador ya los convierte al calcular."""
+    return {str(k): str(v) for k, v in (valores or {}).items()}
+
+
 def _nueva_linea(
-    org_id: uuid.UUID, partida_id: uuid.UUID, datos: LineaMedicionCreate
+    org_id: uuid.UUID,
+    partida_id: uuid.UUID,
+    datos: LineaMedicionCreate,
+    expresion: str | None = None,
 ) -> LineaMedicion:
+    campos = datos.model_dump()
+    valores = _valores_json(campos.pop("formula_valores", None))
+    campos["formula_valores"] = valores
     return LineaMedicion(
         organization_id=org_id,
         partida_id=partida_id,
-        parcial=calc.parcial_de(datos.uds, datos.longitud, datos.anchura, datos.altura),
-        **datos.model_dump(),
+        formula_expresion=expresion,
+        parcial=calc.parcial_de(
+            datos.uds,
+            datos.longitud,
+            datos.anchura,
+            datos.altura,
+            expresion=expresion,
+            valores=valores,
+        ),
+        **campos,
     )
 
 
@@ -441,10 +604,12 @@ async def crear_linea(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return None
-    linea = _nueva_linea(org_id, partida_id, datos)
+    expresion = await _expresion_de(session, datos.formula_id)
+    linea = _nueva_linea(org_id, partida_id, datos, expresion)
     session.add(linea)
     await session.flush()
     await calc.recalcular_partida(session, partida)
+    await _refrescar_venta(session, partida)
     return linea
 
 
@@ -463,14 +628,32 @@ async def actualizar_linea(
     linea = await obtener_linea(session, linea_id)
     if linea is None:
         return None
-    for campo, valor in datos.model_dump(exclude_unset=True).items():
+    cambios = datos.model_dump(exclude_unset=True)
+    for campo, valor in cambios.items():
         setattr(linea, campo, valor)
-    linea.parcial = calc.parcial_de(linea.uds, linea.longitud, linea.anchura, linea.altura)
+
+    # Cambiar de fórmula (o quitarla) rehace la copia congelada de la expresión.
+    if "formula_id" in cambios:
+        linea.formula_expresion = await _expresion_de(session, linea.formula_id)
+    if "formula_valores" in cambios:
+        linea.formula_valores = _valores_json(cambios["formula_valores"])
+    if linea.formula_valores is None:
+        linea.formula_valores = {}
+
+    linea.parcial = calc.parcial_de(
+        linea.uds,
+        linea.longitud,
+        linea.anchura,
+        linea.altura,
+        expresion=linea.formula_expresion,
+        valores=linea.formula_valores,
+    )
     await session.flush()
 
     partida = await obtener_partida(session, linea.partida_id)
     if partida is not None:
         await calc.recalcular_partida(session, partida)
+        await _refrescar_venta(session, partida)
     return linea
 
 
@@ -484,12 +667,305 @@ async def eliminar_linea(session: AsyncSession, linea_id: uuid.UUID) -> bool:
 
     partida = await obtener_partida(session, partida_id)
     if partida is not None:
+        # Al quitar la última línea la partida se queda sin desglose, y
+        # `recalcular_partida` ya no toca la medición para no pisar las
+        # manuales: aquí sí hay que ponerla a cero explícitamente, porque lo
+        # que había era la suma de unas líneas que ya no existen.
+        if not await _tiene_desglose(session, partida_id):
+            partida.medicion = Decimal("0.000")
         await calc.recalcular_partida(session, partida)
+        await _refrescar_venta(session, partida)
     return True
 
 
 class ConversionImposible(Exception):
     pass
+
+
+# --- Descompuesto de la partida (Fase 34) ---
+
+
+async def _lineas_heredadas(
+    session: AsyncSession, concepto_id: uuid.UUID
+) -> list[tuple[Descomposicion, Concepto]]:
+    """Descompuesto del concepto del banco, con el hijo de cada línea."""
+    filas = await session.execute(
+        select(Descomposicion, Concepto)
+        .join(Concepto, Concepto.id == Descomposicion.hijo_id)
+        .where(Descomposicion.padre_id == concepto_id)
+        .order_by(Descomposicion.orden)
+    )
+    return [(linea, hijo) for linea, hijo in filas.all()]
+
+
+async def independizar_descomposicion(
+    session: AsyncSession, partida: Partida
+) -> list[PartidaDescomposicion]:
+    """Clona el descompuesto del concepto en la partida, si no lo tiene ya.
+
+    Es lo que convierte "cambiar el precio solo aquí" en algo posible: hasta
+    ahora la partida compartía el descompuesto del banco con todos los demás
+    presupuestos. Se copian también `costes_indirectos` para que la operación
+    sea neutra en precio — independizarse no puede cambiar lo que vale la
+    partida, solo de dónde sale ese valor.
+    """
+    org_id = require_organization_id()
+    existentes = (
+        await session.execute(
+            select(PartidaDescomposicion)
+            .where(PartidaDescomposicion.partida_id == partida.id)
+            .order_by(PartidaDescomposicion.orden)
+        )
+    ).scalars()
+    ya = list(existentes)
+    if ya:
+        return ya
+    if partida.concepto_id is None:
+        return []
+
+    concepto = await session.scalar(
+        select(Concepto).where(
+            Concepto.id == partida.concepto_id, Concepto.organization_id == org_id
+        )
+    )
+    if concepto is None:
+        return []
+
+    nuevas: list[PartidaDescomposicion] = []
+    for orden, (linea, hijo) in enumerate(await _lineas_heredadas(session, concepto.id)):
+        fila = PartidaDescomposicion(
+            organization_id=org_id,
+            partida_id=partida.id,
+            hijo_id=hijo.id,
+            codigo=hijo.codigo,
+            resumen=hijo.resumen,
+            unidad=hijo.unidad,
+            naturaleza=str(hijo.naturaleza),
+            rendimiento=linea.rendimiento,
+            factor=linea.factor,
+            precio=hijo.precio,
+            orden=orden,
+        )
+        session.add(fila)
+        nuevas.append(fila)
+
+    if nuevas:
+        partida.costes_indirectos = concepto.costes_indirectos
+    await session.flush()
+    return nuevas
+
+
+async def descomposicion_de_partida(
+    session: AsyncSession, partida_id: uuid.UUID
+) -> tuple[bool, list[dict]] | None:
+    """Descompuesto que se le enseña a la partida: el suyo si lo tiene, y si no
+    el del banco en modo lectura. El booleano dice cuál de los dos es."""
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return None
+
+    propias = (
+        await session.execute(
+            select(PartidaDescomposicion)
+            .where(PartidaDescomposicion.partida_id == partida.id)
+            .order_by(PartidaDescomposicion.orden)
+        )
+    ).scalars()
+    propias = list(propias)
+    if propias:
+        return True, [
+            {
+                "id": f.id,
+                "hijo_id": f.hijo_id,
+                "codigo": f.codigo,
+                "resumen": f.resumen,
+                "unidad": f.unidad,
+                "rendimiento": f.rendimiento,
+                "factor": f.factor,
+                "precio": f.precio,
+                "importe": redondear_precio(f.rendimiento * f.factor * f.precio),
+            }
+            for f in propias
+        ]
+
+    if partida.concepto_id is None:
+        return False, []
+    return False, [
+        {
+            "id": linea.id,
+            "hijo_id": hijo.id,
+            "codigo": hijo.codigo,
+            "resumen": hijo.resumen,
+            "unidad": hijo.unidad,
+            "rendimiento": linea.rendimiento,
+            "factor": linea.factor,
+            "precio": hijo.precio,
+            "importe": redondear_precio(linea.rendimiento * linea.factor * hijo.precio),
+        }
+        for linea, hijo in await _lineas_heredadas(session, partida.concepto_id)
+    ]
+
+
+async def anadir_componente(
+    session: AsyncSession,
+    partida_id: uuid.UUID,
+    hijo_id: uuid.UUID,
+    rendimiento: Decimal,
+    factor: Decimal,
+) -> bool:
+    """Añade un componente al descompuesto de la partida (Fase 34).
+
+    Si la partida todavía heredaba el descompuesto del banco, primero se
+    independiza: añadir una línea "solo aquí" es exactamente el caso que la
+    descomposición propia existe para resolver. Una partida alzada (sin
+    concepto) arranca con un descompuesto vacío y este es su primer componente.
+    """
+    org_id = require_organization_id()
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+
+    hijo = await session.scalar(
+        select(Concepto).where(Concepto.id == hijo_id, Concepto.organization_id == org_id)
+    )
+    if hijo is None:
+        raise ConceptoInvalido("El concepto no existe en esta organización")
+
+    await independizar_descomposicion(session, partida)
+    siguiente = await session.scalar(
+        select(func.count())
+        .select_from(PartidaDescomposicion)
+        .where(PartidaDescomposicion.partida_id == partida.id)
+    )
+    session.add(
+        PartidaDescomposicion(
+            organization_id=org_id,
+            partida_id=partida.id,
+            hijo_id=hijo.id,
+            codigo=hijo.codigo,
+            resumen=hijo.resumen,
+            unidad=hijo.unidad,
+            naturaleza=str(hijo.naturaleza),
+            rendimiento=rendimiento,
+            factor=factor,
+            precio=hijo.precio,
+            orden=int(siguiente or 0),
+        )
+    )
+    await session.flush()
+    await calc.recalcular_desde_descomposicion(session, partida)
+    await _refrescar_venta(session, partida)
+    return True
+
+
+async def quitar_componente(
+    session: AsyncSession, partida_id: uuid.UUID, linea_id: uuid.UUID
+) -> bool:
+    """Quita una línea del descompuesto propio de la partida."""
+    org_id = require_organization_id()
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+    linea = await session.scalar(
+        select(PartidaDescomposicion).where(
+            PartidaDescomposicion.id == linea_id,
+            PartidaDescomposicion.partida_id == partida_id,
+            PartidaDescomposicion.organization_id == org_id,
+        )
+    )
+    if linea is None:
+        return False
+    await session.delete(linea)
+    await session.flush()
+    # Si era la última, la partida se queda con descompuesto vacío: el precio
+    # deja de calcularse y se queda con el que tuviera, que es lo mismo que le
+    # pasa a una partida alzada.
+    await calc.recalcular_desde_descomposicion(session, partida)
+    await _refrescar_venta(session, partida)
+    return True
+
+
+async def cambiar_precio_componente(
+    session: AsyncSession,
+    partida_id: uuid.UUID,
+    hijo_id: uuid.UUID,
+    precio: Decimal,
+    alcance: str,
+) -> int:
+    """Cambia el precio de un componente del descompuesto (Fase 34).
+
+    Con alcance `partida` afecta solo a esa; con `presupuesto`, a todas las del
+    mismo presupuesto que lleven ese componente. En ambos casos las partidas
+    afectadas se independizan del banco: el banco de precios no se toca nunca
+    desde aquí, porque cambiarlo arrastraría a otros presupuestos que el
+    usuario no está mirando.
+
+    Devuelve cuántas partidas se han visto afectadas.
+    """
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return 0
+
+    objetivo = [partida]
+    if alcance == "presupuesto":
+        org_id = require_organization_id()
+        hermanas = (
+            await session.execute(
+                select(Partida)
+                .options(selectinload(Partida.lineas))
+                .where(
+                    Partida.presupuesto_id == partida.presupuesto_id,
+                    Partida.organization_id == org_id,
+                    Partida.id != partida.id,
+                )
+            )
+        ).scalars()
+        objetivo.extend(hermanas)
+
+    afectadas = 0
+    for candidata in objetivo:
+        lineas = await independizar_descomposicion(session, candidata)
+        tocada = False
+        for linea in lineas:
+            if linea.hijo_id == hijo_id:
+                linea.precio = redondear_precio(precio)
+                tocada = True
+        if not tocada:
+            continue
+        await session.flush()
+        await calc.recalcular_desde_descomposicion(session, candidata)
+        await _refrescar_venta(session, candidata)
+        afectadas += 1
+
+    return afectadas
+
+
+async def cambiar_rendimiento_componente(
+    session: AsyncSession, partida_id: uuid.UUID, hijo_id: uuid.UUID, rendimiento: Decimal
+) -> bool:
+    """Cambia el rendimiento de un componente del descompuesto de la partida.
+
+    A diferencia del precio, el rendimiento no se comparte nunca entre
+    partidas —es cuánto gasta ESTA partida de ese componente por unidad—, así
+    que no hay alcance que elegir: siempre es "solo aquí". Si la partida
+    todavía heredaba el descompuesto del banco, se independiza igual que al
+    tocar el precio, porque el banco no se toca desde aquí.
+    """
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+    lineas = await independizar_descomposicion(session, partida)
+    tocada = False
+    for linea in lineas:
+        if linea.hijo_id == hijo_id:
+            linea.rendimiento = rendimiento
+            tocada = True
+    if not tocada:
+        return False
+    await session.flush()
+    await calc.recalcular_desde_descomposicion(session, partida)
+    await _refrescar_venta(session, partida)
+    return True
 
 
 async def convertir_linea(
@@ -573,6 +1049,151 @@ async def convertir_linea(
     return ("capitulo", capitulo_nuevo.id)
 
 
+# --- Reajuste del presupuesto (Fase 36) ---
+
+
+class ReajusteImposible(Exception):
+    pass
+
+
+async def reajustar(
+    session: AsyncSession,
+    presupuesto_id: uuid.UUID,
+    tipo: str,
+    valor: Decimal,
+    aplicar: bool,
+) -> dict | None:
+    """Lleva el presupuesto a un importe o a un margen objetivo (Fase 36).
+
+    Solo se mueven las partidas con la venta SIN bloquear: las bloqueadas son
+    precios pactados y el reajuste tiene que respetarlos, así que el resto
+    absorbe toda la diferencia. Se escala el precio unitario de cada una por un
+    factor común, que es lo que reparte proporcionalmente.
+
+    Con `aplicar=False` no toca nada: devuelve exactamente el mismo cálculo
+    para poder enseñarlo antes de decidir.
+    """
+    presupuesto = await obtener(session, presupuesto_id)
+    if presupuesto is None:
+        return None
+
+    org_id = require_organization_id()
+    partidas = list(
+        (
+            await session.execute(
+                select(Partida)
+                .where(
+                    Partida.presupuesto_id == presupuesto_id,
+                    Partida.organization_id == org_id,
+                )
+                .order_by(Partida.orden)
+            )
+        ).scalars()
+    )
+    if not partidas:
+        raise ReajusteImposible("El presupuesto no tiene partidas que reajustar")
+
+    coste = redondear_precio(sum((p.importe for p in partidas), Decimal("0.00")))
+    venta_antes = redondear_precio(sum((p.importe_venta for p in partidas), Decimal("0.00")))
+
+    if tipo == "margen":
+        if valor >= Decimal("100"):
+            raise ReajusteImposible(
+                "Un margen del 100 % o más no tiene solución: el coste nunca llegaría a cubrirse"
+            )
+        objetivo = redondear_precio(coste / (Decimal("1") - valor / Decimal("100")))
+    else:
+        objetivo = redondear_precio(valor)
+
+    libres = [p for p in partidas if not p.venta_bloqueada]
+    bloqueadas = [p for p in partidas if p.venta_bloqueada]
+    if not libres:
+        raise ReajusteImposible(
+            "Todas las ventas están bloqueadas: quita algún candado para poder reajustar"
+        )
+
+    venta_bloqueada = redondear_precio(sum((p.importe_venta for p in bloqueadas), Decimal("0.00")))
+    objetivo_libre = objetivo - venta_bloqueada
+    if objetivo_libre < 0:
+        raise ReajusteImposible(
+            f"Las ventas bloqueadas suman {venta_bloqueada} €, ya por encima del objetivo de {objetivo} €"
+        )
+
+    venta_libre = redondear_precio(sum((p.importe_venta for p in libres), Decimal("0.00")))
+    coste_libre = redondear_precio(sum((p.importe for p in libres), Decimal("0.00")))
+
+    # Se reparte en proporción a la venta actual. Si todavía no hay venta (todo
+    # a cero), se reparte en proporción al coste, que es la única referencia
+    # que queda.
+    if venta_libre > 0:
+        factor = objetivo_libre / venta_libre
+        base = "venta"
+    elif coste_libre > 0:
+        factor = objetivo_libre / coste_libre
+        base = "coste"
+    else:
+        raise ReajusteImposible(
+            "Las partidas a reajustar no tienen ni venta ni coste: no hay nada que escalar"
+        )
+
+    lineas = []
+    bajo_coste = 0
+    for partida in partidas:
+        if partida.venta_bloqueada:
+            nueva_venta = partida.precio_venta
+            nuevo_importe = partida.importe_venta
+        else:
+            referencia = partida.precio_venta if base == "venta" else partida.precio
+            nueva_venta = redondear_precio(referencia * factor)
+            nuevo_importe = redondear_precio(partida.medicion * nueva_venta)
+            if nueva_venta < partida.precio:
+                bajo_coste += 1
+        lineas.append(
+            {
+                "partida_id": partida.id,
+                "codigo": partida.codigo,
+                "resumen": partida.resumen,
+                "bloqueada": partida.venta_bloqueada,
+                "coste": partida.precio,
+                "venta_antes": partida.precio_venta,
+                "venta_despues": nueva_venta,
+                "importe_antes": partida.importe_venta,
+                "importe_despues": nuevo_importe,
+            }
+        )
+
+    venta_despues = redondear_precio(
+        sum((linea["importe_despues"] for linea in lineas), Decimal("0.00"))
+    )
+
+    if aplicar:
+        for partida, linea in zip(partidas, lineas, strict=True):
+            if partida.venta_bloqueada:
+                continue
+            partida.precio_venta = linea["venta_despues"]
+            partida.importe_venta = linea["importe_despues"]
+        await session.flush()
+
+    def margen_pct(venta: Decimal) -> Decimal:
+        return redondear_precio((venta - coste) * Decimal("100") / venta) if venta else Decimal("0.00")
+
+    return {
+        "aplicado": aplicar,
+        "objetivo_venta": objetivo,
+        "coste": coste,
+        "venta_antes": venta_antes,
+        "venta_despues": venta_despues,
+        "diferencia": venta_despues - objetivo,
+        "margen_antes": margen_pct(venta_antes),
+        "margen_despues": margen_pct(venta_despues),
+        "factor": factor.quantize(Decimal("0.000001")),
+        "partidas_afectadas": len(libres),
+        "partidas_bloqueadas": len(bloqueadas),
+        "partidas_bajo_coste": bajo_coste,
+        "lineas": lineas,
+    }
+
+
 # --- Edición por lotes (Fase 33) ---
 
 
@@ -590,6 +1211,7 @@ async def actualizar_lineas_en_lote(
     además evita una consulta por fila.
     """
     org_id = require_organization_id()
+    presupuesto = await obtener(session, presupuesto_id)
     aplicados = 0
 
     for cambio in cambios:
@@ -633,9 +1255,11 @@ async def actualizar_lineas_en_lote(
             partida.precio = redondear_precio(partida.precio)
         # Misma regla que `actualizar_partida`: con desglose manda la suma de
         # los parciales, no lo que venga escrito en la celda.
-        if medicion_manual is not None and not partida.lineas:
+        if medicion_manual is not None and not await _tiene_desglose(session, partida.id):
             partida.medicion = redondear_medicion(medicion_manual)
         partida.importe = redondear_precio(partida.medicion * partida.precio)
+        if presupuesto is not None:
+            calc.aplicar_venta(presupuesto, partida)
         aplicados += 1
 
     await session.flush()
@@ -663,6 +1287,16 @@ async def arbol_y_totales(
         )
         con_desglose = set(filas.scalars())
 
+    # Igual para las que se han independizado del banco (Fase 34).
+    independizadas: set[uuid.UUID] = set()
+    if partidas:
+        filas = await session.execute(
+            select(PartidaDescomposicion.partida_id)
+            .where(PartidaDescomposicion.partida_id.in_([p.id for p in partidas]))
+            .distinct()
+        )
+        independizadas = set(filas.scalars())
+
     por_capitulo: dict[uuid.UUID, list[Partida]] = {}
     for partida in partidas:
         por_capitulo.setdefault(partida.capitulo_id, []).append(partida)
@@ -674,6 +1308,12 @@ async def arbol_y_totales(
     def salida(partida: Partida) -> PartidaOut:
         fila = PartidaOut.model_validate(partida)
         fila.tiene_desglose = partida.id in con_desglose
+        fila.descomposicion_propia = partida.id in independizadas
+        # Semáforo (Fase 35): se compara la venta real con la que tocaría por
+        # el método, para distinguir "va a pérdida" de "gana menos de lo
+        # previsto", que no es lo mismo aunque las dos merezcan un aviso.
+        objetivo = calc.venta_de_presupuesto(presupuesto, partida.precio)
+        fila.estado_venta = calc.estado_venta(partida.precio, partida.precio_venta, objetivo)
         return fila
 
     def nodo(capitulo: Capitulo) -> NodoCapitulo:
@@ -689,7 +1329,9 @@ async def arbol_y_totales(
         )
 
     raices = [nodo(c) for c in hijos.get(None, [])]
-    totales = TotalesOut(**calc.Totales(presupuesto, pem).como_dict())
+    totales = TotalesOut(
+        **calc.Totales(presupuesto, pem, calc.venta_total(partidas)).como_dict()
+    )
     return raices, totales
 
 
@@ -698,7 +1340,7 @@ async def total_de(session: AsyncSession, presupuesto: Presupuesto) -> tuple[Dec
     capitulos, partidas = await calc.cargar_estructura(session, presupuesto.id)
     acumulado = calc.importes_por_capitulo(capitulos, partidas)
     pem = calc.pem_de(capitulos, acumulado)
-    return pem, calc.Totales(presupuesto, pem).total
+    return pem, calc.Totales(presupuesto, pem, calc.venta_total(partidas)).total
 
 
 # Unidad de horas del diccionario `unidad_medida` (ver migración de Fase 20)

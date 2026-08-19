@@ -24,6 +24,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +40,23 @@ class EstadoPresupuesto(StrEnum):
     APROBADO = "aprobado"
     RECHAZADO = "rechazado"
     CANCELADO = "cancelado"
+
+
+class MetodoCalculo(StrEnum):
+    """Cómo se pasa del coste al precio de venta — Fase 35.
+
+    `CLASICO` es el encadenado español de toda la vida (PEM + %GG + %BI). Los
+    otros dos son márgenes comerciales sobre el coste, y se diferencian en
+    sobre qué se calcula el porcentaje: `INCREMENTO_SOBRE_COSTE` lo aplica al
+    coste (markup: 100 € + 20 % = 120 €), mientras que `BENEFICIO_FINAL` lo
+    entiende como porcentaje del precio de venta (margen: 100 € al 20 % son
+    125 €, porque 25 es el 20 % de 125). Confundirlos es el error clásico al
+    presupuestar, así que van explícitamente separados.
+    """
+
+    CLASICO = "clasico"
+    INCREMENTO_SOBRE_COSTE = "incremento_sobre_coste"
+    BENEFICIO_FINAL = "beneficio_final"
 
 
 # Estados en los que el presupuesto deja de seguir al cuadro de precios.
@@ -124,6 +142,19 @@ class Presupuesto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Autori
     # puede moverse solo bajo los pies de quien lo firmó.
     precios_bloqueados: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
+    )
+
+    # Fase 35: cómo se calcula la venta a partir del coste. Por defecto el
+    # modelo clásico, que es lo que hacía la aplicación hasta ahora.
+    metodo_calculo: Mapped[MetodoCalculo] = mapped_column(
+        enum_column(MetodoCalculo, "metodo_calculo"),
+        nullable=False,
+        default=MetodoCalculo.CLASICO,
+    )
+    # Porcentaje de los métodos no clásicos (el clásico usa gastos_generales y
+    # beneficio_industrial, que ya existían).
+    porcentaje_metodo: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.00")
     )
 
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -220,6 +251,26 @@ class Partida(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
         Numeric(14, 2), nullable=False, default=Decimal("0.00")
     )
 
+    # Solo se usa cuando la partida tiene descomposición propia (Fase 34): es
+    # la copia del porcentaje que tenía el concepto al independizarse, para
+    # que soltarse del banco no le cambie el precio por el camino.
+    costes_indirectos: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+
+    # --- Venta (Fase 35) ---
+    # `precio` es el COSTE unitario; esto es lo que se le cobra al cliente.
+    # Se recalcula desde el coste según el método del presupuesto, salvo que
+    # esté bloqueada: el candado es justamente para que un reajuste de
+    # porcentajes no se lleve por delante un precio pactado a mano.
+    precio_venta: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    venta_bloqueada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    importe_venta: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
     # Materializados: cambian solo al tocar la medición o el precio.
     medicion: Mapped[Decimal] = mapped_column(
         Numeric(14, 3), nullable=False, default=Decimal("0.000")
@@ -236,6 +287,89 @@ class Partida(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="LineaMedicion.orden",
     )
+    descomposicion: Mapped[list["PartidaDescomposicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="PartidaDescomposicion.orden",
+    )
+
+
+class PartidaDescomposicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Descompuesto propio de una partida — Fase 34.
+
+    Por defecto una partida no tiene ninguno: hereda el del concepto del banco
+    de precios, compartido con todos los presupuestos que lo usan. En cuanto
+    se toca el precio de un componente "solo aquí", se clona el descompuesto
+    del concepto a estas filas y la partida pasa a ser independiente: a partir
+    de ese momento el banco puede cambiar sin arrastrarla.
+
+    Cada línea congela código, descripción, unidad y precio del hijo por el
+    mismo motivo que `Partida` los congela del concepto: un presupuesto
+    entregado tiene que seguir diciendo lo que decía. `hijo_id` se guarda solo
+    para poder rastrear de dónde salió, y por eso admite nulo (el concepto
+    puede desaparecer del banco después).
+    """
+
+    __tablename__ = "partida_descomposicion"
+    __table_args__ = (
+        Index("ix_presupuestos_partida_descomposicion_partida", "partida_id"),
+        Index("ix_presupuestos_partida_descomposicion_hijo", "hijo_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    hijo_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    naturaleza: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    rendimiento: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    factor: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("1")
+    )
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[Partida] = relationship(back_populates="descomposicion")
+
+
+class FormulaMedicion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Fórmula reutilizable para medir — Fase 37.
+
+    Por cuenta, no por organización, igual que el diccionario y las
+    definiciones de campos libres: son vocabulario de trabajo compartido, no
+    datos de negocio de una empresa concreta. Por eso no lleva RLS.
+
+    La expresión la escribe el usuario y se evalúa con el analizador seguro de
+    `formulas.py` — nunca con `eval()`.
+    """
+
+    __tablename__ = "formula_medicion"
+    __table_args__ = (
+        UniqueConstraint("cuenta_id", "nombre", name="formula_medicion_nombre_unique"),
+        {"schema": SCHEMA},
+    )
+
+    cuenta_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("core.cuenta.id", ondelete="CASCADE"), nullable=False
+    )
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    expresion: Mapped[str] = mapped_column(String(500), nullable=False)
+    descripcion: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class LineaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
@@ -258,6 +392,21 @@ class LineaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base
         ForeignKey(f"{SCHEMA}.partida.id", ondelete="CASCADE"),
         nullable=False,
     )
+
+    # --- Fórmula (Fase 37) ---
+    # Con fórmula, el parcial es `uds` por el resultado de la expresión, en vez
+    # del producto de longitud/anchura/altura. `formula_expresion` es una copia
+    # congelada: si alguien edita después la fórmula del catálogo, esta línea
+    # sigue midiendo lo que medía, igual que la partida congela el precio del
+    # concepto.
+    formula_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.formula_medicion.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    formula_expresion: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    formula_valores: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
     comentario: Mapped[str | None] = mapped_column(String(250), nullable=True)
     uds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     longitud: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)

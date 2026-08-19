@@ -8,6 +8,7 @@ import {
   Columns3,
   Copy,
   Download,
+  FunctionSquare,
   FileDown,
   FilePlus,
   FileText,
@@ -85,6 +86,7 @@ const ICONOS: Record<string, LucideIcon> = {
   confirmar: Check,
   aviso: CircleAlert,
   'mas-vertical': MoreVertical,
+  formula: FunctionSquare,
   estado: Repeat,
 
   // Pestañas de la ficha genérica (Fase 27)

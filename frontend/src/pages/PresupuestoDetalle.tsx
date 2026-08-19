@@ -10,18 +10,19 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Scan,
-  Trash2,
   X,
 } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
 import { ContactosAsociados } from '../components/ContactosAsociados'
+import { DescompuestoPartida } from '../components/DescompuestoPartida'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { NotasCrm } from '../components/NotasCrm'
 import type { FilaPresupuesto } from '../components/RejillaPresupuesto'
+import { ReajusteModal } from '../components/ReajusteModal'
+import { MedicionesPartida } from '../components/MedicionesPartida'
 import { RejillaPresupuesto } from '../components/RejillaPresupuesto'
 import {
   Checkbox,
@@ -35,14 +36,16 @@ import {
   formatoImporte,
 } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
-import { ETIQUETA_ESTADO, ETIQUETA_IVA, api, descargar } from '../lib/api'
+import { ETIQUETA_ESTADO, ETIQUETA_IVA, ETIQUETA_METODO, api, descargar } from '../lib/api'
 import type {
   Concepto,
   EstadoPresupuesto,
   LecturaPlanoDetalle,
   LineaSugerida,
+  NodoCapitulo,
   Partida,
   PresupuestoDetalle as Detalle,
+  MetodoCalculo,
   RecursosPresupuesto,
   Tercero,
   TipoIVA,
@@ -51,7 +54,6 @@ import type {
 } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
 import { useContextoPresupuestos } from './Presupuestos'
-import { useWorkspace } from '../workspace'
 
 function formatoFecha(iso: string): string {
   return new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
@@ -74,6 +76,7 @@ export function PresupuestoDetalle() {
   const [guardandoPlantilla, setGuardandoPlantilla] = useState(false)
   const [editando, setEditando] = useState(false)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
+  const [reajustando, setReajustando] = useState(false)
   const [seleccion, setSeleccion] = useState<
     { tipo: 'partida'; partida: Partida } | { tipo: 'capitulo'; fila: FilaPresupuesto } | null
   >(null)
@@ -86,6 +89,14 @@ export function PresupuestoDetalle() {
         api.presupuestos.recursos(id),
       ])
       setPresupuesto(detalle)
+      // La partida seleccionada se vuelve a leer del árbol recién cargado: si
+      // se guardara solo la copia del momento del clic, los widgets seguirían
+      // enseñando el precio o la medición de antes de la última edición.
+      setSeleccion((actual) => {
+        if (actual?.tipo !== 'partida') return actual
+        const fresca = buscarPartida(detalle.capitulos, actual.partida.id)
+        return fresca ? { tipo: 'partida', partida: fresca } : null
+      })
       setVersiones(lineaVersiones)
       setRecursos(datosRecursos)
       setCliente(detalle.cliente_id ? await api.terceros.get(detalle.cliente_id) : null)
@@ -299,18 +310,49 @@ export function PresupuestoDetalle() {
             minH: 6,
             contenido: (
               <div className="resumen-totales">
-                <Fila etiqueta="Presupuesto de ejecución material (PEM)" valor={t.pem} />
+                {t.metodo === 'clasico' ? (
+                  <>
+                    <Fila etiqueta="Presupuesto de ejecución material (PEM)" valor={t.pem} />
+                    <Fila
+                      etiqueta={`Gastos generales ${formatoImporte(presupuesto.gastos_generales)} %`}
+                      valor={t.gastos_generales}
+                      suave
+                    />
+                    <Fila
+                      etiqueta={`Beneficio industrial ${formatoImporte(presupuesto.beneficio_industrial)} %`}
+                      valor={t.beneficio_industrial}
+                      suave
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Fila etiqueta="Coste" valor={t.coste} />
+                    <Fila
+                      etiqueta={
+                        t.metodo === 'incremento_sobre_coste'
+                          ? `Incremento ${formatoImporte(t.porcentaje_metodo)} % sobre el coste`
+                          : `Beneficio ${formatoImporte(t.porcentaje_metodo)} % sobre la venta`
+                      }
+                      valor={t.incremento}
+                      suave
+                    />
+                  </>
+                )}
+                {Number(t.ajuste_manual) !== 0 && (
+                  <Fila
+                    etiqueta="Ajuste sobre el cálculo teórico"
+                    valor={t.ajuste_manual}
+                    suave
+                  />
+                )}
                 <Fila
-                  etiqueta={`Gastos generales ${formatoImporte(presupuesto.gastos_generales)} %`}
-                  valor={t.gastos_generales}
-                  suave
+                  etiqueta={
+                    t.metodo === 'clasico'
+                      ? 'Presupuesto de ejecución por contrata (sin IVA)'
+                      : 'Venta (sin IVA)'
+                  }
+                  valor={t.pec_sin_iva}
                 />
-                <Fila
-                  etiqueta={`Beneficio industrial ${formatoImporte(presupuesto.beneficio_industrial)} %`}
-                  valor={t.beneficio_industrial}
-                  suave
-                />
-                <Fila etiqueta="Presupuesto de ejecución por contrata (sin IVA)" valor={t.pec_sin_iva} />
                 <Fila
                   etiqueta={
                     presupuesto.inversion_sujeto_pasivo
@@ -321,6 +363,11 @@ export function PresupuestoDetalle() {
                   suave
                 />
                 <Fila etiqueta="Total" valor={t.total} destacado />
+                <Fila
+                  etiqueta={`Margen (${formatoImporte(t.margen_pct)} % de la venta)`}
+                  valor={t.margen}
+                  suave
+                />
               </div>
             ),
           },
@@ -356,14 +403,32 @@ export function PresupuestoDetalle() {
                   </div>
                 </div>
               ) : (
-                <MedicionesPanel partida={seleccion.partida} onCambio={cargar} />
+                <MedicionesPartida partida={seleccion.partida} onCambio={cargar} />
+              ),
+          },
+          {
+            id: 'descompuesto',
+            titulo: 'Descompuesto',
+            x: 0,
+            y: 23,
+            w: 12,
+            h: 10,
+            minW: 5,
+            minH: 5,
+            contenido:
+              seleccion?.tipo === 'partida' ? (
+                <DescompuestoPartida partida={seleccion.partida} onCambio={cargar} />
+              ) : (
+                <EmptyState title="Ninguna partida seleccionada">
+                  Selecciona una partida en el listado para ver de qué se compone su precio.
+                </EmptyState>
               ),
           },
           {
             id: 'materiales',
             titulo: 'Precios básicos',
             x: 0,
-            y: 23,
+            y: 33,
             w: 8,
             h: 10,
             minW: 4,
@@ -409,7 +474,7 @@ export function PresupuestoDetalle() {
             id: 'mano-obra',
             titulo: 'Recursos humanos',
             x: 8,
-            y: 23,
+            y: 33,
             w: 4,
             h: 10,
             minW: 3,
@@ -581,6 +646,10 @@ export function PresupuestoDetalle() {
                 </div>
               </div>
               <div>
+                <div className="barra-acciones__etiqueta">Método de cálculo</div>
+                <div>{ETIQUETA_METODO[presupuesto.metodo_calculo]}</div>
+              </div>
+              <div>
                 <div className="barra-acciones__etiqueta">Tipo de IVA</div>
                 <div>{ETIQUETA_IVA[presupuesto.tipo_iva]}</div>
               </div>
@@ -646,6 +715,12 @@ export function PresupuestoDetalle() {
                 onClick: () => setCambiandoEstado(true),
               },
               {
+                id: 'reajuste',
+                etiqueta: 'Reajustar',
+                icono: 'recalcular',
+                onClick: () => setReajustando(true),
+              },
+              {
                 id: 'eliminar',
                 etiqueta: 'Eliminar',
                 icono: 'eliminar',
@@ -666,6 +741,19 @@ export function PresupuestoDetalle() {
         onClose={() => setEditando(false)}
         onGuardado={() => {
           setEditando(false)
+          void cargar()
+          onCambio()
+        }}
+      />
+    )}
+
+    {reajustando && (
+      <ReajusteModal
+        presupuestoId={id}
+        totalActual={presupuesto.totales.pec_sin_iva}
+        onClose={() => setReajustando(false)}
+        onAplicado={() => {
+          setReajustando(false)
           void cargar()
           onCambio()
         }}
@@ -705,6 +793,8 @@ function EditarPresupuestoModal({
   const [validezDias, setValidezDias] = useState(presupuesto.validez_dias?.toString() ?? '')
   const [tipoObra, setTipoObra] = useState(presupuesto.tipo_obra ?? '')
   const [tipoIva, setTipoIva] = useState(presupuesto.tipo_iva)
+  const [metodo, setMetodo] = useState<MetodoCalculo>(presupuesto.metodo_calculo)
+  const [porcentajeMetodo, setPorcentajeMetodo] = useState(presupuesto.porcentaje_metodo)
   const [gastosGenerales, setGastosGenerales] = useState(presupuesto.gastos_generales)
   const [beneficioIndustrial, setBeneficioIndustrial] = useState(presupuesto.beneficio_industrial)
   const [inversionSujetoPasivo, setInversionSujetoPasivo] = useState(
@@ -750,6 +840,8 @@ function EditarPresupuestoModal({
         validez_dias: validezDias === '' ? null : Number(validezDias),
         tipo_obra: tipoObra || null,
         tipo_iva: tipoIva,
+        metodo_calculo: metodo,
+        porcentaje_metodo: porcentajeMetodo,
         gastos_generales: gastosGenerales,
         beneficio_industrial: beneficioIndustrial,
         inversion_sujeto_pasivo: inversionSujetoPasivo,
@@ -826,24 +918,63 @@ function EditarPresupuestoModal({
               ))}
             </select>
           </Field>
-          <Field label="Gastos generales (%)">
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              value={gastosGenerales}
-              onChange={(e) => setGastosGenerales(e.target.value)}
-            />
+          <Field label="Método de cálculo">
+            <select
+              className="select"
+              value={metodo}
+              onChange={(e) => setMetodo(e.target.value as MetodoCalculo)}
+            >
+              {Object.entries(ETIQUETA_METODO).map(([clave, etiqueta]) => (
+                <option key={clave} value={clave}>
+                  {etiqueta}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Beneficio industrial (%)">
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              value={beneficioIndustrial}
-              onChange={(e) => setBeneficioIndustrial(e.target.value)}
-            />
-          </Field>
+          {metodo === 'clasico' ? (
+            <>
+              <Field label="Gastos generales (%)">
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={gastosGenerales}
+                  onChange={(e) => setGastosGenerales(e.target.value)}
+                />
+              </Field>
+              <Field label="Beneficio industrial (%)">
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={beneficioIndustrial}
+                  onChange={(e) => setBeneficioIndustrial(e.target.value)}
+                />
+              </Field>
+            </>
+          ) : (
+            <Field
+              label={
+                metodo === 'incremento_sobre_coste'
+                  ? 'Incremento sobre el coste (%)'
+                  : 'Beneficio final sobre la venta (%)'
+              }
+              hint={
+                metodo === 'incremento_sobre_coste'
+                  ? 'Un 20 % convierte 100 € de coste en 120 € de venta'
+                  : 'Un 20 % convierte 100 € de coste en 125 €: el beneficio es el 20 % de la venta'
+              }
+            >
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                max="99.99"
+                value={porcentajeMetodo}
+                onChange={(e) => setPorcentajeMetodo(e.target.value)}
+              />
+            </Field>
+          )}
           <Field label="Responsable">
             {usuariosDisponibles ? (
               <select
@@ -1305,10 +1436,15 @@ function MedicionModal({
   onClose: () => void
   onCambio: () => void
 }) {
+  const [leyendoPlano, setLeyendoPlano] = useState(false)
   return (
     <Modal title={`Medición · ${partida.codigo}`} onClose={onClose}>
       <div className="form-section">
-        <MedicionesPanel partida={partida} onCambio={onCambio} />
+        <MedicionesPartida
+          partida={partida}
+          onCambio={onCambio}
+          onLeerPlano={() => setLeyendoPlano(true)}
+        />
       </div>
 
       <div className="form-actions">
@@ -1317,118 +1453,6 @@ function MedicionModal({
           Hecho
         </button>
       </div>
-    </Modal>
-  )
-}
-
-/** Tabla de mediciones de una partida + acciones (añadir línea, leer plano
- *  con IA, campos libres) — sin cabecera modal propia, para poder vivir
- *  tanto dentro de `MedicionModal` como del widget "Mediciones" (Fase 31),
- *  que la muestra inline según la fila seleccionada en el listado. */
-function MedicionesPanel({
-  partida,
-  onCambio,
-}: {
-  partida: Partida
-  onCambio: () => void
-}) {
-  const { modules } = useWorkspace()
-  const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
-  const [detalle, setDetalle] = useState<Awaited<
-    ReturnType<typeof api.partidas.get>
-  > | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [leyendoPlano, setLeyendoPlano] = useState(false)
-
-  const recargar = useCallback(async () => {
-    try {
-      setDetalle(await api.partidas.get(partida.id))
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    }
-  }, [partida.id, onCambio])
-
-  useEffect(() => {
-    void api.partidas
-      .get(partida.id)
-      .then(setDetalle)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
-  }, [partida.id])
-
-  async function anadir() {
-    await api.partidas.addLinea(partida.id, { comentario: '', uds: '1' })
-    await recargar()
-  }
-
-  return (
-    <>
-      <p className="form-section__note">
-        {partida.resumen}. El parcial es el producto de lo que esté informado: una línea con
-        solo unidades mide esas unidades. Un valor negativo deduce, que es como se descuentan
-        los huecos.
-      </p>
-      <ErrorNotice error={error} />
-
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Comentario</th>
-              <th className="table__num">Uds</th>
-              <th className="table__num">Longitud</th>
-              <th className="table__num">Anchura</th>
-              <th className="table__num">Altura</th>
-              <th className="table__num">Parcial</th>
-              <th className="table__actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {(detalle?.lineas ?? []).map((linea) => (
-              <FilaMedicion key={linea.id} linea={linea} onCambio={recargar} />
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="fila-total">
-              <td colSpan={5} className="table__num total-label">
-                Medición total
-              </td>
-              <td className="table__num">
-                <strong>{formatoImporte(detalle?.medicion ?? '0', 3)}</strong>
-              </td>
-              <td />
-            </tr>
-            <tr>
-              <td colSpan={5} className="table__num total-label">
-                × {formatoImporte(detalle?.precio ?? '0')} €/{partida.unidad}
-              </td>
-              <td className="table__num">
-                <strong>{formatoImporte(detalle?.importe ?? '0')} €</strong>
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
-        <button className="btn" onClick={() => void anadir()}>
-          <Plus size={16} aria-hidden="true" />
-          Añadir línea
-        </button>
-        {iaActiva && (
-          <Tooltip texto="Extraer mediciones de un plano acotado con IA">
-            <button className="btn" onClick={() => setLeyendoPlano(true)}>
-              <Scan size={16} aria-hidden="true" />
-              Leer plano (IA)
-            </button>
-          </Tooltip>
-        )}
-      </div>
-
-      <div style={{ marginTop: 'var(--sp-4)' }}>
-        <CamposLibres entidad="partida" entidadId={partida.id} />
-      </div>
 
       {leyendoPlano && (
         <LeerPlanoModal
@@ -1436,13 +1460,14 @@ function MedicionesPanel({
           onClose={() => setLeyendoPlano(false)}
           onAplicado={() => {
             setLeyendoPlano(false)
-            void recargar()
+            onCambio()
           }}
         />
       )}
-    </>
+    </Modal>
   )
 }
+
 
 function LeerPlanoModal({
   partida,
@@ -1632,78 +1657,14 @@ function LeerPlanoModal({
   )
 }
 
-function FilaMedicion({
-  linea,
-  onCambio,
-}: {
-  linea: import('../lib/api').LineaMedicion
-  onCambio: () => void
-}) {
-  const [valores, setValores] = useState({
-    comentario: linea.comentario ?? '',
-    uds: linea.uds ?? '',
-    longitud: linea.longitud ?? '',
-    anchura: linea.anchura ?? '',
-    altura: linea.altura ?? '',
-  })
-
-  // Se guarda al salir del campo: cada guardado recalcula la partida y, con
-  // ella, todos los totales del presupuesto.
-  async function guardar() {
-    await api.mediciones.update(linea.id, {
-      comentario: valores.comentario || null,
-      uds: valores.uds === '' ? null : valores.uds,
-      longitud: valores.longitud === '' ? null : valores.longitud,
-      anchura: valores.anchura === '' ? null : valores.anchura,
-      altura: valores.altura === '' ? null : valores.altura,
-    })
-    onCambio()
+/** Busca una partida por id en el árbol de capítulos (recursivo: los capítulos
+ *  anidan subcapítulos). Devuelve `null` si ya no existe — la habrán borrado. */
+function buscarPartida(capitulos: NodoCapitulo[], partidaId: string): Partida | null {
+  for (const capitulo of capitulos) {
+    const encontrada = capitulo.partidas.find((p) => p.id === partidaId)
+    if (encontrada) return encontrada
+    const enHijos = buscarPartida(capitulo.hijos, partidaId)
+    if (enHijos) return enHijos
   }
-
-  async function eliminar() {
-    await api.mediciones.remove(linea.id)
-    onCambio()
-  }
-
-  const campo = (clave: keyof typeof valores) => (
-    <input
-      className="input input--celda"
-      type={clave === 'comentario' ? 'text' : 'number'}
-      step="0.001"
-      value={valores[clave]}
-      onChange={(e) => setValores((v) => ({ ...v, [clave]: e.target.value }))}
-      onBlur={() => void guardar()}
-    />
-  )
-
-  return (
-    <tr>
-      <td>
-        <input
-          className="input input--celda input--texto"
-          value={valores.comentario}
-          onChange={(e) => setValores((v) => ({ ...v, comentario: e.target.value }))}
-          onBlur={() => void guardar()}
-          placeholder="—"
-        />
-      </td>
-      <td className="table__num">{campo('uds')}</td>
-      <td className="table__num">{campo('longitud')}</td>
-      <td className="table__num">{campo('anchura')}</td>
-      <td className="table__num">{campo('altura')}</td>
-      <td className="table__num">
-        <strong>{formatoImporte(linea.parcial, 3)}</strong>
-      </td>
-      <td className="table__actions">
-        <Tooltip texto="Eliminar esta línea de medición">
-          <button
-            className="btn btn--sm btn--danger btn--solo-icono"
-            onClick={() => void eliminar()}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </td>
-    </tr>
-  )
+  return null
 }

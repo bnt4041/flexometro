@@ -1,0 +1,383 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Plus, Save, Trash2, Unlink, X } from 'lucide-react'
+
+import { BotonAtajos } from './AtajosTeclado'
+import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
+import { RejillaEditable } from './RejillaEditable'
+import { EmptyState, ErrorNotice, Modal, Tooltip, formatoImporte } from './ui'
+import { api } from '../lib/api'
+import type {
+  AlcancePrecio,
+  ConceptoDetalle,
+  DescomposicionPartida,
+  LineaDescomposicion,
+  Partida,
+} from '../lib/api'
+import { useToast } from '../toast'
+
+/** Fila que solo vive en el navegador mientras se está montando un componente
+ *  nuevo — nunca llega a `datos.lineas`, que es lo que devuelve el backend. */
+const ID_BORRADOR = '__nuevo__'
+
+/** Descompuesto de la partida seleccionada (Fase 34).
+ *
+ *  Mientras la partida hereda el descompuesto del banco de precios se enseña
+ *  igual, pero al cambiar el precio de un componente hay que decidir hasta
+ *  dónde llega el cambio: solo esta partida, o todas las del presupuesto que
+ *  lleven ese componente. En ambos casos la partida (o partidas) se
+ *  independizan del banco — el banco no se toca nunca desde aquí. */
+export function DescompuestoPartida({
+  partida,
+  onCambio,
+}: {
+  partida: Partida
+  onCambio: () => void
+}) {
+  const { notificar } = useToast()
+  const [datos, setDatos] = useState<DescomposicionPartida | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pendiente, setPendiente] = useState<{ linea: LineaDescomposicion; precio: string } | null>(
+    null,
+  )
+  // Dos pasos, igual que capítulos/partidas: primero se busca o se crea el
+  // concepto (celda "Descripción"), y solo al confirmarlo se abre la celda de
+  // rendimiento — hasta entonces no hay nada que enviar al backend, porque
+  // `anadir_componente` exige un `hijo_id` real desde el principio.
+  const [conceptoNuevo, setConceptoNuevo] = useState<ConceptoDetalle | null>(null)
+  const [anadiendo, setAnadiendo] = useState(false)
+
+  const cargar = useCallback(async () => {
+    try {
+      setDatos(await api.partidas.descomposicion(partida.id))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }, [partida.id])
+
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  async function aplicar(alcance: AlcancePrecio) {
+    if (!pendiente?.linea.hijo_id) return
+    try {
+      // La respuesta ya trae el descompuesto recalculado: volver a pedirlo aquí
+      // se cruzaría con el commit del servidor, que ocurre tras enviar la
+      // respuesta, y devolvería el estado anterior.
+      const { partidas_afectadas, descomposicion } = await api.partidas.cambiarPrecioComponente(
+        partida.id,
+        { hijo_id: pendiente.linea.hijo_id, precio: pendiente.precio, alcance },
+      )
+      setPendiente(null)
+      setDatos(descomposicion)
+      onCambio()
+      notificar(
+        partidas_afectadas === 1
+          ? 'Precio cambiado en 1 partida'
+          : `Precio cambiado en ${partidas_afectadas} partidas`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPendiente(null)
+    }
+  }
+
+  async function quitar(linea: LineaDescomposicion) {
+    if (!window.confirm(`¿Quitar «${linea.resumen}» del descompuesto?`)) return
+    try {
+      // Igual que arriba: la respuesta trae el descompuesto ya recalculado.
+      setDatos(await api.partidas.quitarComponente(partida.id, linea.id))
+      onCambio()
+      notificar('Componente quitado del descompuesto')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  function empezarAlta() {
+    if (anadiendo) return
+    setConceptoNuevo(null)
+    setAnadiendo(true)
+  }
+
+  function cancelarAlta() {
+    setAnadiendo(false)
+    setConceptoNuevo(null)
+  }
+
+  async function elegirConcepto(opcion?: OpcionCelda) {
+    if (!opcion) {
+      cancelarAlta()
+      return
+    }
+    try {
+      const concepto = opcion.esAccion
+        ? await api.conceptos.create({ resumen: opcion.valor, unidad: 'ud', precio: '0', tipo: 'basico' })
+        : await api.conceptos.get(opcion.valor)
+      if (opcion.esAccion) notificar(`«${opcion.valor}» dado de alta en el banco de precios`)
+      setConceptoNuevo(concepto)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      cancelarAlta()
+    }
+  }
+
+  async function confirmarRendimiento(valor: string) {
+    if (!conceptoNuevo) return
+    const limpio = valor.replace(',', '.')
+    if (limpio === '' || Number.isNaN(Number(limpio)) || Number(limpio) <= 0) {
+      setError('El rendimiento tiene que ser un número mayor que cero')
+      return
+    }
+    try {
+      setDatos(await api.partidas.anadirComponente(partida.id, { hijo_id: conceptoNuevo.id, rendimiento: limpio }))
+      cancelarAlta()
+      onCambio()
+      notificar('Componente añadido al descompuesto')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      cancelarAlta()
+    }
+  }
+
+  async function cambiarRendimiento(linea: LineaDescomposicion, valor: string) {
+    if (!linea.hijo_id) return
+    const limpio = valor.replace(',', '.')
+    if (limpio === '' || Number.isNaN(Number(limpio)) || Number(limpio) <= 0) {
+      setError('El rendimiento tiene que ser un número mayor que cero')
+      return
+    }
+    if (Number(limpio) === Number(linea.rendimiento)) return
+    try {
+      setDatos(
+        await api.partidas.cambiarRendimientoComponente(partida.id, {
+          hijo_id: linea.hijo_id,
+          rendimiento: limpio,
+        }),
+      )
+      onCambio()
+      notificar('Rendimiento actualizado')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  const lineaBorrador: LineaDescomposicion = conceptoNuevo
+    ? {
+        id: ID_BORRADOR,
+        hijo_id: conceptoNuevo.id,
+        codigo: conceptoNuevo.codigo,
+        resumen: conceptoNuevo.resumen,
+        unidad: conceptoNuevo.unidad,
+        rendimiento: '1',
+        factor: '1',
+        precio: conceptoNuevo.precio,
+        importe: conceptoNuevo.precio,
+      }
+    : {
+        id: ID_BORRADOR,
+        hijo_id: null,
+        codigo: '',
+        resumen: '',
+        unidad: '',
+        rendimiento: '1',
+        factor: '1',
+        precio: '0',
+        importe: '0',
+      }
+
+  const columnas: ColumnaRejilla<LineaDescomposicion>[] = [
+    { id: 'codigo', etiqueta: 'Código', ancho: '140px', valor: (l) => l.codigo },
+    {
+      id: 'resumen',
+      etiqueta: 'Descripción',
+      valor: (l) => l.resumen,
+      editable: (l) => l.id === ID_BORRADOR && !conceptoNuevo,
+      tipo: 'autocompletado',
+      buscar: async (q) => {
+        if (q.trim().length < 2) return []
+        const pagina = await api.conceptos.list({ q, activo: true, limit: 8 })
+        const sugerencias: OpcionCelda[] = pagina.items
+          .filter((c) => c.id !== partida.concepto_id)
+          .map((c) => ({
+            valor: c.id,
+            etiqueta: `${c.codigo} · ${c.resumen}`,
+            detalle: `${formatoImporte(c.precio)} €/${c.unidad}`,
+          }))
+        sugerencias.push({
+          valor: q,
+          etiqueta: `Crear «${q}» en el banco de precios`,
+          esAccion: true,
+        })
+        return sugerencias
+      },
+    },
+    { id: 'unidad', etiqueta: 'Ud.', ancho: '70px', valor: (l) => l.unidad },
+    {
+      id: 'rendimiento',
+      etiqueta: 'Rendim.',
+      ancho: '100px',
+      tipo: 'numero',
+      valor: (l) => formatoImporte(l.rendimiento, 3),
+      // En el borrador, solo tras elegir el concepto (segundo paso). En una
+      // línea ya guardada, lo mismo que el precio: hace falta que el
+      // concepto siga existiendo en el banco para saber a qué aplicarlo.
+      editable: (l) => (l.id === ID_BORRADOR ? Boolean(conceptoNuevo) : l.hijo_id !== null),
+    },
+    {
+      id: 'precio',
+      etiqueta: 'Precio',
+      ancho: '110px',
+      tipo: 'numero',
+      valor: (l) => formatoImporte(l.precio),
+      // Solo se puede tocar el precio de un componente que siga existiendo en
+      // el banco: sin `hijo_id` no hay a qué aplicar el cambio.
+      editable: (l) => l.hijo_id !== null && l.id !== ID_BORRADOR,
+    },
+    {
+      id: 'importe',
+      etiqueta: 'Importe',
+      ancho: '110px',
+      tipo: 'numero',
+      valor: (l) => formatoImporte(l.importe),
+    },
+  ]
+
+  const total = (datos?.lineas ?? []).reduce((suma, l) => suma + Number(l.importe), 0)
+  const filas = anadiendo ? [...(datos?.lineas ?? []), lineaBorrador] : (datos?.lineas ?? [])
+
+  return (
+    <>
+      <div className="rejilla-barra">
+        <BotonAtajos conAutocompletado />
+        <Tooltip texto="Buscar en el banco de precios, o crear uno nuevo">
+          <button className="btn btn--sm" onClick={empezarAlta} disabled={anadiendo}>
+            <Plus size={14} aria-hidden="true" />
+            Línea
+          </button>
+        </Tooltip>
+        {anadiendo && (
+          <button className="btn btn--sm" onClick={cancelarAlta}>
+            <X size={14} aria-hidden="true" />
+            Cancelar
+          </button>
+        )}
+        <span className="rejilla-barra__ayuda muted">
+          {partida.codigo} · {partida.resumen}
+        </span>
+        <span className="rejilla-barra__estado">
+          {datos?.propia ? (
+            <span className="chip chip--preferente">descompuesto propio</span>
+          ) : (
+            <span className="chip">del banco de precios</span>
+          )}
+        </span>
+      </div>
+
+      <ErrorNotice error={error} />
+
+      <RejillaEditable
+        filas={filas}
+        columnas={columnas}
+        idDe={(l) => l.id}
+        filaAEditarId={anadiendo ? ID_BORRADOR : null}
+        columnaAEditarId={anadiendo ? (conceptoNuevo ? 'rendimiento' : 'resumen') : null}
+        onEditar={(linea, columnaId, valor, opcion) => {
+          if (linea.id === ID_BORRADOR) {
+            if (columnaId === 'resumen') void elegirConcepto(opcion)
+            else if (columnaId === 'rendimiento') void confirmarRendimiento(valor)
+            return
+          }
+          if (columnaId === 'rendimiento') {
+            void cambiarRendimiento(linea, valor)
+            return
+          }
+          if (columnaId !== 'precio') return
+          const limpio = valor.replace(',', '.')
+          if (limpio === '' || Number.isNaN(Number(limpio))) return
+          if (Number(limpio) === Number(linea.precio)) return
+          setPendiente({ linea, precio: limpio })
+        }}
+        acciones={(l) =>
+          l.id === ID_BORRADOR ? null : (
+            <Tooltip texto="Quitar este componente del descompuesto">
+              <button
+                className="btn btn--sm btn--danger btn--solo-icono"
+                aria-label={`Quitar ${l.resumen}`}
+                onClick={() => void quitar(l)}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )
+        }
+        vacia={
+          <EmptyState title="Sin descomponer">
+            Esta partida no tiene descompuesto: su precio va a mano o viene de una partida alzada.
+            <div style={{ marginTop: 'var(--sp-3)' }}>
+              <button className="btn btn--primary" onClick={empezarAlta}>
+                <Plus size={16} aria-hidden="true" />
+                Añadir el primer componente
+              </button>
+            </div>
+          </EmptyState>
+        }
+      />
+
+      {(datos?.lineas.length ?? 0) > 0 && (
+        <div className="resumen-totales" style={{ marginTop: 'var(--sp-3)' }}>
+          <div className="resumen-totales__fila is-total">
+            <span>Coste directo</span>
+            <span className="resumen-totales__valor">{formatoImporte(String(total))} €</span>
+          </div>
+          {partida.costes_indirectos && (
+            <div className="resumen-totales__fila is-suave">
+              <span>Costes indirectos {formatoImporte(partida.costes_indirectos)} %</span>
+              <span className="resumen-totales__valor">
+                {formatoImporte(String(Number(partida.precio) - total))} €
+              </span>
+            </div>
+          )}
+          <div className="resumen-totales__fila is-total">
+            <span>Precio por {partida.unidad}</span>
+            <span className="resumen-totales__valor">{formatoImporte(partida.precio)} €</span>
+          </div>
+        </div>
+      )}
+
+      {pendiente && (
+        <Modal title="¿Hasta dónde llega este cambio?" onClose={() => setPendiente(null)}>
+          <div className="form-section">
+            <p className="form-section__note">
+              Vas a poner <strong>«{pendiente.linea.resumen}»</strong> a{' '}
+              <strong>{formatoImporte(pendiente.precio)} €/{pendiente.linea.unidad}</strong> (antes{' '}
+              {formatoImporte(pendiente.linea.precio)} €). El banco de precios no se modifica en
+              ninguno de los dos casos: la partida se independiza de él.
+            </p>
+            {/* Ojo: estos botones NO van dentro de `Field`, que envuelve en un
+                `<label>`; un `<label>` es para etiquetar un control, y metiendo
+                botones dentro se rompe su nombre accesible. */}
+            <div className="field__label">Alcance</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+              <button className="btn" onClick={() => void aplicar('partida')}>
+                <Unlink size={16} aria-hidden="true" />
+                Solo en esta partida
+              </button>
+              <button className="btn btn--primary" onClick={() => void aplicar('presupuesto')}>
+                <Save size={16} aria-hidden="true" />
+                En todo el presupuesto donde aparezca
+              </button>
+            </div>
+          </div>
+          <div className="form-actions">
+            <button className="btn" onClick={() => setPendiente(null)}>
+              <X size={16} aria-hidden="true" />
+              Cancelar
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}

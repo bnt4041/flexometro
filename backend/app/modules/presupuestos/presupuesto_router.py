@@ -9,18 +9,29 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.presupuestos import informes
+from app.modules.presupuestos import formulas, informes
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos import versionado
 from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto
+from app.modules.core.tenant_utils import cuenta_id_del_principal
 from app.modules.presupuestos.presupuesto_schemas import (
     CambioOut,
     CapituloCreate,
     CapituloUpdate,
+    CambioPrecioComponente,
+    CambioRendimientoComponente,
     ComparacionOut,
+    ComponenteNuevo,
     ConvertirLinea,
+    DescomposicionPartidaOut,
+    FormulaMedicionCreate,
+    FormulaMedicionOut,
+    FormulaMedicionUpdate,
+    ProbarFormulaIn,
+    ProbarFormulaOut,
     GuardarComoPlantilla,
+    LineaDescomposicionOut,
     InstanciarPlantilla,
     LineaMedicionCreate,
     LineaMedicionOut,
@@ -35,12 +46,20 @@ from app.modules.presupuestos.presupuesto_schemas import (
     PresupuestoOut,
     PresupuestoResumen,
     PresupuestoUpdate,
+    LineaReajusteOut,
+    ReajusteIn,
+    ReajusteOut,
     RecursosPresupuesto,
+    ResultadoCambioPrecio,
     ResultadoSincronizacion,
     VersionOut,
 )
 
 guard = Depends(require_module("presupuestos"))
+
+formulas_router = APIRouter(
+    prefix="/api/formulas-medicion", tags=["presupuestos"], dependencies=[guard]
+)
 
 presupuestos_router = APIRouter(
     prefix="/api/presupuestos", tags=["presupuestos"], dependencies=[guard]
@@ -154,6 +173,37 @@ async def actualizar_lineas_en_lote(
         capitulos=capitulos,
         totales=totales,
         partidas_desactualizadas=len(desfasadas),
+    )
+
+
+@presupuestos_router.post("/{presupuesto_id}/reajuste", response_model=ReajusteOut)
+async def reajustar(
+    presupuesto_id: uuid.UUID,
+    datos: ReajusteIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ReajusteOut:
+    """Reajusta el presupuesto a un importe o a un margen objetivo (Fase 36).
+
+    Con `aplicar` en falso solo simula, que es lo que alimenta la vista previa.
+    """
+    await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    try:
+        resultado = await service.reajustar(
+            session, presupuesto_id, datos.tipo, datos.valor, datos.aplicar
+        )
+    except service.ReajusteImposible as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if resultado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Presupuesto no encontrado")
+    if datos.aplicar:
+        # Igual que en el cambio de precio de un componente: se confirma aquí
+        # para que la recarga que dispara el cliente al recibir la respuesta ya
+        # vea el reajuste (ver `get_session`).
+        await session.commit()
+    return ReajusteOut(
+        **{**resultado, "lineas": [LineaReajusteOut(**linea) for linea in resultado["lineas"]]}
     )
 
 
@@ -375,6 +425,142 @@ async def integrar_en_banco_precios(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     assert partida is not None
     return PartidaOut.model_validate(partida)
+
+
+@partidas_router.get("/{partida_id}/descomposicion", response_model=DescomposicionPartidaOut)
+async def descomposicion_de_partida(
+    partida_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> DescomposicionPartidaOut:
+    """Descompuesto de la partida: el suyo propio si se independizó, y si no el
+    del concepto del banco (Fase 34)."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    resultado = await service.descomposicion_de_partida(session, partida_id)
+    if resultado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partida no encontrada")
+    propia, lineas = resultado
+    return DescomposicionPartidaOut(
+        propia=propia, lineas=[LineaDescomposicionOut(**linea) for linea in lineas]
+    )
+
+
+async def _descomposicion_fresca(session, partida_id: uuid.UUID) -> DescomposicionPartidaOut:
+    """Descompuesto ya recalculado, para devolverlo en la misma respuesta de la
+    escritura y no depender de una lectura posterior (ver `get_session`)."""
+    resultado = await service.descomposicion_de_partida(session, partida_id)
+    lineas = [] if resultado is None else resultado[1]
+    return DescomposicionPartidaOut(
+        propia=bool(resultado and resultado[0]),
+        lineas=[LineaDescomposicionOut(**linea) for linea in lineas],
+    )
+
+
+@partidas_router.post(
+    "/{partida_id}/descomposicion",
+    response_model=DescomposicionPartidaOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def anadir_componente(
+    partida_id: uuid.UUID,
+    datos: ComponenteNuevo,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Añade un componente al descompuesto de la partida, independizándola del
+    banco de precios si aún lo heredaba (Fase 34)."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    try:
+        creado = await service.anadir_componente(
+            session, partida_id, datos.hijo_id, datos.rendimiento, datos.factor
+        )
+    except service.ConceptoInvalido as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not creado:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partida no encontrada")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
+@partidas_router.delete(
+    "/{partida_id}/descomposicion/{linea_id}", response_model=DescomposicionPartidaOut
+)
+async def quitar_componente(
+    partida_id: uuid.UUID,
+    linea_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    await _partida_propia(session, partida_id, alcance, principal)
+    if not await service.quitar_componente(session, partida_id, linea_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Línea no encontrada")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
+@partidas_router.patch(
+    "/{partida_id}/descomposicion/precio", response_model=ResultadoCambioPrecio
+)
+async def cambiar_precio_componente(
+    partida_id: uuid.UUID,
+    datos: CambioPrecioComponente,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoCambioPrecio:
+    """Cambia el precio de un componente del descompuesto, en esta partida o en
+    todo el presupuesto (Fase 34). Las partidas afectadas se independizan del
+    banco de precios; el banco no se modifica."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    afectadas = await service.cambiar_precio_componente(
+        session, partida_id, datos.hijo_id, datos.precio, datos.alcance
+    )
+    # Se devuelve el descompuesto ya recalculado en vez de dejar que el cliente
+    # lo vuelva a pedir: `get_session` confirma la transacción en el cierre de
+    # la dependencia, y FastAPI ejecuta eso DESPUÉS de enviar la respuesta, así
+    # que un GET inmediato puede leer todavía el estado anterior.
+    resultado = await service.descomposicion_de_partida(session, partida_id)
+    lineas = [] if resultado is None else resultado[1]
+    propia = bool(resultado and resultado[0])
+    # Y se confirma aquí mismo, para que cualquier otra lectura que dispare el
+    # cliente al recibir la respuesta (recargar el presupuesto, por ejemplo) vea
+    # ya el cambio. Ojo al orden: `set_config('app.organization_id', ..., true)`
+    # es local a la transacción, así que después del commit ya no se puede leer.
+    await session.commit()
+    return ResultadoCambioPrecio(
+        partidas_afectadas=afectadas,
+        descomposicion=DescomposicionPartidaOut(
+            propia=propia, lineas=[LineaDescomposicionOut(**l) for l in lineas]
+        ),
+    )
+
+
+@partidas_router.patch(
+    "/{partida_id}/descomposicion/rendimiento", response_model=DescomposicionPartidaOut
+)
+async def cambiar_rendimiento_componente(
+    partida_id: uuid.UUID,
+    datos: CambioRendimientoComponente,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Cambia el rendimiento de un componente del descompuesto (siempre "solo
+    en esta partida": el rendimiento no se comparte entre partidas, así que no
+    hace falta elegir alcance como con el precio)."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    if not await service.cambiar_rendimiento_componente(
+        session, partida_id, datos.hijo_id, datos.rendimiento
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Componente no encontrado")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
 
 
 @partidas_router.post(
@@ -617,5 +803,102 @@ async def descargar_pdf(
 router = APIRouter()
 router.include_router(presupuestos_router)
 router.include_router(capitulos_router)
+# --- Fórmulas de medición (Fase 37) ---
+#
+# Viven a nivel de cuenta, como el diccionario: cualquier usuario del tenant
+# puede consultarlas y crearlas desde el propio modal de medición, sin pasar
+# por Ajustes.
+
+
+def _formula_a_out(formula) -> FormulaMedicionOut:
+    salida = FormulaMedicionOut.model_validate(formula)
+    try:
+        salida.variables = formulas.validar(formula.expresion)
+    except formulas.FormulaInvalida:
+        # Una fórmula guardada que ya no valida (editada a mano en la base de
+        # datos) no debe tumbar el listado entero.
+        salida.variables = []
+    return salida
+
+
+@formulas_router.get("", response_model=list[FormulaMedicionOut])
+async def listar_formulas(
+    solo_activas: bool = Query(default=True),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> list[FormulaMedicionOut]:
+    cuenta_id = await cuenta_id_del_principal(session, principal)
+    filas = await service.listar_formulas(session, cuenta_id, solo_activas=solo_activas)
+    return [_formula_a_out(f) for f in filas]
+
+
+@formulas_router.post("", response_model=FormulaMedicionOut, status_code=status.HTTP_201_CREATED)
+async def crear_formula(
+    datos: FormulaMedicionCreate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> FormulaMedicionOut:
+    cuenta_id = await cuenta_id_del_principal(session, principal)
+    try:
+        formula = await service.crear_formula(session, cuenta_id, datos)
+    except formulas.FormulaInvalida as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except service.CodigoDuplicado as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    return _formula_a_out(formula)
+
+
+@formulas_router.post("/probar", response_model=ProbarFormulaOut)
+async def probar_formula(
+    datos: ProbarFormulaIn,
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> ProbarFormulaOut:
+    """Comprueba una expresión y la calcula con unos valores de prueba, para
+    poder ver el resultado antes de guardar la fórmula."""
+    try:
+        variables = formulas.validar(datos.expresion)
+        resultado = formulas.evaluar(datos.expresion, datos.valores)
+    except formulas.FormulaInvalida as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return ProbarFormulaOut(variables=variables, resultado=resultado)
+
+
+@formulas_router.patch("/{formula_id}", response_model=FormulaMedicionOut)
+async def actualizar_formula(
+    formula_id: uuid.UUID,
+    datos: FormulaMedicionUpdate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> FormulaMedicionOut:
+    cuenta_id = await cuenta_id_del_principal(session, principal)
+    try:
+        formula = await service.actualizar_formula(session, cuenta_id, formula_id, datos)
+    except formulas.FormulaInvalida as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if formula is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fórmula no encontrada")
+    await session.commit()
+    return _formula_a_out(formula)
+
+
+@formulas_router.delete("/{formula_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_formula(
+    formula_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> None:
+    cuenta_id = await cuenta_id_del_principal(session, principal)
+    if not await service.eliminar_formula(session, cuenta_id, formula_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fórmula no encontrada")
+    await session.commit()
+
+
 router.include_router(partidas_router)
 router.include_router(mediciones_router)
+router.include_router(formulas_router)

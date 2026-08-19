@@ -597,6 +597,14 @@ textarea.input {
   white-space: nowrap;
 }
 
+/* La rejilla editable trata esta celda como una columna más al navegar con
+ * el teclado (flechas/Tab): mismo anillo que `.rejilla__celda.is-activa`,
+ * pero sin su `overflow: hidden` — recortaría el tooltip del botón. */
+.rejilla .table__actions.is-activa {
+  box-shadow: inset 0 0 0 2px var(--c-accent);
+  border-radius: var(--radius-sm);
+}
+
 /* --- DataTable: listados con columnas movibles/redimensionables, filtros
    en cabecera, exportación y paginación (ver components/DataTable.tsx) --- */
 
@@ -948,8 +956,38 @@ textarea.input {
 .rejilla-barra {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  flex-wrap: wrap;
+  gap: var(--sp-2);
   margin-bottom: var(--sp-3);
+}
+
+/* Desplegable para replegar/expandir una rama del arbol de presupuesto. Va
+   dentro de la celda de codigo, antes del texto, y no debe parecer un boton:
+   solo el chevron, con su propia zona de clic comoda. */
+.rejilla__plegar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: var(--sp-1);
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  flex: none;
+}
+
+.rejilla__plegar:hover {
+  background: var(--c-surface-3);
+  color: var(--c-text);
+}
+
+.rejilla__plegar:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
 }
 
 .rejilla-barra__ayuda {
@@ -994,11 +1032,16 @@ textarea.input {
   position: relative;
 }
 
+/* `position: fixed` en coordenadas de ventana (calculadas en JS) y portada a
+ * `document.body`: si se posicionara relativa a la celda se recortaría contra
+ * el `overflow: hidden` de la propia `<td>` o, dentro de un widget con zoom,
+ * contra su `transform` (mismo motivo que el portal de `Modal`, ver `ui.tsx`).
+ * z-index por encima de `.modal-pantalla-backdrop` (40): la rejilla suele
+ * vivir dentro de una ficha, y por debajo perdía los clics — la ficha entera
+ * se pintaba encima aunque el desplegable estuviera bien posicionado. */
 .rejilla__sugerencias {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 55;
   min-width: 320px;
   max-height: 240px;
   overflow-y: auto;
@@ -1030,6 +1073,55 @@ textarea.input {
 .rejilla__sugerencia-accion {
   color: var(--c-accent);
   font-weight: 600;
+}
+
+/* --- Semáforo de la venta y candado (Fase 35) --- */
+
+/* Un borde a la izquierda, no un fondo: la fila ya usa el fondo para marcar
+ * la selección, y superponer los dos haría ilegibles ambos. */
+.rejilla__fila.venta-perdida td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-danger);
+}
+
+.rejilla__fila.venta-bajo td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-warning);
+}
+
+.rejilla__fila.venta-perdida .rejilla__celda:nth-child(8) {
+  color: var(--c-danger);
+  font-weight: 600;
+}
+
+.rejilla__fila.venta-bajo .rejilla__celda:nth-child(8) {
+  color: var(--c-warning);
+}
+
+.btn--solo-icono.is-bloqueada {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+/* --- Ayuda de atajos de teclado --- */
+
+kbd {
+  display: inline-block;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--c-border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.tabla-atajos td {
+  vertical-align: middle;
+}
+
+/* Ancho fijo para que las descripciones queden alineadas entre grupos. */
+.tabla-atajos__teclas {
+  width: 190px;
 }
 
 /* --- Menú de acciones desplegable --- */
