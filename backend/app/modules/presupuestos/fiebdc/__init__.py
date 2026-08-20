@@ -15,6 +15,8 @@ from app.modules.presupuestos.fiebdc.importador import (
     EstrategiaCodigos,
     ResultadoImportacion,
     importar,
+    importar_bajo_capitulo,
+    importar_en_raiz,
 )
 from app.modules.presupuestos.fiebdc.parser import parsear
 
@@ -23,5 +25,7 @@ __all__ = [
     "ResultadoImportacion",
     "exportar_presupuesto",
     "importar",
+    "importar_bajo_capitulo",
+    "importar_en_raiz",
     "parsear",
 ]

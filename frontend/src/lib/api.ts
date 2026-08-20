@@ -680,6 +680,7 @@ export interface NodoCapitulo {
   texto: string | null
   orden: number
   importe: string
+  importe_venta: string
   partidas: Partida[]
   hijos: NodoCapitulo[]
 }
@@ -1256,6 +1257,19 @@ export async function descargar(
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
+/** Como `descargar`, pero para mostrar el fichero incrustado (p. ej. una
+ *  imagen dentro de una descripción con formato) en vez de guardarlo o
+ *  abrirlo aparte — el `<img src>` no puede llevar la cabecera Authorization,
+ *  así que hay que pedirlo por fetch y quedarse con la URL del blob mientras
+ *  se muestre. Quien la pida es quien debe revocarla con `URL.revokeObjectURL`
+ *  cuando deje de hacer falta.
+ */
+export async function urlBlob(path: string): Promise<string> {
+  const response = await fetch(path, { headers: await cabeceras() })
+  if (!response.ok) throw new Error(await mensajeDeError(response))
+  return URL.createObjectURL(await response.blob())
+}
+
 function query(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams()
   for (const [clave, valor] of Object.entries(params)) {
@@ -1287,6 +1301,34 @@ async function subir<T>(path: string, formulario: FormData): Promise<T> {
   })
   if (!response.ok) throw new Error(await mensajeDeError(response))
   return response.json() as Promise<T>
+}
+
+/** Lo que puede proponer la IA en "Ayuda con IA" o en la conversación sobre
+ *  un documento arrastrado — nunca lo ejecuta ella, solo deja la propuesta
+ *  lista para que el usuario la confirme (ver `AyudaIAModal`/`DocumentoIAModal`). */
+export interface PropuestaIA {
+  tipo: 'copiar_partida' | 'crear_partida' | 'importar_capitulo'
+  descripcion: string
+  // copiar_partida:
+  partida_id: string | null
+  // crear_partida:
+  resumen: string | null
+  unidad: string | null
+  componentes: {
+    concepto_id: string | null
+    codigo: string | null
+    resumen: string
+    unidad: string
+    rendimiento: string
+    // Personalizado: no existe en el banco de precios, se da de alta al
+    // confirmar con este precio/naturaleza (ver AyudaIAModal.confirmarCrear).
+    personalizado: boolean
+    precio: string | null
+    naturaleza: string | null
+  }[]
+  // importar_capitulo:
+  capitulo_resumen: string | null
+  partidas_propuestas: { resumen: string; unidad: string; precio: string; medicion: string }[]
 }
 
 export interface AnalisisBC3 {
@@ -1924,6 +1966,10 @@ export const api = {
         `/api/presupuestos/${id}/lineas/${lineaId}/convertir`,
         { tipo },
       ),
+    pegarCapitulos: (
+      id: string,
+      datos: { capitulo_ids: string[]; parent_id?: string | null; alcance: AlcancePegado },
+    ) => post<ResultadoPegado>(`/api/presupuestos/${id}/capitulos/pegar`, datos),
   },
 
   formulasMedicion: {
@@ -1944,7 +1990,13 @@ export const api = {
   capitulos: {
     update: (
       id: string,
-      datos: { codigo?: string; resumen?: string; orden?: number; parent_id?: string | null },
+      datos: {
+        codigo?: string
+        resumen?: string
+        texto?: string | null
+        orden?: number
+        parent_id?: string | null
+      },
     ) => patch<{ id: string }>(`/api/capitulos/${id}`, datos),
     remove: (id: string) => del(`/api/capitulos/${id}`),
     addPartida: (
@@ -1956,6 +2008,7 @@ export const api = {
         unidad?: string
         precio?: string
         orden?: number
+        lineas?: { comentario?: string; uds?: string; longitud?: string; anchura?: string; altura?: string }[]
       },
     ) => post<Partida>(`/api/capitulos/${id}/partidas`, datos),
     pegarPartidas: (id: string, datos: { partida_ids: string[]; alcance: AlcancePegado }) =>
@@ -2041,6 +2094,18 @@ export const api = {
         f.append('nombre_presupuesto', opciones.nombre_presupuesto)
       }
       return subir<ImportacionBC3>('/api/fiebdc/importar', f)
+    },
+    importarEnCapitulo: (capituloId: string, fichero: File, estrategia: string) => {
+      const f = new FormData()
+      f.append('fichero', fichero)
+      f.append('estrategia', estrategia)
+      return subir<ImportacionBC3>(`/api/fiebdc/importar-en-capitulo/${capituloId}`, f)
+    },
+    importarEnPresupuesto: (presupuestoId: string, fichero: File, estrategia: string) => {
+      const f = new FormData()
+      f.append('fichero', fichero)
+      f.append('estrategia', estrategia)
+      return subir<ImportacionBC3>(`/api/fiebdc/importar-en-presupuesto/${presupuestoId}`, f)
     },
     exportarUrl: (presupuestoId: string) => `/api/fiebdc/exportar/${presupuestoId}`,
   },
@@ -2206,6 +2271,32 @@ export const api = {
           altura?: string | null
         }[],
       ) => post<LineaMedicion[]>(`/api/ia/mediciones/${id}/aplicar`, { lineas }),
+    },
+    ayudaLineaConversar: (datos: {
+      contexto: {
+        tipo: 'capitulo' | 'partida'
+        codigo?: string | null
+        resumen: string
+        unidad?: string | null
+        precio?: string | null
+        presupuesto_id: string
+        presupuesto_nombre: string
+      }
+      mensajes: { rol: 'user' | 'assistant'; contenido: string }[]
+    }) => post<{ respuesta: string; propuesta: PropuestaIA | null }>('/api/ia/ayuda-linea/conversar', datos),
+    documentoConversar: (
+      fichero: File,
+      mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
+      presupuestoId?: string,
+    ) => {
+      const f = new FormData()
+      f.append('fichero', fichero)
+      f.append('mensajes', JSON.stringify(mensajes))
+      if (presupuestoId) f.append('presupuesto_id', presupuestoId)
+      return subir<{ respuesta: string; propuesta: PropuestaIA | null }>(
+        '/api/ia/documentos/conversar',
+        f,
+      )
     },
   },
 }

@@ -16,11 +16,13 @@ import {
 import { CamposLibres } from '../components/CamposLibres'
 import { ContactosAsociados } from '../components/ContactosAsociados'
 import { DescompuestoPartida } from '../components/DescompuestoPartida'
+import { DescripcionEditor } from '../components/DescripcionEditor'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { NotasCrm } from '../components/NotasCrm'
 import type { FilaPresupuesto } from '../components/RejillaPresupuesto'
+import { ID_RAIZ } from '../components/RejillaPresupuesto'
 import { ReajusteModal } from '../components/ReajusteModal'
 import { MedicionesPartida } from '../components/MedicionesPartida'
 import { RejillaPresupuesto } from '../components/RejillaPresupuesto'
@@ -519,6 +521,46 @@ export function PresupuestoDetalle() {
                 )}
               </>
             ),
+          },
+          {
+            id: 'descripcion',
+            titulo: 'Descripción',
+            x: 0,
+            y: 43,
+            w: 12,
+            h: 12,
+            minW: 5,
+            minH: 6,
+            contenido:
+              seleccion === null ? (
+                <EmptyState title="Nada seleccionado">
+                  Selecciona un capítulo o una partida para ver y editar su descripción aquí.
+                </EmptyState>
+              ) : seleccion.tipo === 'partida' ? (
+                <DescripcionEditor
+                  key={seleccion.partida.id}
+                  id={seleccion.partida.id}
+                  html={seleccion.partida.texto}
+                  presupuestoId={id}
+                  onGuardar={async (texto) => {
+                    await api.partidas.update(seleccion.partida.id, { texto })
+                  }}
+                />
+              ) : seleccion.fila.id === ID_RAIZ ? (
+                <EmptyState title="La raíz no tiene descripción">
+                  Selecciona un capítulo o una partida del presupuesto.
+                </EmptyState>
+              ) : (
+                <DescripcionEditor
+                  key={seleccion.fila.id}
+                  id={seleccion.fila.id}
+                  html={seleccion.fila.texto}
+                  presupuestoId={id}
+                  onGuardar={async (texto) => {
+                    await api.capitulos.update(seleccion.fila.id, { texto })
+                  }}
+                />
+              ),
           },
         ]}
       />

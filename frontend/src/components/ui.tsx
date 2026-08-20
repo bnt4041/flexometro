@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Icon } from './Icon'
 import type { NombreIcono } from './Icon'
+import { useSidebarColapsada } from '../lib/sidebarColapsada'
 
 /** Pila de capas superpuestas (fichas y modales) para repartir el Escape.
  *
@@ -270,6 +271,7 @@ export function ModalPantalla({
   children: ReactNode
 }) {
   useEscapeCierra(onClose)
+  const [colapsada, alternarColapsada] = useSidebarColapsada()
 
   // Mismo motivo que en `Modal`: sacarlo de la jerarquía de un widget con
   // zoom (que pone `transform`) para que el `position: fixed` cubra la
@@ -283,7 +285,28 @@ export function ModalPantalla({
         aria-modal="true"
       >
         <div className="modal-pantalla__head">
-          <span className="modal-pantalla__title">{title}</span>
+          <div className="modal-pantalla__head-izq">
+            {/* La ficha tapa la topbar entera, así que su botón de recoger la
+                barra lateral queda inalcanzable desde aquí dentro — este es
+                el mismo interruptor (`sidebarColapsada.ts`), repetido en la
+                cabecera de la ficha para que siga habiendo forma de llegar a
+                él. */}
+            <Tooltip texto={colapsada ? 'Mostrar el menú' : 'Ocultar el menú'} posicion="abajo">
+              <button
+                className="modal-pantalla__colapsar"
+                onClick={alternarColapsada}
+                aria-label={colapsada ? 'Mostrar el menú' : 'Ocultar el menú'}
+                aria-expanded={!colapsada}
+              >
+                {colapsada ? (
+                  <ChevronRight size={16} aria-hidden="true" />
+                ) : (
+                  <ChevronLeft size={16} aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+            <span className="modal-pantalla__title">{title}</span>
+          </div>
           <Tooltip texto="Cerrar" posicion="abajo">
             <button className="modal-pantalla__close" onClick={onClose} aria-label="Cerrar">
               <Icon name="cerrar" />

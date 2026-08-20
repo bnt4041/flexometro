@@ -39,6 +39,7 @@ export function MedicionesPartida({
   const [pendiente, setPendiente] = useState(false)
   const [gestionandoFormulas, setGestionandoFormulas] = useState(false)
   const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
+  const [filtros, setFiltros] = useState<Record<string, string>>({})
   const cambios = useRef<Map<string, Record<string, string | null>>>(new Map())
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -249,10 +250,25 @@ export function MedicionesPartida({
       ancho: '110px',
       tipo: 'numero',
       valor: (l) => formatoImporte(l.parcial, 3),
+      // La medición ya recalculada del servidor, no una suma local: coincide
+      // con lo que enseña el resumen de abajo aunque el redondeo del backend
+      // difiera del de sumar aquí mismo.
+      total: `${formatoImporte(detalle?.medicion ?? '0', 3)} ${partida.unidad}`,
     },
   ]
 
   const lineas = detalle?.lineas ?? []
+
+  const filtrosActivos = Object.entries(filtros).filter(([, v]) => v.trim() !== '')
+  const lineasVisibles =
+    filtrosActivos.length === 0
+      ? lineas
+      : lineas.filter((l) =>
+          filtrosActivos.every(([colId, q]) => {
+            const col = columnas.find((c) => c.id === colId)
+            return (col?.valor(l) ?? '').toLowerCase().includes(q.trim().toLowerCase())
+          }),
+        )
 
   return (
     <>
@@ -313,7 +329,7 @@ export function MedicionesPartida({
       <ErrorNotice error={error} />
 
       <RejillaEditable
-        filas={lineas}
+        filas={lineasVisibles}
         columnas={columnas}
         idDe={(l) => l.id}
         onEditar={(linea, columnaId, valor) => {
@@ -329,10 +345,16 @@ export function MedicionesPartida({
         onCopiar={copiarLineas}
         onPegar={pegar}
         onSoltarEn={() => pegar()}
+        filtros={filtros}
+        onFiltrar={(columnaId, valor) => setFiltros((f) => ({ ...f, [columnaId]: valor }))}
         vacia={
-          <EmptyState title="Sin líneas de medición">
-            Añade una línea, o mide con una fórmula.
-          </EmptyState>
+          filtrosActivos.length > 0 ? (
+            <EmptyState title="Sin resultados">Nada coincide con los filtros.</EmptyState>
+          ) : (
+            <EmptyState title="Sin líneas de medición">
+              Añade una línea, o mide con una fórmula.
+            </EmptyState>
+          )
         }
         acciones={(l) =>
           conFormula(l) ? (

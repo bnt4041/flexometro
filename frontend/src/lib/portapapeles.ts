@@ -3,7 +3,7 @@
  *  memoria: así sobrevive a cambiar de pestaña o de presupuesto, que es
  *  justo lo que hace falta para pegar de un presupuesto a otro (Fase 1c). */
 
-export type TipoPortapapeles = 'partidas' | 'lineas_medicion' | 'componentes_descompuesto'
+export type TipoPortapapeles = 'capitulos' | 'partidas' | 'lineas_medicion' | 'componentes_descompuesto'
 
 export interface ContenidoPortapapeles {
   tipo: TipoPortapapeles

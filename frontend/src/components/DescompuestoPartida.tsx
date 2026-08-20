@@ -82,6 +82,7 @@ export function DescompuestoPartida({
   } | null>(null)
   const [anadiendo, setAnadiendo] = useState(false)
   const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
+  const [filtros, setFiltros] = useState<Record<string, string>>({})
   const unidadesMedida = useDiccionario('unidad_medida')
 
   const cargar = useCallback(async () => {
@@ -387,6 +388,8 @@ export function DescompuestoPartida({
         importe: '0',
       }
 
+  const total = (datos?.lineas ?? []).reduce((suma, l) => suma + Number(l.importe), 0)
+
   const columnas: ColumnaRejilla<LineaDescomposicion>[] = [
     { id: 'codigo', etiqueta: 'Código', ancho: '140px', valor: (l) => l.codigo },
     {
@@ -484,11 +487,25 @@ export function DescompuestoPartida({
       ancho: '110px',
       tipo: 'numero',
       valor: (l) => formatoImporte(l.importe),
+      total: `${formatoImporte(String(total))} €`,
     },
   ]
 
-  const total = (datos?.lineas ?? []).reduce((suma, l) => suma + Number(l.importe), 0)
   const filas = anadiendo ? [...(datos?.lineas ?? []), lineaBorrador] : (datos?.lineas ?? [])
+
+  // El borrador de un alta en marcha nunca se filtra: se está tecleando.
+  const filtrosActivos = Object.entries(filtros).filter(([, v]) => v.trim() !== '')
+  const filasVisibles =
+    filtrosActivos.length === 0
+      ? filas
+      : filas.filter(
+          (f) =>
+            f.id === ID_BORRADOR ||
+            filtrosActivos.every(([colId, q]) => {
+              const col = columnas.find((c) => c.id === colId)
+              return (col?.valor(f) ?? '').toLowerCase().includes(q.trim().toLowerCase())
+            }),
+        )
 
   return (
     <>
@@ -521,7 +538,7 @@ export function DescompuestoPartida({
       <ErrorNotice error={error} />
 
       <RejillaEditable
-        filas={filas}
+        filas={filasVisibles}
         columnas={columnas}
         idDe={(l) => l.id}
         // ↓ en la última fila, o Tab al final de la fila: empieza el mismo
@@ -531,6 +548,8 @@ export function DescompuestoPartida({
         onPegar={pegar}
         onSoltarEn={() => pegar()}
         puedeArrastrar={(l) => l.id !== ID_BORRADOR}
+        filtros={filtros}
+        onFiltrar={(columnaId, valor) => setFiltros((f) => ({ ...f, [columnaId]: valor }))}
         filaAEditarId={anadiendo ? ID_BORRADOR : null}
         columnaAEditarId={
           anadiendo
@@ -587,15 +606,19 @@ export function DescompuestoPartida({
           )
         }
         vacia={
-          <EmptyState title="Sin descomponer">
-            Esta partida no tiene descompuesto: su precio va a mano o viene de una partida alzada.
-            <div style={{ marginTop: 'var(--sp-3)' }}>
-              <button className="btn btn--primary" onClick={empezarAlta}>
-                <Plus size={16} aria-hidden="true" />
-                Añadir el primer componente
-              </button>
-            </div>
-          </EmptyState>
+          filtrosActivos.length > 0 ? (
+            <EmptyState title="Sin resultados">Nada coincide con los filtros.</EmptyState>
+          ) : (
+            <EmptyState title="Sin descomponer">
+              Esta partida no tiene descompuesto: su precio va a mano o viene de una partida alzada.
+              <div style={{ marginTop: 'var(--sp-3)' }}>
+                <button className="btn btn--primary" onClick={empezarAlta}>
+                  <Plus size={16} aria-hidden="true" />
+                  Añadir el primer componente
+                </button>
+              </div>
+            </EmptyState>
+          )
         }
       />
 

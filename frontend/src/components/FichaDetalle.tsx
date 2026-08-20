@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Icon } from './Icon'
 import type { NombreIcono } from './Icon'
 import { Tooltip, useEscapeCierra } from './ui'
+import { useSidebarColapsada } from '../lib/sidebarColapsada'
 
 export interface PestanaFicha {
   id: string
@@ -41,6 +43,7 @@ export function FichaDetalle({
 }) {
   const [activaId, setActivaId] = useState(pestanas[0]?.id)
   const activa = pestanas.find((p) => p.id === activaId) ?? pestanas[0]
+  const [colapsada, alternarColapsada] = useSidebarColapsada()
 
   // Por la pila de capas: si esta ficha tiene un modal abierto, el Escape es
   // suyo, no de la ficha (ver `useEscapeCierra`).
@@ -55,7 +58,26 @@ export function FichaDetalle({
         aria-modal="true"
       >
         <div className="modal-pantalla__head">
-          <span className="modal-pantalla__title">{titulo}</span>
+          <div className="modal-pantalla__head-izq">
+            {/* La ficha tapa la topbar entera (con el botón de recoger la
+                barra lateral) — mismo interruptor (`sidebarColapsada.ts`),
+                repetido aquí para que siga habiendo forma de llegar a él. */}
+            <Tooltip texto={colapsada ? 'Mostrar el menú' : 'Ocultar el menú'} posicion="abajo">
+              <button
+                className="modal-pantalla__colapsar"
+                onClick={alternarColapsada}
+                aria-label={colapsada ? 'Mostrar el menú' : 'Ocultar el menú'}
+                aria-expanded={!colapsada}
+              >
+                {colapsada ? (
+                  <ChevronRight size={16} aria-hidden="true" />
+                ) : (
+                  <ChevronLeft size={16} aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+            <span className="modal-pantalla__title">{titulo}</span>
+          </div>
           <Tooltip texto="Cerrar" posicion="abajo">
             <button className="modal-pantalla__close" onClick={onClose} aria-label="Cerrar">
               <Icon name="cerrar" />

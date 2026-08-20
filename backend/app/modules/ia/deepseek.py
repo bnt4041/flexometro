@@ -129,3 +129,55 @@ async def solicitar_sugerencia(
         tokens_salida=int(uso.get("completion_tokens", 0)),
     )
     return _parsear_respuesta(contenido), tokens
+
+
+async def chat_con_herramientas(
+    session: AsyncSession,
+    mensajes: list[dict],
+    herramientas: list[dict],
+) -> tuple[str | None, list[dict], UsoTokens]:
+    """Un turno de chat con function-calling (formato OpenAI, que DeepSeek
+    implementa igual) — usado por el asistente conversacional de `asistente.py`.
+
+    Sin JSON forzado ni esquema de respuesta: aquí lo estructurado son las
+    llamadas a herramientas (`tool_calls`), que decide el propio modelo, no
+    un `response_format`. Devuelve `(texto, tool_calls, uso)` — `texto` puede
+    ser `None` cuando la respuesta es solo llamadas a herramientas."""
+    credenciales = await credenciales_deepseek(session)
+    if not credenciales.api_key:
+        raise DeepSeekError(
+            "DeepSeek no tiene clave configurada; añádela en Administración → "
+            "Ajustes IA (o DEEPSEEK_API_KEY en el .env) para activar la ayuda con IA"
+        )
+
+    payload: dict = {
+        "model": credenciales.modelo,
+        "temperature": 0.3,
+        "messages": mensajes,
+    }
+    if herramientas:
+        payload["tools"] = herramientas
+        payload["tool_choice"] = "auto"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as cliente:
+            respuesta = await cliente.post(
+                f"{credenciales.base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {credenciales.api_key}"},
+            )
+            respuesta.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("Fallo al llamar a DeepSeek: %s", exc)
+        raise DeepSeekError(f"No se pudo contactar con DeepSeek: {exc}") from exc
+
+    cuerpo = respuesta.json()
+    mensaje = cuerpo["choices"][0]["message"]
+    uso = cuerpo.get("usage", {})
+    tokens = UsoTokens(
+        modelo=credenciales.modelo,
+        tokens_entrada=int(uso.get("prompt_tokens", 0)),
+        tokens_salida=int(uso.get("completion_tokens", 0)),
+    )
+    contenido = mensaje.get("content")
+    return (contenido.strip() if contenido else None), mensaje.get("tool_calls") or [], tokens

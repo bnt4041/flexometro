@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import OrigenDato
@@ -158,30 +158,18 @@ def calcular_precios(archivo: ArchivoBC3) -> tuple[dict[str, Decimal], list]:
     return precios, discrepancias
 
 
-async def importar(
+async def _importar_conceptos(
     session: AsyncSession,
     archivo: ArchivoBC3,
-    *,
-    estrategia: EstrategiaCodigos = EstrategiaCodigos.OMITIR,
-    crear_presupuesto: bool = True,
-    nombre_presupuesto: str | None = None,
-    codigo_presupuesto: str | None = None,
-) -> ResultadoImportacion:
+    precios: dict[str, Decimal],
+    estrategia: EstrategiaCodigos,
+    resultado: ResultadoImportacion,
+) -> dict[str, uuid.UUID]:
+    """Sube al catálogo de precios los conceptos básicos/auxiliares/unitarios
+    del fichero. Independiente de si el fichero acaba formando un presupuesto
+    nuevo, insertándose bajo un capítulo existente, o ninguna de las dos —
+    por eso vive separado de `_importar_presupuesto`/`_recorrer_bc3`."""
     org_id = require_organization_id()
-    resultado = ResultadoImportacion(
-        incidencias=[f"línea {i.linea} {i.registro}: {i.detalle}" for i in archivo.incidencias]
-    )
-
-    resultado.ciclos = detectar_ciclos(archivo)
-    if resultado.ciclos:
-        # Con ciclos no se escribe nada: el árbol de precios no sería calculable.
-        return resultado
-
-    precios, discrepancias = calcular_precios(archivo)
-    resultado.discrepancias = discrepancias
-
-    # --- Conceptos de precio ---
-
     existentes = dict(
         (
             await session.execute(
@@ -254,8 +242,31 @@ async def importar(
         resultado.lineas_descomposicion = len(lineas_desc)
 
     await session.flush()
+    return existentes
 
-    # --- Presupuesto ---
+
+async def importar(
+    session: AsyncSession,
+    archivo: ArchivoBC3,
+    *,
+    estrategia: EstrategiaCodigos = EstrategiaCodigos.OMITIR,
+    crear_presupuesto: bool = True,
+    nombre_presupuesto: str | None = None,
+    codigo_presupuesto: str | None = None,
+) -> ResultadoImportacion:
+    resultado = ResultadoImportacion(
+        incidencias=[f"línea {i.linea} {i.registro}: {i.detalle}" for i in archivo.incidencias]
+    )
+
+    resultado.ciclos = detectar_ciclos(archivo)
+    if resultado.ciclos:
+        # Con ciclos no se escribe nada: el árbol de precios no sería calculable.
+        return resultado
+
+    precios, discrepancias = calcular_precios(archivo)
+    resultado.discrepancias = discrepancias
+
+    existentes = await _importar_conceptos(session, archivo, precios, estrategia, resultado)
 
     if crear_presupuesto and archivo.es_presupuesto:
         await _importar_presupuesto(
@@ -268,6 +279,144 @@ async def importar(
             codigo_presupuesto=codigo_presupuesto,
         )
 
+    return resultado
+
+
+async def _parsear_y_subir_conceptos(
+    session: AsyncSession,
+    archivo: ArchivoBC3,
+    estrategia: EstrategiaCodigos,
+) -> tuple[ResultadoImportacion, dict[str, uuid.UUID], dict[str, Decimal]]:
+    """Ciclos, precios y catálogo: la parte común a `importar_bajo_capitulo` y
+    `importar_en_raiz` antes de decidir dónde colgar el árbol. Si hay ciclos,
+    o el fichero no trae estructura de presupuesto, `existentes`/`precios`
+    salen vacíos y el llamador debe devolver `resultado` tal cual — se
+    reconoce por `resultado.ciclos` o `not archivo.es_presupuesto`."""
+    resultado = ResultadoImportacion(
+        incidencias=[f"línea {i.linea} {i.registro}: {i.detalle}" for i in archivo.incidencias]
+    )
+
+    resultado.ciclos = detectar_ciclos(archivo)
+    if resultado.ciclos:
+        return resultado, {}, {}
+
+    precios, discrepancias = calcular_precios(archivo)
+    resultado.discrepancias = discrepancias
+
+    existentes = await _importar_conceptos(session, archivo, precios, estrategia, resultado)
+
+    if not archivo.es_presupuesto or archivo.raiz is None:
+        resultado.incidencias.append(
+            "El fichero no trae una estructura de capítulos/partidas que insertar "
+            "(solo conceptos de precio, ya subidos al catálogo)"
+        )
+        return resultado, existentes, precios
+
+    return resultado, existentes, precios
+
+
+async def importar_bajo_capitulo(
+    session: AsyncSession,
+    archivo: ArchivoBC3,
+    capitulo_id: uuid.UUID,
+    *,
+    estrategia: EstrategiaCodigos = EstrategiaCodigos.OMITIR,
+) -> ResultadoImportacion:
+    """Igual que `importar`, pero en vez de crear un presupuesto nuevo cuelga
+    la estructura del fichero (subcapítulos y partidas, con sus mediciones)
+    de un capítulo que ya existe — arrastrar un BC3 sobre una fila del
+    presupuesto, en vez de "Importar BC3" como pantalla aparte.
+
+    El catálogo de precios se sube exactamente igual que en `importar`; lo
+    único que cambia es el destino del árbol de capítulos/partidas.
+    """
+    org_id = require_organization_id()
+    resultado, existentes, precios = await _parsear_y_subir_conceptos(session, archivo, estrategia)
+    if resultado.ciclos or not archivo.es_presupuesto or archivo.raiz is None:
+        return resultado
+
+    capitulo = await session.scalar(
+        select(Capitulo).where(Capitulo.id == capitulo_id, Capitulo.organization_id == org_id)
+    )
+    if capitulo is None:
+        resultado.incidencias.append("El capítulo destino no existe")
+        return resultado
+
+    # Dos secuencias de orden independientes (capítulos y partidas no
+    # comparten numeración dentro de un mismo padre — mismo criterio que
+    # `siguienteOrden` en el frontend), para que lo nuevo se coloque detrás
+    # de lo que ya hubiera, no se intercale ni empiece en 0.
+    orden_cap = await session.scalar(
+        select(func.max(Capitulo.orden)).where(Capitulo.parent_id == capitulo_id)
+    )
+    orden_part = await session.scalar(
+        select(func.max(Partida.orden)).where(Partida.capitulo_id == capitulo_id)
+    )
+
+    resultado.presupuesto_id = capitulo.presupuesto_id
+    await _recorrer_bc3(
+        session,
+        archivo,
+        existentes,
+        precios,
+        resultado,
+        org_id=org_id,
+        presupuesto_id=capitulo.presupuesto_id,
+        codigo_raiz=archivo.raiz.codigo,
+        parent_id=capitulo.id,
+        orden_capitulos_inicial=int(orden_cap + 1) if orden_cap is not None else 0,
+        orden_partidas_inicial=int(orden_part + 1) if orden_part is not None else 0,
+    )
+    return resultado
+
+
+async def importar_en_raiz(
+    session: AsyncSession,
+    archivo: ArchivoBC3,
+    presupuesto_id: uuid.UUID,
+    *,
+    estrategia: EstrategiaCodigos = EstrategiaCodigos.OMITIR,
+) -> ResultadoImportacion:
+    """Igual que `importar_bajo_capitulo`, pero arrastrando el BC3 sobre la
+    fila raíz del presupuesto en vez de sobre un capítulo: los capítulos del
+    fichero se cuelgan como capítulos de primer nivel, detrás de los que ya
+    hubiera. Las partidas que el fichero traiga sueltas en su raíz (sin un
+    capítulo que las envuelva) se ignoran, igual que en `importar()` — una
+    partida siempre necesita un capítulo y no le inventamos uno.
+    """
+    org_id = require_organization_id()
+    resultado, existentes, precios = await _parsear_y_subir_conceptos(session, archivo, estrategia)
+    if resultado.ciclos or not archivo.es_presupuesto or archivo.raiz is None:
+        return resultado
+
+    presupuesto = await session.scalar(
+        select(Presupuesto).where(
+            Presupuesto.id == presupuesto_id, Presupuesto.organization_id == org_id
+        )
+    )
+    if presupuesto is None:
+        resultado.incidencias.append("El presupuesto destino no existe")
+        return resultado
+
+    orden_cap = await session.scalar(
+        select(func.max(Capitulo.orden)).where(
+            Capitulo.presupuesto_id == presupuesto_id, Capitulo.parent_id.is_(None)
+        )
+    )
+
+    resultado.presupuesto_id = presupuesto.id
+    await _recorrer_bc3(
+        session,
+        archivo,
+        existentes,
+        precios,
+        resultado,
+        org_id=org_id,
+        presupuesto_id=presupuesto.id,
+        codigo_raiz=archivo.raiz.codigo,
+        parent_id=None,
+        orden_capitulos_inicial=int(orden_cap + 1) if orden_cap is not None else 0,
+    )
     return resultado
 
 
@@ -330,39 +479,80 @@ async def _importar_presupuesto(
     await session.flush()
     resultado.presupuesto_id = presupuesto.id
 
-    # Mediciones indexadas por el par capítulo/partida al que pertenecen.
+    await _recorrer_bc3(
+        session,
+        archivo,
+        conceptos_bd,
+        precios,
+        resultado,
+        org_id=org_id,
+        presupuesto_id=presupuesto.id,
+        codigo_raiz=raiz.codigo,
+        parent_id=None,
+    )
+
+
+async def _recorrer_bc3(
+    session: AsyncSession,
+    archivo: ArchivoBC3,
+    conceptos_bd: dict[str, uuid.UUID],
+    precios: dict[str, Decimal],
+    resultado: ResultadoImportacion,
+    *,
+    org_id: uuid.UUID,
+    presupuesto_id: uuid.UUID,
+    codigo_raiz: str,
+    parent_id: uuid.UUID | None,
+    orden_capitulos_inicial: int = 0,
+    orden_partidas_inicial: int = 0,
+) -> None:
+    """Recorrido recursivo compartido por "crear presupuesto nuevo" y
+    "insertar bajo un capítulo existente": arma capítulos/partidas/mediciones
+    a partir de `codigo_raiz` hacia abajo, colgando todo de `parent_id`
+    (`None` = nivel raíz del presupuesto). Los `orden_*_inicial` solo importan
+    en el primer nivel — un capítulo recién creado por este mismo recorrido
+    nunca tiene hermanos previos, así que sus hijos siempre empiezan en 0."""
     mediciones = {(m.padre, m.hijo): m for m in archivo.mediciones}
 
-    capitulos_bd: dict[str, uuid.UUID] = {}
-    partidas: list[Partida] = []
-
-    async def recorrer(codigo: str, parent_id: uuid.UUID | None, profundidad: int) -> None:
+    async def recorrer(
+        codigo: str,
+        parent_id: uuid.UUID | None,
+        profundidad: int,
+        orden_cap: int,
+        orden_part: int,
+    ) -> None:
         if profundidad > 12:
             resultado.incidencias.append(
                 f"'{codigo}': jerarquía demasiado profunda, se corta el recorrido"
             )
             return
 
-        for orden, linea in enumerate(archivo.descomposiciones.get(codigo, [])):
+        for linea in archivo.descomposiciones.get(codigo, []):
             hijo = archivo.conceptos.get(linea.hijo)
             if hijo is None:
+                # No debería pasar tras la normalización del parser, pero si
+                # el fichero referencia un código que de verdad no existe en
+                # ningún ~C, mejor decirlo que perder esa rama en silencio.
+                resultado.incidencias.append(
+                    f"'{codigo}' referencia a '{linea.hijo}', que no está en el fichero; se omite"
+                )
                 continue
 
             if hijo.tipo is TipoConceptoBC3.CAPITULO:
                 capitulo = Capitulo(
                     organization_id=org_id,
-                    presupuesto_id=presupuesto.id,
+                    presupuesto_id=presupuesto_id,
                     parent_id=parent_id,
                     codigo=hijo.codigo.rstrip("#") or hijo.codigo,
                     resumen=hijo.resumen or hijo.codigo,
                     texto=hijo.texto,
-                    orden=orden,
+                    orden=orden_cap,
                 )
                 session.add(capitulo)
                 await session.flush()
-                capitulos_bd[hijo.codigo] = capitulo.id
+                orden_cap += 1
                 resultado.capitulos += 1
-                await recorrer(hijo.codigo, capitulo.id, profundidad + 1)
+                await recorrer(hijo.codigo, capitulo.id, profundidad + 1, 0, 0)
                 continue
 
             if parent_id is None:
@@ -376,7 +566,7 @@ async def _importar_presupuesto(
             medicion = mediciones.get((codigo, hijo.codigo))
             partida = Partida(
                 organization_id=org_id,
-                presupuesto_id=presupuesto.id,
+                presupuesto_id=presupuesto_id,
                 capitulo_id=parent_id,
                 concepto_id=conceptos_bd.get(hijo.codigo),
                 codigo=hijo.codigo,
@@ -384,11 +574,11 @@ async def _importar_presupuesto(
                 texto=hijo.texto,
                 unidad=hijo.unidad or "ud",
                 precio=precios.get(hijo.codigo, Decimal("0.00")),
-                orden=orden,
+                orden=orden_part,
             )
             session.add(partida)
             await session.flush()
-            partidas.append(partida)
+            orden_part += 1
             resultado.partidas += 1
 
             total = Decimal("0.000")
@@ -420,5 +610,5 @@ async def _importar_presupuesto(
             partida.medicion = redondear_medicion(total)
             partida.importe = redondear_precio(partida.medicion * partida.precio)
 
-    await recorrer(raiz.codigo, None, 0)
+    await recorrer(codigo_raiz, parent_id, 0, orden_capitulos_inicial, orden_partidas_inicial)
     await session.flush()

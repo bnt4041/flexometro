@@ -483,77 +483,9 @@ async def pegar_partidas(
             partida.orden = orden
             afectadas.append(partida)
         else:
-            nueva = Partida(
-                organization_id=org_id,
-                presupuesto_id=capitulo.presupuesto_id,
-                capitulo_id=capitulo_id,
-                concepto_id=partida.concepto_id,
-                codigo=partida.codigo,
-                resumen=partida.resumen,
-                texto=partida.texto,
-                unidad=partida.unidad,
-                precio=partida.precio,
-                costes_indirectos=partida.costes_indirectos,
-                precio_venta=partida.precio_venta,
-                # Un precio pactado a mano en el origen no se hereda: es un
-                # candado puesto para ESA partida, no para la copia.
-                venta_bloqueada=False,
-                importe_venta=partida.importe_venta,
-                medicion=partida.medicion,
-                importe=partida.importe,
-                orden=orden,
+            nueva = await _clonar_partida(
+                session, partida, org_id, capitulo.presupuesto_id, capitulo_id, orden
             )
-            session.add(nueva)
-            await session.flush()
-
-            propias = (
-                await session.execute(
-                    select(PartidaDescomposicion)
-                    .where(PartidaDescomposicion.partida_id == partida.id)
-                    .order_by(PartidaDescomposicion.orden)
-                )
-            ).scalars()
-            for linea in propias:
-                session.add(
-                    PartidaDescomposicion(
-                        organization_id=org_id,
-                        partida_id=nueva.id,
-                        hijo_id=linea.hijo_id,
-                        codigo=linea.codigo,
-                        resumen=linea.resumen,
-                        unidad=linea.unidad,
-                        naturaleza=linea.naturaleza,
-                        rendimiento=linea.rendimiento,
-                        factor=linea.factor,
-                        precio=linea.precio,
-                        orden=linea.orden,
-                    )
-                )
-
-            mediciones = (
-                await session.execute(
-                    select(LineaMedicion)
-                    .where(LineaMedicion.partida_id == partida.id)
-                    .order_by(LineaMedicion.orden)
-                )
-            ).scalars()
-            for medicion in mediciones:
-                session.add(
-                    LineaMedicion(
-                        organization_id=org_id,
-                        partida_id=nueva.id,
-                        formula_id=medicion.formula_id,
-                        formula_expresion=medicion.formula_expresion,
-                        formula_valores=medicion.formula_valores,
-                        comentario=medicion.comentario,
-                        uds=medicion.uds,
-                        longitud=medicion.longitud,
-                        anchura=medicion.anchura,
-                        altura=medicion.altura,
-                        parcial=medicion.parcial,
-                        orden=medicion.orden,
-                    )
-                )
             afectadas.append(nueva)
         orden += 1
 
@@ -561,6 +493,238 @@ async def pegar_partidas(
     for p in afectadas:
         await _refrescar_venta(session, p)
     return len(afectadas)
+
+
+async def _clonar_partida(
+    session: AsyncSession,
+    partida: Partida,
+    org_id: uuid.UUID,
+    presupuesto_id: uuid.UUID,
+    capitulo_id: uuid.UUID,
+    orden: int,
+) -> Partida:
+    """Clona una partida entera —descompuesto propio y mediciones incluidos—
+    con ids nuevos, en el capítulo indicado. Compartido por `pegar_partidas`
+    y `_clonar_capitulo` (copiar un capítulo copia también sus partidas)."""
+    nueva = Partida(
+        organization_id=org_id,
+        presupuesto_id=presupuesto_id,
+        capitulo_id=capitulo_id,
+        concepto_id=partida.concepto_id,
+        codigo=partida.codigo,
+        resumen=partida.resumen,
+        texto=partida.texto,
+        unidad=partida.unidad,
+        precio=partida.precio,
+        costes_indirectos=partida.costes_indirectos,
+        precio_venta=partida.precio_venta,
+        # Un precio pactado a mano en el origen no se hereda: es un candado
+        # puesto para ESA partida, no para la copia.
+        venta_bloqueada=False,
+        importe_venta=partida.importe_venta,
+        medicion=partida.medicion,
+        importe=partida.importe,
+        orden=orden,
+    )
+    session.add(nueva)
+    await session.flush()
+
+    propias = (
+        await session.execute(
+            select(PartidaDescomposicion)
+            .where(PartidaDescomposicion.partida_id == partida.id)
+            .order_by(PartidaDescomposicion.orden)
+        )
+    ).scalars()
+    for linea in propias:
+        session.add(
+            PartidaDescomposicion(
+                organization_id=org_id,
+                partida_id=nueva.id,
+                hijo_id=linea.hijo_id,
+                codigo=linea.codigo,
+                resumen=linea.resumen,
+                unidad=linea.unidad,
+                naturaleza=linea.naturaleza,
+                rendimiento=linea.rendimiento,
+                factor=linea.factor,
+                precio=linea.precio,
+                orden=linea.orden,
+            )
+        )
+
+    mediciones = (
+        await session.execute(
+            select(LineaMedicion)
+            .where(LineaMedicion.partida_id == partida.id)
+            .order_by(LineaMedicion.orden)
+        )
+    ).scalars()
+    for medicion in mediciones:
+        session.add(
+            LineaMedicion(
+                organization_id=org_id,
+                partida_id=nueva.id,
+                formula_id=medicion.formula_id,
+                formula_expresion=medicion.formula_expresion,
+                formula_valores=medicion.formula_valores,
+                comentario=medicion.comentario,
+                uds=medicion.uds,
+                longitud=medicion.longitud,
+                anchura=medicion.anchura,
+                altura=medicion.altura,
+                parcial=medicion.parcial,
+                orden=medicion.orden,
+            )
+        )
+    return nueva
+
+
+async def _clonar_capitulo(
+    session: AsyncSession,
+    capitulo: Capitulo,
+    org_id: uuid.UUID,
+    presupuesto_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    orden: int,
+) -> Capitulo:
+    """Clona un capítulo entero: subcapítulos y partidas —con su descompuesto
+    y mediciones— a cualquier profundidad, todo con ids nuevos."""
+    nuevo = Capitulo(
+        organization_id=org_id,
+        presupuesto_id=presupuesto_id,
+        parent_id=parent_id,
+        codigo=capitulo.codigo,
+        resumen=capitulo.resumen,
+        texto=capitulo.texto,
+        orden=orden,
+    )
+    session.add(nuevo)
+    await session.flush()
+
+    partidas = (
+        await session.execute(
+            select(Partida).where(Partida.capitulo_id == capitulo.id).order_by(Partida.orden)
+        )
+    ).scalars()
+    for i, partida in enumerate(partidas):
+        await _clonar_partida(session, partida, org_id, presupuesto_id, nuevo.id, i)
+
+    subcapitulos = (
+        await session.execute(
+            select(Capitulo).where(Capitulo.parent_id == capitulo.id).order_by(Capitulo.orden)
+        )
+    ).scalars()
+    for i, hijo in enumerate(subcapitulos):
+        await _clonar_capitulo(session, hijo, org_id, presupuesto_id, nuevo.id, i)
+
+    return nuevo
+
+
+async def _reparentar_capitulo(
+    session: AsyncSession,
+    capitulo: Capitulo,
+    presupuesto_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    orden: int,
+) -> None:
+    """Reengancha un capítulo a otro punto del árbol, o a otro presupuesto."""
+    capitulo.parent_id = parent_id
+    capitulo.orden = orden
+    if capitulo.presupuesto_id == presupuesto_id:
+        return
+    capitulo.presupuesto_id = presupuesto_id
+    # Cruza a otro presupuesto: todo lo que cuelga de él —subcapítulos y
+    # partidas, a cualquier profundidad— tiene que migrar con él. Si no, se
+    # queda con un `presupuesto_id` que ya no coincide con el árbol al que
+    # ahora pertenece y `cargar_estructura` (que filtra por `presupuesto_id`
+    # en cada tabla) lo deja fuera de los dos presupuestos a la vez.
+    nivel = [capitulo.id]
+    while nivel:
+        hijos = (
+            await session.execute(select(Capitulo).where(Capitulo.parent_id.in_(nivel)))
+        ).scalars().all()
+        for hijo in hijos:
+            hijo.presupuesto_id = presupuesto_id
+        partidas = (
+            await session.execute(select(Partida).where(Partida.capitulo_id.in_(nivel)))
+        ).scalars().all()
+        for partida in partidas:
+            partida.presupuesto_id = presupuesto_id
+        nivel = [h.id for h in hijos]
+
+
+async def pegar_capitulos(
+    session: AsyncSession,
+    presupuesto_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    capitulo_ids: list[uuid.UUID],
+    alcance: str,
+) -> int:
+    """Copia o mueve capítulos enteros —con todo lo que cuelguen de ellos— a
+    otro punto del árbol, del mismo presupuesto o de otro (Fase 1e).
+
+    `parent_id=None` los deja a nivel raíz del presupuesto destino."""
+    org_id = require_organization_id()
+    presupuesto = await obtener(session, presupuesto_id)
+    if presupuesto is None:
+        return 0
+
+    if parent_id is not None:
+        padre = await session.scalar(
+            select(Capitulo).where(Capitulo.id == parent_id, Capitulo.organization_id == org_id)
+        )
+        if padre is None:
+            return 0
+
+    origen = list(
+        (
+            await session.execute(
+                select(Capitulo).where(
+                    Capitulo.id.in_(capitulo_ids), Capitulo.organization_id == org_id
+                )
+            )
+        ).scalars()
+    )
+    if not origen:
+        return 0
+    origen_por_id = {c.id: c for c in origen}
+    orden_pedido = [origen_por_id[cid] for cid in capitulo_ids if cid in origen_por_id]
+
+    # Sin esto, colgar un capítulo de sí mismo o de uno de sus propios
+    # descendientes cerraría un ciclo en el árbol.
+    if parent_id is not None:
+        origen_ids = {c.id for c in orden_pedido}
+        cadena: uuid.UUID | None = parent_id
+        vistos: set[uuid.UUID] = set()
+        while cadena is not None and cadena not in vistos:
+            if cadena in origen_ids:
+                return 0
+            vistos.add(cadena)
+            ancestro = await session.get(Capitulo, cadena)
+            cadena = ancestro.parent_id if ancestro else None
+
+    siguiente = await session.scalar(
+        select(func.max(Capitulo.orden)).where(
+            Capitulo.presupuesto_id == presupuesto_id,
+            Capitulo.parent_id.is_(None) if parent_id is None else Capitulo.parent_id == parent_id,
+        )
+    )
+    orden = int(siguiente + 1) if siguiente is not None else 0
+
+    afectados = 0
+    for capitulo in orden_pedido:
+        if capitulo.id == parent_id:
+            continue
+        if alcance == "mover":
+            await _reparentar_capitulo(session, capitulo, presupuesto_id, parent_id, orden)
+        else:
+            await _clonar_capitulo(session, capitulo, org_id, presupuesto_id, parent_id, orden)
+        afectados += 1
+        orden += 1
+
+    await session.flush()
+    return afectados
 
 
 async def pegar_lineas_medicion(
@@ -1655,6 +1819,9 @@ async def arbol_y_totales(
 ) -> tuple[list[NodoCapitulo], TotalesOut]:
     capitulos, partidas = await calc.cargar_estructura(session, presupuesto.id)
     acumulado = calc.importes_por_capitulo(capitulos, partidas)
+    acumulado_venta = calc.importes_por_capitulo(
+        capitulos, partidas, campo=lambda p: p.importe_venta
+    )
     pem = calc.pem_de(capitulos, acumulado)
 
     # Qué partidas tienen desglose de medición: una sola consulta para todo el
@@ -1705,6 +1872,7 @@ async def arbol_y_totales(
             texto=capitulo.texto,
             orden=capitulo.orden,
             importe=acumulado[capitulo.id],
+            importe_venta=acumulado_venta[capitulo.id],
             partidas=[salida(p) for p in por_capitulo.get(capitulo.id, [])],
             hijos=[nodo(h) for h in hijos.get(capitulo.id, [])],
         )

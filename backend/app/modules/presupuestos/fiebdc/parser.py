@@ -102,8 +102,35 @@ def parsear(datos: bytes) -> ArchivoBC3:
                 )
             )
 
+    _resolver_capitulos_sin_almohadilla(archivo)
     _clasificar(archivo)
     return archivo
+
+
+def _resolver_capitulos_sin_almohadilla(archivo: ArchivoBC3) -> None:
+    """Algunos programas exportan la línea ~D de un capítulo sin el '#' final
+    que sí lleva su propio ~C (p. ej. hijo='CAP. 1' cuando el concepto está
+    dado de alta como 'CAP. 1#'). Sin este arreglo esa línea de descomposición
+    queda huérfana — `archivo.conceptos.get('CAP. 1')` no encuentra nada — y
+    el capítulo entero (con lo que cuelgue de él) desaparece en silencio al
+    importar."""
+    for padre, lineas in archivo.descomposiciones.items():
+        for linea in lineas:
+            if linea.hijo in archivo.conceptos:
+                continue
+            con_almohadilla = f"{linea.hijo}#"
+            if con_almohadilla in archivo.conceptos:
+                archivo.incidencias.append(
+                    Incidencia(
+                        linea=0,
+                        registro="~D",
+                        detalle=(
+                            f"'{padre}' referenciaba a '{linea.hijo}' sin la '#' final; "
+                            f"se ha resuelto como '{con_almohadilla}'"
+                        ),
+                    )
+                )
+                linea.hijo = con_almohadilla
 
 
 def _leer_cabecera(archivo: ArchivoBC3, registro) -> None:

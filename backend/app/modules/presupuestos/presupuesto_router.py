@@ -44,6 +44,7 @@ from app.modules.presupuestos.presupuesto_schemas import (
     PartidaDetalle,
     PartidaOut,
     PartidaUpdate,
+    PegarCapitulos,
     PegarComponentesDescompuesto,
     PegarLineasMedicion,
     PegarPartidas,
@@ -125,6 +126,7 @@ async def crear(
         presupuesto = await service.crear(session, datos)
     except service.CodigoDuplicado as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
     return PresupuestoOut.model_validate(presupuesto)
 
 
@@ -175,6 +177,7 @@ async def actualizar_lineas_en_lote(
     await service.actualizar_lineas_en_lote(session, presupuesto_id, datos.cambios)
     capitulos, totales = await service.arbol_y_totales(session, presupuesto)
     desfasadas = await calc.partidas_desactualizadas(session, presupuesto_id)
+    await session.commit()
     return PresupuestoDetalle(
         **PresupuestoOut.model_validate(presupuesto).model_dump(),
         capitulos=capitulos,
@@ -232,6 +235,7 @@ async def convertir_linea(
     if resultado is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Línea no encontrada")
     tipo, id_nuevo = resultado
+    await session.commit()
     return {"tipo": tipo, "id": str(id_nuevo)}
 
 
@@ -245,6 +249,7 @@ async def actualizar(
 ) -> PresupuestoOut:
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     presupuesto = await service.actualizar(session, presupuesto_id, datos)
+    await session.commit()
     return PresupuestoOut.model_validate(presupuesto)
 
 
@@ -257,6 +262,11 @@ async def eliminar(
 ) -> None:
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     await service.eliminar(session, presupuesto_id)
+    # Sin este commit explícito, el GET de la lista que dispara el cliente en
+    # cuanto recibe el 204 puede llegar antes de que `get_session` confirme
+    # la transacción (esa confirmación ocurre DESPUÉS de enviar la
+    # respuesta) y ver el presupuesto todavía ahí.
+    await session.commit()
 
 
 @presupuestos_router.post(
@@ -271,9 +281,9 @@ async def sincronizar_precios(
     """Trae los precios actuales del cuadro, incluso con los precios
     bloqueados. Es una acción deliberada, nunca automática."""
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
-    return ResultadoSincronizacion(
-        partidas_actualizadas=await calc.sincronizar_precios(session, presupuesto_id)
-    )
+    actualizadas = await calc.sincronizar_precios(session, presupuesto_id)
+    await session.commit()
+    return ResultadoSincronizacion(partidas_actualizadas=actualizadas)
 
 
 @presupuestos_router.post(
@@ -289,12 +299,33 @@ async def crear_capitulo(
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     capitulo = await service.crear_capitulo(session, presupuesto_id, datos)
     assert capitulo is not None
+    await session.commit()
     return {
         "id": str(capitulo.id),
         "codigo": capitulo.codigo,
         "resumen": capitulo.resumen,
         "parent_id": str(capitulo.parent_id) if capitulo.parent_id else None,
     }
+
+
+@presupuestos_router.post("/{presupuesto_id}/capitulos/pegar", response_model=ResultadoPegado)
+async def pegar_capitulos(
+    presupuesto_id: uuid.UUID,
+    datos: PegarCapitulos,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoPegado:
+    """Copia o mueve capítulos enteros —con subcapítulos, partidas,
+    descompuestos y mediciones— a este presupuesto (Fase 1e: portapapeles,
+    del mismo presupuesto o de otro). `parent_id` los deja a nivel raíz si es
+    `None`, o los anida bajo ese capítulo si no."""
+    await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    pegados = await service.pegar_capitulos(
+        session, presupuesto_id, datos.parent_id, datos.capitulo_ids, datos.alcance
+    )
+    await session.commit()
+    return ResultadoPegado(pegadas=pegados)
 
 
 async def _capitulo_propio(
@@ -319,6 +350,7 @@ async def actualizar_capitulo(
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     capitulo = await service.actualizar_capitulo(session, capitulo_id, datos)
     assert capitulo is not None
+    await session.commit()
     return {"id": str(capitulo.id), "codigo": capitulo.codigo, "resumen": capitulo.resumen}
 
 
@@ -331,6 +363,10 @@ async def eliminar_capitulo(
 ) -> None:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     await service.eliminar_capitulo(session, capitulo_id)
+    # Misma carrera lectura-tras-escritura que en el resto de escrituras de
+    # este módulo: sin el commit aquí, el refresco que dispara el cliente al
+    # recibir el 204 puede llegar antes de que se confirme el borrado.
+    await session.commit()
 
 
 @capitulos_router.post(
@@ -355,6 +391,11 @@ async def crear_partida(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     assert partida is not None
+    # Igual que en `pegar_partidas` más abajo: sin este commit, un cliente que
+    # encadene otra escritura justo detrás (añadir un componente a esta
+    # partida recién creada, por ejemplo) puede llegar antes de que
+    # `get_session` confirme la transacción y encontrarse con un 404.
+    await session.commit()
     return PartidaOut.model_validate(partida)
 
 
@@ -426,6 +467,7 @@ async def actualizar_partida(
     await _partida_propia(session, partida_id, alcance, principal)
     partida = await service.actualizar_partida(session, partida_id, datos)
     assert partida is not None
+    await session.commit()
     return PartidaOut.model_validate(partida)
 
 
@@ -438,6 +480,7 @@ async def eliminar_partida(
 ) -> None:
     await _partida_propia(session, partida_id, alcance, principal)
     await service.eliminar_partida(session, partida_id)
+    await session.commit()
 
 
 @partidas_router.post("/{partida_id}/integrar-banco-precios", response_model=PartidaOut)
@@ -453,6 +496,7 @@ async def integrar_en_banco_precios(
     except (service.ConceptoYaVinculado, service.CodigoDuplicado) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     assert partida is not None
+    await session.commit()
     return PartidaOut.model_validate(partida)
 
 
@@ -712,6 +756,7 @@ async def crear_linea(
     await _partida_propia(session, partida_id, alcance, principal)
     linea = await service.crear_linea(session, partida_id, datos)
     assert linea is not None
+    await session.commit()
     return LineaMedicionOut.model_validate(linea)
 
 
@@ -753,6 +798,7 @@ async def actualizar_linea(
     await _linea_medicion_propia(session, linea_id, alcance, principal)
     linea = await service.actualizar_linea(session, linea_id, datos)
     assert linea is not None
+    await session.commit()
     return LineaMedicionOut.model_validate(linea)
 
 
@@ -765,6 +811,7 @@ async def eliminar_linea(
 ) -> None:
     await _linea_medicion_propia(session, linea_id, alcance, principal)
     await service.eliminar_linea(session, linea_id)
+    await session.commit()
 
 
 # --- Versiones, plantillas e informes ---
@@ -816,6 +863,7 @@ async def nueva_version(
         nueva = await versionado.nueva_version(session, presupuesto_id)
     except versionado.PresupuestoNoEncontrado as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
     return PresupuestoOut.model_validate(nueva)
 
 
@@ -893,6 +941,7 @@ async def guardar_como_plantilla(
         )
     except versionado.PresupuestoNoEncontrado as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
     return PresupuestoOut.model_validate(plantilla)
 
 
@@ -925,6 +974,7 @@ async def instanciar(
         )
     except versionado.PresupuestoNoEncontrado as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
     return PresupuestoOut.model_validate(nuevo)
 
 

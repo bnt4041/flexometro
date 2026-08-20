@@ -867,9 +867,34 @@ textarea.input {
   flex-shrink: 0;
 }
 
+.modal-pantalla__head-izq {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
 .modal-pantalla__title {
   font-size: var(--fs-lg);
   font-weight: 650;
+}
+
+.modal-pantalla__colapsar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--c-text-muted);
+  flex-shrink: 0;
+}
+
+.modal-pantalla__colapsar:hover {
+  background: var(--c-surface-2);
+  color: var(--c-text);
 }
 
 .modal-pantalla__close {
@@ -889,6 +914,169 @@ textarea.input {
   flex: 1;
   overflow-y: auto;
   padding: var(--sp-6) var(--sp-5);
+}
+
+/* Documento arrastrado al presupuesto (Fase "Arrastrar al presupuesto"):
+ * visor a un lado para cotejar, conversación al otro — cada mitad con su
+ * propio scroll, para no perder de vista ni el documento ni el chat. */
+.documento-ia {
+  display: flex;
+  gap: var(--sp-5);
+  height: 100%;
+  min-height: 0;
+}
+
+.documento-ia__visor {
+  flex: 3;
+  min-width: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--c-surface-2);
+  display: flex;
+}
+
+.documento-ia__visor iframe,
+.documento-ia__visor img {
+  width: 100%;
+  height: 100%;
+  border: none;
+  object-fit: contain;
+}
+
+.documento-ia__sin-visor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  color: var(--c-text-muted);
+  text-align: center;
+  padding: var(--sp-5);
+}
+
+.documento-ia__chat {
+  flex: 2;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+.documento-ia__chat .chat-ia {
+  flex: 1;
+  max-height: none;
+}
+
+/* --- Descripción con formato de capítulo/partida (Fase 38) --- */
+
+.descripcion-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.descripcion-editor__barra {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.descripcion-editor__boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.descripcion-editor__boton:hover {
+  background: var(--c-surface-3);
+  color: var(--c-text);
+}
+
+.descripcion-editor__boton--activo {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.descripcion-editor__separador {
+  width: 1px;
+  height: 20px;
+  background: var(--c-border-strong);
+  margin: 0 var(--sp-1);
+}
+
+.descripcion-editor__estado {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+}
+
+.descripcion-editor__contenido {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-4);
+}
+
+.descripcion-editor__contenido .ProseMirror {
+  outline: none;
+  min-height: 100%;
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  color: var(--c-text);
+}
+
+.descripcion-editor__contenido .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--c-text-subtle);
+  pointer-events: none;
+}
+
+.descripcion-editor__contenido .ProseMirror img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.descripcion-editor__contenido .ProseMirror blockquote {
+  border-left: 3px solid var(--c-border-strong);
+  margin: 0;
+  padding-left: var(--sp-3);
+  color: var(--c-text-muted);
+}
+
+.descripcion-editor__contenido .ProseMirror ul,
+.descripcion-editor__contenido .ProseMirror ol {
+  padding-left: var(--sp-5);
+}
+
+.girando {
+  animation: girar 0.8s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* --- Ficha genérica: cabecera + pestañas (Fase 27) --- */
@@ -1019,6 +1207,63 @@ textarea.input {
   table-layout: fixed;
 }
 
+/* Filas lo más bajas posible: Capítulos y partidas, Descompuesto y
+ * Mediciones suelen acabar con muchas líneas, y el alto de cada una se nota
+ * multiplicado por decenas. Pisa el `padding` (más generoso) de `.table
+ * th`/`.table td`, pensado para listados con pocas filas — no toca esas
+ * reglas para no encogerle la fila a nada que no sea esta rejilla. */
+.rejilla__tabla th,
+.rejilla__tabla td {
+  padding: var(--sp-1) var(--sp-3);
+  line-height: 1.25;
+}
+
+/* El botón de acción (quitar línea, etc.) tenía el tamaño pensado para una
+ * barra de herramientas, no para ir uno por fila en una tabla densa. */
+.rejilla__tabla .table__actions .btn--solo-icono {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+/* Total de la columna (Fase 1f): bajo la etiqueta, en la propia cabecera —
+ * así se ve sin desplazarse hasta el final de una rejilla larga. */
+.rejilla__total-columna {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--c-text);
+}
+
+/* Fila de filtros bajo la cabecera (Fase 1f), una caja por columna. Mismo
+ * fondo que la cabecera para que se lea como parte de ella, no como una fila
+ * de datos más. */
+.rejilla__fila-filtros th {
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-surface-2);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.rejilla__filtro-input {
+  width: 100%;
+  padding: 3px var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--c-text);
+}
+
+.rejilla__filtro-input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+}
+
 .rejilla__celda {
   position: relative;
   cursor: cell;
@@ -1041,6 +1286,23 @@ textarea.input {
 
 .rejilla:focus-visible .rejilla__celda.is-activa {
   box-shadow: inset 0 0 0 2px var(--c-accent-strong);
+}
+
+/* Una fila de capítulo pesa más que una partida: se marca en negrita para
+ * que se distinga de un vistazo en una lista larga. Sin tocar el color: el
+ * semáforo de venta (`venta-perdida`/`venta-bajo`) sigue siendo solo de las
+ * partidas. */
+.rejilla__fila.fila-capitulo .rejilla__celda {
+  font-weight: 600;
+}
+
+/* La fila raíz (el presupuesto entero, Fase 1h) pesa más aún que un
+ * capítulo normal: es el techo del árbol, no un nivel más. */
+.rejilla__fila.fila-raiz .rejilla__celda {
+  background: var(--c-surface-3);
+  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.03em;
 }
 
 /* Varias filas marcadas para copiar/arrastrar juntas (Fase 1a) — un tinte de
@@ -1120,6 +1382,53 @@ textarea.input {
 .rejilla__sugerencia-accion {
   color: var(--c-accent);
   font-weight: 600;
+}
+
+/* Menú contextual (clic derecho). Portado a `document.body`, en coordenadas
+ * de ventana (`clientX`/`clientY` tal cual) — mismo motivo que
+ * `.rejilla__sugerencias` arriba, y mismo z-index para quedar por encima de
+ * la ficha a pantalla completa desde la que se suele abrir. */
+.rejilla__menu-contextual {
+  position: fixed;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: var(--sp-1);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.rejilla__menu-contextual-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--c-text);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.rejilla__menu-contextual-item:hover:not(:disabled) {
+  background: var(--c-surface-2);
+}
+
+.rejilla__menu-contextual-item:disabled {
+  color: var(--c-text-subtle);
+  cursor: default;
+}
+
+.rejilla__menu-contextual-item.is-peligroso {
+  color: var(--c-danger);
+}
+
+.rejilla__menu-contextual-item.is-peligroso:hover:not(:disabled) {
+  background: var(--c-danger-soft);
 }
 
 /* --- Semáforo de la venta y candado (Fase 35) --- */
@@ -1562,6 +1871,56 @@ kbd {
   align-items: center;
   gap: var(--sp-3);
   flex-wrap: wrap;
+}
+
+/* Conversación de "Ayuda con IA" (Fase 1g). Burbujas simples, sin avatar:
+ * el usuario a la derecha, la IA a la izquierda, como cualquier chat. */
+.chat-ia {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+}
+
+.chat-ia__burbuja {
+  align-self: flex-start;
+  max-width: 85%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface-2);
+  white-space: pre-wrap;
+  font-size: var(--fs-sm);
+}
+
+.chat-ia__burbuja.is-usuario {
+  align-self: flex-end;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.chat-ia__propuesta {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Componentes de una partida propuesta (crear_partida): lista simple, sin
+ * viñeta propia — el guion del texto ya hace de separador. */
+.chat-ia__componentes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tabla-presupuesto .fila-capitulo td {
@@ -2076,6 +2435,10 @@ input[type='file'].input {
   }
 
   .topbar__colapsar-btn {
+    display: none;
+  }
+
+  .modal-pantalla__colapsar {
     display: none;
   }
 

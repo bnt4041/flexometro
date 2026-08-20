@@ -18,6 +18,7 @@ import {
 import logoOscuro from '../assets/logo-sobre-oscuro.png'
 import { Icon } from '../components/Icon'
 import { Tooltip } from '../components/ui'
+import { useSidebarColapsada } from '../lib/sidebarColapsada'
 import { useWorkspace } from '../workspace'
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -39,22 +40,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [location.pathname])
 
   // En escritorio la barra lateral se puede recoger si se desea, para ganar
-  // ancho de contenido; se recuerda entre sesiones.
-  const [colapsada, setColapsada] = useState(
-    () => localStorage.getItem('obrai:sidebar-colapsada') === '1',
-  )
-  useEffect(() => {
-    localStorage.setItem('obrai:sidebar-colapsada', colapsada ? '1' : '0')
-    // La ficha a pantalla completa (`ModalPantalla`) se porta a `document.body`,
-    // fuera de `.shell` — no hay forma de que un selector CSS anidado la
-    // entere de que la barra se ha recogido. Esta variable en `:root` es el
-    // puente: sin ella, su hueco a la izquierda se quedaba reservado aunque
-    // la barra ya no estuviera.
-    document.documentElement.style.setProperty(
-      '--sidebar-w-actual',
-      colapsada ? '0px' : 'var(--sidebar-w)',
-    )
-  }, [colapsada])
+  // ancho de contenido; se recuerda entre sesiones. Compartido con
+  // `ModalPantalla`, que necesita el mismo interruptor (ver `sidebarColapsada.ts`).
+  const [colapsada, alternarColapsada] = useSidebarColapsada()
 
   const clasesShell = ['shell', menuAbierto && 'shell--menu-abierto', colapsada && 'shell--sidebar-colapsada']
     .filter(Boolean)
@@ -181,7 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className="topbar__colapsar-btn"
               aria-label={colapsada ? t('nav.mostrarMenu') : t('nav.ocultarMenu')}
               aria-expanded={!colapsada}
-              onClick={() => setColapsada((v) => !v)}
+              onClick={alternarColapsada}
             >
               {colapsada ? (
                 <ChevronRight size={16} aria-hidden="true" />

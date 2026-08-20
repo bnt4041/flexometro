@@ -118,6 +118,82 @@ async def importar(
             ),
         )
 
+    # Sin este commit, un cliente que navegue al presupuesto recién creado en
+    # cuanto recibe la respuesta (lo normal aquí) puede llegar antes de que
+    # `get_session` confirme la transacción y encontrarse un 404.
+    await session.commit()
+    return _salida(resultado)
+
+
+@router.post("/importar-en-capitulo/{capitulo_id}", response_model=ImportacionOut)
+async def importar_en_capitulo(
+    capitulo_id: uuid.UUID,
+    fichero: UploadFile = File(...),
+    estrategia: EstrategiaCodigos = Form(default=EstrategiaCodigos.OMITIR),
+    session: AsyncSession = Depends(get_session),
+) -> ImportacionOut:
+    """Arrastrar un BC3 sobre un capítulo del presupuesto (en vez de "Importar
+    BC3" como pantalla aparte): cuelga los subcapítulos y partidas del
+    fichero de ese capítulo, detrás de lo que ya tuviera. El catálogo de
+    precios se sube igual que en `/importar`."""
+    archivo = fiebdc.parsear(await _leer(fichero))
+    resultado = await fiebdc.importar_bajo_capitulo(
+        session, archivo, capitulo_id, estrategia=estrategia
+    )
+
+    if resultado.ciclos:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "El fichero tiene ciclos en la descomposición y no se puede importar: "
+                + "; ".join(resultado.ciclos[:5])
+            ),
+        )
+    if resultado.presupuesto_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="; ".join(resultado.incidencias[:3]) or "El capítulo destino no existe",
+        )
+
+    await session.commit()
+    return _salida(resultado)
+
+
+@router.post("/importar-en-presupuesto/{presupuesto_id}", response_model=ImportacionOut)
+async def importar_en_presupuesto(
+    presupuesto_id: uuid.UUID,
+    fichero: UploadFile = File(...),
+    estrategia: EstrategiaCodigos = Form(default=EstrategiaCodigos.OMITIR),
+    session: AsyncSession = Depends(get_session),
+) -> ImportacionOut:
+    """Arrastrar un BC3 sobre la fila raíz del presupuesto (en vez de sobre un
+    capítulo, o "Importar BC3" como pantalla aparte): cuelga los capítulos
+    del fichero como capítulos de primer nivel, detrás de los que ya
+    hubiera."""
+    archivo = fiebdc.parsear(await _leer(fichero))
+    resultado = await fiebdc.importar_en_raiz(
+        session, archivo, presupuesto_id, estrategia=estrategia
+    )
+
+    if resultado.ciclos:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "El fichero tiene ciclos en la descomposición y no se puede importar: "
+                + "; ".join(resultado.ciclos[:5])
+            ),
+        )
+    if resultado.presupuesto_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="; ".join(resultado.incidencias[:3]) or "El presupuesto destino no existe",
+        )
+
+    await session.commit()
+    return _salida(resultado)
+
+
+def _salida(resultado) -> ImportacionOut:
     return ImportacionOut(
         conceptos_creados=resultado.conceptos_creados,
         conceptos_omitidos=resultado.conceptos_omitidos,

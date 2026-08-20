@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,7 +59,16 @@ class Settings(BaseSettings):
             f"{self.keycloak_public_url.rstrip('/')}/realms/{self.keycloak_realm}",
         }
 
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Lista separada por comas en vez de `list[str]` directo: así se escribe
+    # en el `.env` como una variable normal (`CORS_ORIGINS=https://...,https://...`)
+    # sin tener que dar formato JSON al desplegar en un dominio real.
+    cors_origins_raw: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173", alias="CORS_ORIGINS"
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origen.strip() for origen in self.cors_origins_raw.split(",") if origen.strip()]
 
     # URL pública de la aplicación, para enlaces en correos (bienvenida...).
     frontend_url: str = "http://localhost:5173"

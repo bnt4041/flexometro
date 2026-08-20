@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import { useEscapeCierra } from './ui'
+
 export interface OpcionCelda {
   valor: string
   etiqueta: string
@@ -9,6 +11,15 @@ export interface OpcionCelda {
   detalle?: string
   /** Para "crear nuevo" y demás opciones que no salen de la búsqueda. */
   esAccion?: boolean
+}
+
+export interface ItemMenuContextual {
+  id: string
+  etiqueta: string
+  icono?: ReactNode
+  onClick: () => void
+  peligroso?: boolean
+  disabled?: boolean
 }
 
 export interface ColumnaRejilla<F> {
@@ -30,6 +41,13 @@ export interface ColumnaRejilla<F> {
    *  el desplegable de replegar el árbol, por ejemplo. Recibe los clics por su
    *  cuenta, así que debe frenar la propagación si no quiere mover el cursor. */
   prefijo?: (fila: F) => ReactNode
+  /** Ya formateado por quien la usa (Fase 1f) — se pinta bajo la etiqueta de
+   *  la columna, en la propia cabecera. `undefined` no pinta nada; una
+   *  columna sin total pero con filtro no debe dejar un hueco en blanco. */
+  total?: string
+  /** `false` quita la caja de "Filtrar…" de esta columna en la fila de
+   *  filtros (Fase 1f). Por defecto todas la tienen. */
+  filtrable?: boolean
 }
 
 interface Props<F> {
@@ -65,10 +83,24 @@ interface Props<F> {
    *  Ctrl+C—, así que solo hace falta este evento nuevo para el destino. Sin
    *  `onSoltarEn` las filas no se pueden arrastrar. */
   onSoltarEn?: (fila: F | null) => void
+  /** Soltar un fichero del sistema operativo sobre esta fila ("Arrastrar al
+   *  presupuesto") — un `DataTransfer` con `types` incluyendo `"Files"`, muy
+   *  distinto de arrastrar una fila propia (`onSoltarEn`), aunque comparten
+   *  el mismo gesto visual. Sin `onSoltarFichero` un fichero soltado aquí no
+   *  hace nada especial (lo abriría el navegador, como en cualquier web). */
+  onSoltarFichero?: (fila: F, archivo: File) => void
   /** Filas que no tiene sentido coger (un capítulo en vez de una partida, la
    *  fila de borrador de un alta en marcha…). Por defecto, todas se pueden
    *  arrastrar; devolver `false` aquí también las deja fuera de `onCopiar`. */
   puedeArrastrar?: (fila: F) => boolean
+  /** Clic derecho sobre una fila: qué acciones ofrecerle. `null`/`[]` no
+   *  abre menú (deja pasar el menú nativo del navegador). Antes de abrirlo
+   *  se selecciona la fila, igual que un clic normal. */
+  menuContextual?: (fila: F) => ItemMenuContextual[] | null
+  /** Clic derecho en el hueco por debajo de la última fila (o en toda la
+   *  rejilla si está vacía) — para acciones que no cuelgan de ninguna fila en
+   *  concreto, como "pegar a nivel raíz". */
+  menuVacio?: () => ItemMenuContextual[] | null
   acciones?: (fila: F) => ReactNode
   vacia?: ReactNode
   /** Abre esta celda en edición desde fuera (un botón "+ Línea" que crea una
@@ -76,6 +108,23 @@ interface Props<F> {
    *  para no forzar nada. Cambiar de columna con la misma fila reabre. */
   filaAEditarId?: string | null
   columnaAEditarId?: string | null
+  /** Fila de filtros bajo la cabecera (Fase 1f), uno por columna. Sin esto no
+   *  se pinta ninguna caja. El filtrado en sí no lo hace esta rejilla —
+   *  `filas` ya llega filtrada por quien la usa; esto solo pinta la caja y
+   *  avisa de cada tecleo por `onFiltrar`. */
+  filtros?: Record<string, string>
+  onFiltrar?: (columnaId: string, valor: string) => void
+}
+
+/** Se monta solo mientras el menú contextual está abierto, para que
+ *  `useEscapeCierra` empuje y saque su capa exactamente en ese momento — si
+ *  se llamara sin condición dentro de `RejillaEditable` (que vive montada
+ *  todo el rato), su capa se colaría por encima de la de la ficha desde el
+ *  principio y un Escape pensado para cerrar la ficha se lo comería el
+ *  menú, aunque no hubiera ninguno abierto. */
+function CapaEscapeMenu({ onCerrar }: { onCerrar: () => void }) {
+  useEscapeCierra(onCerrar)
+  return null
 }
 
 const TECLAS_CONTROL = new Set([
@@ -110,11 +159,16 @@ export function RejillaEditable<F>({
   onCopiar,
   onPegar,
   onSoltarEn,
+  onSoltarFichero,
   puedeArrastrar,
+  menuContextual,
+  menuVacio,
   acciones,
   vacia,
   filaAEditarId,
   columnaAEditarId,
+  filtros,
+  onFiltrar,
 }: Props<F>) {
   const [activa, setActiva] = useState<{ f: number; c: number } | null>(null)
   const [editando, setEditando] = useState(false)
@@ -128,6 +182,11 @@ export function RejillaEditable<F>({
   // que sobrevivan a que la lista cambie a mitad de un arrastre.
   const [arrastrando, setArrastrando] = useState<number | null>(null)
   const [sobreDestino, setSobreDestino] = useState<number | null>(null)
+  // Menú contextual (clic derecho): posición en coordenadas de ventana,
+  // portado a `document.body` por el mismo motivo que `.rejilla__sugerencias`
+  // (ver ese comentario en el CSS) — sin el portal, un widget con zoom que
+  // ponga `transform` en un ancestro recortaría el menú.
+  const [menu, setMenu] = useState<{ f: number; x: number; y: number } | null>(null)
   const [borrador, setBorrador] = useState('')
   const [sugerencias, setSugerencias] = useState<OpcionCelda[]>([])
   const [sugerenciaActiva, setSugerenciaActiva] = useState(0)
@@ -580,6 +639,22 @@ export function RejillaEditable<F>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [borrador, editando, activa?.f, activa?.c])
 
+  // El Escape lo gestiona `useEscapeCierra` más abajo (vía `CapaEscapeMenu`),
+  // no aquí: esta rejilla suele vivir dentro de una ficha que TAMBIÉN se
+  // cierra con Escape, y sin repartirlo por la pila de capas un Escape para
+  // cerrar solo el menú se llevaría la ficha entera por delante.
+  useEffect(() => {
+    if (!menu) return
+    function alPulsarFuera(e: MouseEvent) {
+      const nodo = e.target as Node
+      if (!(nodo instanceof Element) || !nodo.closest('.rejilla__menu-contextual')) setMenu(null)
+    }
+    document.addEventListener('mousedown', alPulsarFuera)
+    return () => {
+      document.removeEventListener('mousedown', alPulsarFuera)
+    }
+  }, [menu])
+
   // Ojo: aunque no haya filas, el contenedor con el `onKeyDown` tiene que
   // seguir montado — si no, Ctrl+V no tiene dónde engancharse y pegar en una
   // rejilla vacía (el caso más típico: la primera vez que se pega algo aquí)
@@ -619,6 +694,16 @@ export function RejillaEditable<F>({
       onKeyDown={(e) => {
         if (!editando) alPulsarNavegando(e)
       }}
+      onContextMenu={(e) => {
+        // Solo el hueco por debajo de la última fila: un clic derecho sobre
+        // una fila de verdad ya lo resuelve su propio `onContextMenu` (y
+        // frena la propagación antes de llegar aquí).
+        if (!menuVacio || (e.target as Element).closest('tr')) return
+        const items = menuVacio()
+        if (!items || items.length === 0) return
+        e.preventDefault()
+        setMenu({ f: -1, x: e.clientX, y: e.clientY })
+      }}
     >
       <table className="table rejilla__tabla">
         <thead>
@@ -630,10 +715,29 @@ export function RejillaEditable<F>({
                 className={col.tipo === 'numero' ? 'table__num' : undefined}
               >
                 {col.etiqueta}
+                {col.total !== undefined && <div className="rejilla__total-columna">{col.total}</div>}
               </th>
             ))}
             {acciones && <th className="table__actions" />}
           </tr>
+          {(filtros || onFiltrar) && (
+            <tr className="rejilla__fila-filtros">
+              {columnas.map((col) => (
+                <th key={col.id}>
+                  {col.filtrable !== false && (
+                    <input
+                      type="text"
+                      className="rejilla__filtro-input"
+                      placeholder="Filtrar…"
+                      value={filtros?.[col.id] ?? ''}
+                      onChange={(e) => onFiltrar?.(col.id, e.target.value)}
+                    />
+                  )}
+                </th>
+              ))}
+              {acciones && <th />}
+            </tr>
+          )}
         </thead>
         <tbody>
           {filas.map((fila, f) => {
@@ -672,6 +776,15 @@ export function RejillaEditable<F>({
                   setSobreDestino(null)
                 }}
                 onDragOver={(e) => {
+                  // Un fichero del sistema operativo, no una fila propia
+                  // arrastrada dentro de la rejilla — comparten el mismo
+                  // gesto pero son dos cosas distintas (ver `onSoltarFichero`).
+                  if (e.dataTransfer.types.includes('Files')) {
+                    if (!onSoltarFichero) return
+                    e.preventDefault()
+                    if (sobreDestino !== f) setSobreDestino(f)
+                    return
+                  }
                   if (!onSoltarEn || arrastrando === null) return
                   // Sin esto el navegador no deja soltar: por defecto un
                   // `dragover` no autoriza el `drop` que le sigue.
@@ -682,7 +795,23 @@ export function RejillaEditable<F>({
                   e.preventDefault()
                   setArrastrando(null)
                   setSobreDestino(null)
+                  if (e.dataTransfer.types.includes('Files')) {
+                    const archivo = e.dataTransfer.files[0]
+                    if (archivo && onSoltarFichero) onSoltarFichero(fila, archivo)
+                    return
+                  }
                   onSoltarEn?.(fila)
+                }}
+                onContextMenu={(e) => {
+                  if (!menuContextual) return
+                  const items = menuContextual(fila)
+                  if (!items || items.length === 0) return
+                  e.preventDefault()
+                  // Sin esto, el `onContextMenu` del contenedor (más abajo,
+                  // para `menuVacio`) se dispara también y pisa este menú.
+                  e.stopPropagation()
+                  irA(f, 0)
+                  setMenu({ f, x: e.clientX, y: e.clientY })
                 }}
               >
                 {columnas.map((col, c) => {
@@ -816,6 +945,45 @@ export function RejillaEditable<F>({
           })}
         </tbody>
       </table>
+      {menu &&
+        (() => {
+          const items = menu.f === -1 ? menuVacio?.() : menuContextual?.(filas[menu.f])
+          if (!items || items.length === 0) return null
+          return (
+            <>
+              <CapaEscapeMenu onCerrar={() => setMenu(null)} />
+              {createPortal(
+                <div
+                  className="rejilla__menu-contextual"
+                  role="menu"
+                  style={{ top: menu.y, left: menu.x }}
+                >
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={item.disabled}
+                      className={
+                        item.peligroso
+                          ? 'rejilla__menu-contextual-item is-peligroso'
+                          : 'rejilla__menu-contextual-item'
+                      }
+                      onClick={() => {
+                        setMenu(null)
+                        item.onClick()
+                      }}
+                    >
+                      {item.icono}
+                      {item.etiqueta}
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+            </>
+          )
+        })()}
     </div>
   )
 }

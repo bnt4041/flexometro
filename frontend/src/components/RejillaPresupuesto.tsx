@@ -5,18 +5,26 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Clipboard,
+  Copy,
+  ExternalLink,
   FolderPlus,
   Layers,
   Lock,
   LockOpen,
   Plus,
   Ruler,
+  Sparkles,
   Trash2,
+  Upload,
 } from 'lucide-react'
 
+import { AyudaIAModal } from './AyudaIAModal'
 import { BotonAtajos } from './AtajosTeclado'
+import { DocumentoIAModal } from './DocumentoIAModal'
+import { ImportarBC3EnCapituloModal } from './ImportarBC3EnCapituloModal'
 import { PegarModal } from './PegarModal'
-import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
+import type { ColumnaRejilla, ItemMenuContextual, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
@@ -24,6 +32,7 @@ import type { AlcancePegado, CambioLinea, NodoCapitulo, Partida, PresupuestoDeta
 import { useDiccionario } from '../lib/useDiccionario'
 import { copiarAlPortapapeles, leerPortapapeles } from '../lib/portapapeles'
 import { useToast } from '../toast'
+import { useWorkspace } from '../workspace'
 
 /** Una línea de la rejilla: capítulos y partidas aplanados en una sola lista,
  *  que es como se teclea un presupuesto de verdad (y como lo enseñan Presto y
@@ -34,6 +43,9 @@ export interface FilaPresupuesto {
   nivel: number
   codigo: string
   resumen: string
+  /** Descripción con formato del capítulo (HTML). Para la partida, la suya
+   *  vive en `partida.texto` — este campo solo se rellena para capítulos. */
+  texto: string | null
   unidad: string
   medicion: string
   precio: string
@@ -50,6 +62,46 @@ export interface FilaPresupuesto {
   partida?: Partida
 }
 
+/** Fila sintética que representa al presupuesto entero, para poder
+ *  pegar/arrastrar a nivel raíz igual que a cualquier otro capítulo — hasta
+ *  ahora la raíz no tenía ninguna fila propia a la que apuntar. No es un
+ *  capítulo real: no se puede editar, borrar ni copiar, y su "capítulo
+ *  contenedor" es `null` de verdad (ver `contenedorDe`). */
+export const ID_RAIZ = '__raiz__'
+
+function construirFilas(p: {
+  codigo: string
+  nombre: string
+  capitulos: NodoCapitulo[]
+}): FilaPresupuesto[] {
+  const raiz: FilaPresupuesto = {
+    id: ID_RAIZ,
+    tipo: 'capitulo',
+    nivel: 0,
+    codigo: p.codigo,
+    resumen: p.nombre,
+    texto: null,
+    unidad: '',
+    medicion: '',
+    precio: '',
+    importe: String(p.capitulos.reduce((s, c) => s + Number(c.importe), 0)),
+    conceptoId: null,
+    padreId: null,
+    orden: -1,
+    tieneDesglose: false,
+    precioVenta: '',
+    ventaBloqueada: false,
+    importeVenta: String(p.capitulos.reduce((s, c) => s + Number(c.importe_venta), 0)),
+    estadoVenta: 'ok',
+  }
+  // OJO: el tercer argumento sigue siendo `null`, no `ID_RAIZ` — `padreId` es
+  // el `parent_id` real de backend (lo que lee `indentar`/`contenedorDe` para
+  // escribir), y un capítulo de verdad a nivel raíz lo sigue teniendo a
+  // `null`. Solo `nivel` (puramente visual) se desplaza, para que se vea
+  // anidado bajo esta fila sintética.
+  return [raiz, ...aplanar(p.capitulos, 1, null)]
+}
+
 function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = null): FilaPresupuesto[] {
   const filas: FilaPresupuesto[] = []
   for (const capitulo of capitulos) {
@@ -59,6 +111,7 @@ function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = 
       nivel,
       codigo: capitulo.codigo,
       resumen: capitulo.resumen,
+      texto: capitulo.texto,
       unidad: '',
       medicion: '',
       precio: '',
@@ -69,7 +122,7 @@ function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = 
       tieneDesglose: false,
       precioVenta: '',
       ventaBloqueada: false,
-      importeVenta: '',
+      importeVenta: capitulo.importe_venta,
       estadoVenta: 'ok',
     })
     for (const partida of capitulo.partidas) {
@@ -79,6 +132,7 @@ function aplanar(capitulos: NodoCapitulo[], nivel = 0, padreId: string | null = 
         nivel: nivel + 1,
         codigo: partida.codigo,
         resumen: partida.resumen,
+        texto: partida.texto,
         unidad: partida.unidad,
         medicion: partida.medicion,
         precio: partida.precio,
@@ -117,17 +171,37 @@ export function RejillaPresupuesto({
   seleccionadaId?: string | null
 }) {
   const { notificar } = useToast()
+  const { modules } = useWorkspace()
+  const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
   const unidadesMedida = useDiccionario('unidad_medida')
-  const [filas, setFilas] = useState<FilaPresupuesto[]>(() => aplanar(presupuesto.capitulos))
+  const [filas, setFilas] = useState<FilaPresupuesto[]>(() => construirFilas(presupuesto))
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [pendiente, setPendiente] = useState(false)
   const [replegados, setReplegados] = useState<Set<string>>(new Set())
+  const [filtros, setFiltros] = useState<Record<string, string>>({})
   const [pegando, setPegando] = useState<{
+    tipo: 'partidas' | 'capitulos'
     ids: string[]
     origenEtiqueta: string
-    capituloId: string
+    /** Capítulo destino de unas partidas (nunca `null`), o padre de unos
+     *  capítulos (`null` = raíz del presupuesto). */
+    destino: string | null
   } | null>(null)
+  const [ayudaIA, setAyudaIA] = useState<FilaPresupuesto | null>(null)
+  // "Arrastrar al presupuesto": BC3 se cuelga de un capítulo, o de la raíz
+  // del presupuesto (`capituloId: null`) como capítulos de primer nivel;
+  // PDF/imagen abre la conversación con la IA. `filaParaSubir` es del botón
+  // "Subir fichero…" del menú contextual, la alternativa sin arrastrar — el
+  // input de fichero en sí está oculto y se dispara con `.click()`.
+  const [importandoBc3, setImportandoBc3] = useState<{
+    fichero: File
+    capituloId: string | null
+    capituloResumen: string
+  } | null>(null)
+  const [documentoIA, setDocumentoIA] = useState<File | null>(null)
+  const inputFicheroRef = useRef<HTMLInputElement>(null)
+  const filaParaSubir = useRef<FilaPresupuesto | null>(null)
   const cambios = useRef<Map<string, CambioLinea>>(new Map())
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Para saber dónde pegar (Ctrl+V): el capítulo de la fila con el cursor
@@ -136,7 +210,7 @@ export function RejillaPresupuesto({
   // externa tiene abierta y puede ir por libre.
   const filaActiva = useRef<FilaPresupuesto | null>(null)
 
-  const filasDelServidor = useMemo(() => aplanar(presupuesto.capitulos), [presupuesto])
+  const filasDelServidor = useMemo(() => construirFilas(presupuesto), [presupuesto])
 
   // Un capítulo se puede replegar para no perderse en un presupuesto largo. Se
   // oculta todo lo que cuelgue de él, a cualquier profundidad: se sube por la
@@ -154,7 +228,101 @@ export function RejillaPresupuesto({
     }
     return false
   }
-  const filasVisibles = filas.filter((f) => !ocultaPorAncestro(f))
+
+  // Un valor "en bruto" por columna y fila, para filtrar sin depender de
+  // `columnas` (definida más abajo, con acceso a `unidadesMedida`) — mismos
+  // campos que sus `valor()`, sin formatear.
+  function valorCrudoDe(f: FilaPresupuesto, columnaId: string): string {
+    switch (columnaId) {
+      case 'tipo':
+        return f.id === ID_RAIZ
+          ? 'presupuesto'
+          : f.tipo === 'capitulo'
+            ? 'capitulo'
+            : f.conceptoId
+              ? 'unitaria'
+              : 'alzada'
+      case 'codigo':
+        return f.codigo
+      case 'resumen':
+        return f.resumen
+      case 'unidad':
+        return f.tipo === 'partida' ? f.unidad : ''
+      case 'medicion':
+        return f.tipo === 'partida' ? f.medicion : ''
+      case 'precio':
+        return f.tipo === 'partida' ? f.precio : ''
+      case 'importe':
+        return f.importe
+      case 'precio_venta':
+        return f.tipo === 'partida' ? f.precioVenta : ''
+      case 'importe_venta':
+        return f.importeVenta
+      default:
+        return ''
+    }
+  }
+
+  // Filtros por columna (Fase 1f): una fila pasa si coincide con TODOS los
+  // filtros activos a la vez. Un capítulo que coincide enseña todo lo que
+  // cuelga de él (para eso se filtraba); una fila que coincide enseña
+  // también la cadena de capítulos que la contienen, para no dejarla
+  // huérfana sin contexto. Mientras se filtra, se ignoran los capítulos
+  // replegados a mano — si no, un acierto podría quedar oculto sin explicación.
+  const filtrosActivos = Object.entries(filtros).filter(([, v]) => v.trim() !== '')
+  const filtrando = filtrosActivos.length > 0
+  const idsCoincidentes = useMemo(() => {
+    if (!filtrando) return null
+    const activos = filtrosActivos.map(([id, v]) => [id, v.trim().toLowerCase()] as const)
+    const ids = new Set<string>()
+    const hijosDe = new Map<string, FilaPresupuesto[]>()
+    for (const f of filas) {
+      if (!f.padreId) continue
+      const lista = hijosDe.get(f.padreId)
+      if (lista) lista.push(f)
+      else hijosDe.set(f.padreId, [f])
+    }
+    const marcarDescendientes = (id: string) => {
+      for (const hijo of hijosDe.get(id) ?? []) {
+        if (ids.has(hijo.id)) continue
+        ids.add(hijo.id)
+        if (hijo.tipo === 'capitulo') marcarDescendientes(hijo.id)
+      }
+    }
+    for (const f of filas) {
+      const coincide = activos.every(([id, q]) => valorCrudoDe(f, id).toLowerCase().includes(q))
+      if (!coincide) continue
+      ids.add(f.id)
+      let padre = f.padreId
+      while (padre) {
+        ids.add(padre)
+        padre = porId.get(padre)?.padreId ?? null
+      }
+      if (f.tipo === 'capitulo') marcarDescendientes(f.id)
+    }
+    return ids
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtrando, filtros, filas, porId])
+
+  const filasVisibles = filas.filter((f) =>
+    filtrando ? (idsCoincidentes?.has(f.id) ?? false) : !ocultaPorAncestro(f),
+  )
+
+  // Totales de coste y venta: siempre a partir de las partidas (nunca de los
+  // capítulos, que ya son la suma de las suyas — sumarlos también sería
+  // contar dos veces). Con un filtro activo, el total es el de lo
+  // encontrado; si no, el del presupuesto entero, colapsado o no.
+  const totales = useMemo(() => {
+    let coste = 0
+    let venta = 0
+    for (const f of filas) {
+      if (f.tipo !== 'partida') continue
+      if (filtrando && !idsCoincidentes?.has(f.id)) continue
+      coste += Number(f.importe)
+      venta += Number(f.importeVenta)
+    }
+    return { coste, venta }
+  }, [filas, filtrando, idsCoincidentes])
 
   function alternarReplegado(id: string) {
     setReplegados((previos) => {
@@ -184,7 +352,7 @@ export function RejillaPresupuesto({
     setGuardando(true)
     try {
       const actualizado = await api.presupuestos.actualizarLineas(presupuesto.id, tanda)
-      setFilas(aplanar(actualizado.capitulos))
+      setFilas(construirFilas(actualizado))
       setError(null)
       onCambio()
     } catch (err) {
@@ -318,8 +486,9 @@ export function RejillaPresupuesto({
   async function nuevaFila(actual: FilaPresupuesto | null) {
     setError(null)
     try {
-      // Sin nada todavía, lo primero que hace falta es un capítulo.
-      if (!actual) {
+      // Sin nada todavía, o desde la fila raíz: lo primero que hace falta es
+      // un capítulo.
+      if (!actual || actual.id === ID_RAIZ) {
         await api.presupuestos.addCapitulo(presupuesto.id, { resumen: 'Nuevo capítulo' })
         onCambio()
         return
@@ -365,6 +534,7 @@ export function RejillaPresupuesto({
   }
 
   async function eliminarFila(fila: FilaPresupuesto) {
+    if (fila.id === ID_RAIZ) return
     const que = fila.tipo === 'capitulo' ? 'el capítulo y todo su contenido' : 'la partida'
     if (!window.confirm(`¿Eliminar ${que} «${fila.resumen || fila.codigo}»?`)) return
     try {
@@ -376,21 +546,33 @@ export function RejillaPresupuesto({
     }
   }
 
-  function copiarPartidas(ids: string[]) {
-    // Solo partidas: copiar un capítulo entero (con sus partidas) no es lo
-    // que pide la Fase 1b, así que si hay capítulos marcados junto a
-    // partidas se descartan en silencio en vez de fallar todo el copiado.
-    const partidas = ids.filter((id) => porId.get(id)?.tipo === 'partida')
-    if (partidas.length === 0) {
-      notificar('Marca una o varias partidas para copiar')
-      return
+  /** El capítulo que contiene a una fila: el suyo propio si es un capítulo,
+   *  el de su padre si es una partida. Sirve tanto de destino para pegar
+   *  partidas (que siempre necesitan un capítulo) como de padre para pegar
+   *  capítulos (que además admiten `null`: raíz del presupuesto). */
+  function contenedorDe(fila: FilaPresupuesto | null): string | null {
+    if (!fila) return null
+    if (fila.id === ID_RAIZ) return null
+    return fila.tipo === 'capitulo' ? fila.id : fila.padreId
+  }
+
+  function copiar(ids: string[]) {
+    const filas = ids
+      .map((id) => porId.get(id))
+      .filter((f): f is FilaPresupuesto => f != null && f.id !== ID_RAIZ)
+    if (filas.length === 0) return
+    // Una marca puede mezclar capítulos y partidas; se copia solo el tipo de
+    // la primera fila arrastrada o marcada, no una mezcla de las dos —el
+    // portapapeles es de un solo tipo a la vez.
+    const tipo = filas[0].tipo
+    const mismos = filas.filter((f) => f.tipo === tipo).map((f) => f.id)
+    if (tipo === 'capitulo') {
+      copiarAlPortapapeles({ tipo: 'capitulos', ids: mismos, origenEtiqueta: presupuesto.nombre })
+      notificar(mismos.length === 1 ? 'Capítulo copiado' : `${mismos.length} capítulos copiados`)
+    } else {
+      copiarAlPortapapeles({ tipo: 'partidas', ids: mismos, origenEtiqueta: presupuesto.nombre })
+      notificar(mismos.length === 1 ? 'Partida copiada' : `${mismos.length} partidas copiadas`)
     }
-    copiarAlPortapapeles({
-      tipo: 'partidas',
-      ids: partidas,
-      origenEtiqueta: presupuesto.nombre,
-    })
-    notificar(partidas.length === 1 ? 'Partida copiada' : `${partidas.length} partidas copiadas`)
   }
 
   /** Ctrl+V usa la fila con el cursor encima (`filaActiva`); soltar un
@@ -402,45 +584,165 @@ export function RejillaPresupuesto({
       notificar('No hay nada copiado')
       return
     }
-    if (contenido.tipo !== 'partidas') {
-      notificar('Lo copiado no se puede pegar aquí')
-      return
-    }
     const actual = filaDestino ?? filaActiva.current
-    const capituloId = actual ? (actual.tipo === 'capitulo' ? actual.id : actual.padreId) : null
-    if (!capituloId) {
-      notificar('Selecciona antes un capítulo, o una partida dentro de uno, para pegar ahí')
+    const destino = contenedorDe(actual)
+    if (contenido.tipo === 'partidas') {
+      if (!destino) {
+        notificar('Selecciona antes un capítulo, o una partida dentro de uno, para pegar ahí')
+        return
+      }
+      setPegando({ tipo: 'partidas', ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta, destino })
       return
     }
-    setPegando({ ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta, capituloId })
+    if (contenido.tipo === 'capitulos') {
+      // `destino` puede ser `null` aquí a propósito: sin fila activa, el
+      // capítulo se pega a nivel raíz del presupuesto.
+      setPegando({ tipo: 'capitulos', ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta, destino })
+      return
+    }
+    notificar('Lo copiado no se puede pegar aquí')
+  }
+
+  /** Pegar a nivel raíz sin depender de qué fila esté activa: con contenido
+   *  ya en la rejilla, `filaActiva` casi nunca es `null` (queda pegada a lo
+   *  último que se tocó), así que `pegar()` nunca resolvía sola la raíz —
+   *  hacía falta este atajo explícito. Solo tiene sentido para capítulos: una
+   *  partida no puede vivir sin uno. */
+  function pegarEnRaiz() {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    if (contenido.tipo !== 'capitulos') {
+      notificar('Solo se puede pegar un capítulo a nivel raíz')
+      return
+    }
+    setPegando({
+      tipo: 'capitulos',
+      ids: contenido.ids,
+      origenEtiqueta: contenido.origenEtiqueta,
+      destino: null,
+    })
   }
 
   async function confirmarPegado(alcance: AlcancePegado) {
     if (!pegando) return
     try {
-      const resultado = await api.capitulos.pegarPartidas(pegando.capituloId, {
-        partida_ids: pegando.ids,
-        alcance,
-      })
+      const resultado =
+        pegando.tipo === 'partidas'
+          ? await api.capitulos.pegarPartidas(pegando.destino!, { partida_ids: pegando.ids, alcance })
+          : await api.presupuestos.pegarCapitulos(presupuesto.id, {
+              capitulo_ids: pegando.ids,
+              parent_id: pegando.destino,
+              alcance,
+            })
       setPegando(null)
       onCambio()
-      notificar(resultado.pegadas === 1 ? 'Partida pegada' : `${resultado.pegadas} partidas pegadas`)
+      if (resultado.pegadas === 0) {
+        notificar('No se pegó nada: ¿un capítulo soltado sobre sí mismo o uno de sus propios subcapítulos?')
+        return
+      }
+      notificar(
+        pegando.tipo === 'partidas'
+          ? resultado.pegadas === 1
+            ? '1 partida pegada'
+            : `${resultado.pegadas} partidas pegadas`
+          : resultado.pegadas === 1
+            ? '1 capítulo pegado'
+            : `${resultado.pegadas} capítulos pegados`,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
       setPegando(null)
     }
   }
 
+  /** BC3 se cuelga del capítulo (el suyo si `fila` ya es uno, si no el de su
+   *  padre — mismo criterio que `contenedorDe`), o de la raíz del presupuesto
+   *  si se suelta ahí (`contenedorDe` da `null`); PDF/imagen/Excel no
+   *  necesita capítulo, solo el presupuesto, así que hasta la fila raíz vale. */
+  function manejarFichero(fila: FilaPresupuesto, archivo: File) {
+    const nombre = archivo.name.toLowerCase()
+    const esBc3 = nombre.endsWith('.bc3')
+    const esPdf = archivo.type === 'application/pdf' || nombre.endsWith('.pdf')
+    const esImagen = archivo.type.startsWith('image/')
+    const esExcel = nombre.endsWith('.xlsx')
+
+    if (esBc3) {
+      const capituloId = contenedorDe(fila)
+      const capitulo = capituloId ? (fila.tipo === 'capitulo' ? fila : porId.get(capituloId)) : null
+      setImportandoBc3({ fichero: archivo, capituloId, capituloResumen: capitulo?.resumen ?? '' })
+      return
+    }
+    if (esPdf || esImagen || esExcel) {
+      setDocumentoIA(archivo)
+      return
+    }
+    notificar('Solo se pueden soltar aquí ficheros BC3, PDF, imagen o Excel (.xlsx)')
+  }
+
+  function pedirFichero(fila: FilaPresupuesto) {
+    filaParaSubir.current = fila
+    inputFicheroRef.current?.click()
+  }
+
+  function menuContextualDe(f: FilaPresupuesto): ItemMenuContextual[] {
+    const esRaiz = f.id === ID_RAIZ
+    const items: ItemMenuContextual[] = [
+      {
+        id: 'pegar',
+        etiqueta: esRaiz ? 'Pegar en la raíz' : 'Pegar',
+        icono: <Clipboard size={14} aria-hidden="true" />,
+        onClick: () => pegar(f),
+        disabled: !leerPortapapeles(),
+      },
+    ]
+    if (!esRaiz) {
+      items.unshift({
+        id: 'copiar',
+        etiqueta: f.tipo === 'capitulo' ? 'Copiar capítulo' : 'Copiar partida',
+        icono: <Copy size={14} aria-hidden="true" />,
+        onClick: () => copiar([f.id]),
+      })
+    }
+    if (f.tipo === 'partida' && f.conceptoId) {
+      items.push({
+        id: 'banco',
+        etiqueta: 'Abrir en banco de precios',
+        icono: <ExternalLink size={14} aria-hidden="true" />,
+        onClick: () => window.open(`/banco-precios/${f.conceptoId}`, '_blank'),
+      })
+    }
+    if (iaActiva) {
+      items.push({
+        id: 'ia',
+        etiqueta: 'Ayuda con IA',
+        icono: <Sparkles size={14} aria-hidden="true" />,
+        onClick: () => setAyudaIA(f),
+      })
+    }
+    items.push({
+      id: 'subir-fichero',
+      etiqueta: 'Subir fichero (BC3, PDF o imagen)…',
+      icono: <Upload size={14} aria-hidden="true" />,
+      onClick: () => pedirFichero(f),
+    })
+    return items
+  }
+
   /** Alt+→ / Alt+←: mueve la línea un nivel dentro del árbol. */
   async function indentar(fila: FilaPresupuesto, direccion: 1 | -1) {
+    if (fila.id === ID_RAIZ) return
     setError(null)
     const indice = filas.findIndex((f) => f.id === fila.id)
     try {
       if (direccion === 1) {
-        // Colgar de la línea anterior que pueda ser su contenedor.
+        // Colgar de la línea anterior que pueda ser su contenedor. La fila
+        // raíz nunca vale como contenedor real: no tiene un `id` de verdad.
         const anterior = [...filas.slice(0, indice)]
           .reverse()
-          .find((f) => f.tipo === 'capitulo' && f.id !== fila.id)
+          .find((f) => f.tipo === 'capitulo' && f.id !== fila.id && f.id !== ID_RAIZ)
         if (!anterior) return
         if (fila.tipo === 'partida') await api.partidas.update(fila.id, { capitulo_id: anterior.id })
         else await api.capitulos.update(fila.id, { parent_id: anterior.id })
@@ -468,8 +770,14 @@ export function RejillaPresupuesto({
       ancho: '120px',
       tipo: 'select',
       valor: (f) =>
-        f.tipo === 'capitulo' ? 'capitulo' : f.conceptoId ? 'unitaria' : 'alzada',
-      editable: () => true,
+        f.id === ID_RAIZ
+          ? 'presupuesto'
+          : f.tipo === 'capitulo'
+            ? 'capitulo'
+            : f.conceptoId
+              ? 'unitaria'
+              : 'alzada',
+      editable: (f) => f.id !== ID_RAIZ,
       opciones: () => [
         { valor: 'capitulo', etiqueta: 'Capítulo' },
         { valor: 'unitaria', etiqueta: 'Unitaria' },
@@ -481,7 +789,7 @@ export function RejillaPresupuesto({
       etiqueta: 'Código',
       ancho: '170px',
       valor: (f) => f.codigo,
-      editable: () => true,
+      editable: (f) => f.id !== ID_RAIZ,
       sangrada: true,
       prefijo: (f) =>
         f.tipo === 'capitulo' && conHijos.has(f.id) ? (
@@ -513,7 +821,7 @@ export function RejillaPresupuesto({
       // aplastar justo la columna que hay que poder leer.
       ancho: '260px',
       valor: (f) => f.resumen,
-      editable: () => true,
+      editable: (f) => f.id !== ID_RAIZ,
       tipo: 'autocompletado',
       buscar: async (q, fila) => {
         if (fila.tipo === 'capitulo' || q.trim().length < 2) return []
@@ -587,6 +895,7 @@ export function RejillaPresupuesto({
       ancho: '110px',
       tipo: 'numero',
       valor: (f) => formatoImporte(f.importe),
+      total: `${formatoImporte(String(totales.coste))} €`,
     },
     {
       id: 'precio_venta',
@@ -601,7 +910,10 @@ export function RejillaPresupuesto({
       etiqueta: 'Importe venta',
       ancho: '130px',
       tipo: 'numero',
-      valor: (f) => (f.tipo === 'partida' ? formatoImporte(f.importeVenta) : ''),
+      // Sin gatear a partida: igual que "Coste", en un capítulo es la suma
+      // de lo que cuelgue de él, a cualquier profundidad.
+      valor: (f) => formatoImporte(f.importeVenta),
+      total: `${formatoImporte(String(totales.venta))} €`,
     },
   ]
 
@@ -634,6 +946,11 @@ export function RejillaPresupuesto({
             </Tooltip>
           </>
         )}
+        <Tooltip texto="Pegar el capítulo copiado a nivel raíz del presupuesto (no dentro de otro)">
+          <button className="btn btn--sm btn--solo-icono" aria-label="Pegar en la raíz" onClick={pegarEnRaiz}>
+            <Clipboard size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
         <span className="rejilla-barra__estado">
           {guardando ? (
             <span className="muted">Guardando…</span>
@@ -659,7 +976,11 @@ export function RejillaPresupuesto({
         idDe={(f) => f.id}
         nivelDe={(f) => f.nivel}
         claseDe={(f) =>
-          f.tipo === 'capitulo' ? 'fila-capitulo' : `venta-${f.estadoVenta}`
+          f.id === ID_RAIZ
+            ? 'fila-capitulo fila-raiz'
+            : f.tipo === 'capitulo'
+              ? 'fila-capitulo'
+              : `venta-${f.estadoVenta}`
         }
         onEditar={(f, col, valor, opcion) => void alEditar(f, col, valor, opcion)}
         onNuevaFila={nuevaFila}
@@ -670,20 +991,37 @@ export function RejillaPresupuesto({
           onSeleccionar?.(f)
         }}
         seleccionadaId={seleccionadaId}
-        onCopiar={copiarPartidas}
+        onCopiar={copiar}
         onPegar={pegar}
         onSoltarEn={(f) => pegar(f)}
-        puedeArrastrar={(f) => f.tipo === 'partida'}
+        puedeArrastrar={(f) => f.id !== ID_RAIZ}
+        onSoltarFichero={manejarFichero}
+        menuContextual={menuContextualDe}
+        menuVacio={() => [
+          {
+            id: 'pegar-raiz',
+            etiqueta: 'Pegar en la raíz',
+            icono: <Clipboard size={14} aria-hidden="true" />,
+            onClick: pegarEnRaiz,
+            disabled: leerPortapapeles()?.tipo !== 'capitulos',
+          },
+        ]}
+        filtros={filtros}
+        onFiltrar={(columnaId, valor) => setFiltros((f) => ({ ...f, [columnaId]: valor }))}
         vacia={
-          <EmptyState title="Presupuesto vacío">
-            Empieza creando un capítulo; dentro irán las partidas con su medición.
-            <div style={{ marginTop: 'var(--sp-3)' }}>
-              <button className="btn" onClick={() => void nuevoCapitulo(null)}>
-                <FolderPlus size={16} aria-hidden="true" />
-                Añadir capítulo
-              </button>
-            </div>
-          </EmptyState>
+          filtrando ? (
+            <EmptyState title="Sin resultados">Nada coincide con los filtros.</EmptyState>
+          ) : (
+            <EmptyState title="Presupuesto vacío">
+              Empieza creando un capítulo; dentro irán las partidas con su medición.
+              <div style={{ marginTop: 'var(--sp-3)' }}>
+                <button className="btn" onClick={() => void nuevoCapitulo(null)}>
+                  <FolderPlus size={16} aria-hidden="true" />
+                  Añadir capítulo
+                </button>
+              </div>
+            </EmptyState>
+          )
         }
         acciones={(f) =>
           f.tipo === 'partida' && f.partida ? (
@@ -743,6 +1081,16 @@ export function RejillaPresupuesto({
                 </button>
               </Tooltip>
             </>
+          ) : f.id === ID_RAIZ ? (
+            <Tooltip texto="Añadir un capítulo">
+              <button
+                className="btn btn--sm btn--solo-icono"
+                aria-label="Añadir un capítulo"
+                onClick={() => void nuevaFila(f)}
+              >
+                <Plus size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
           ) : (
             <>
               <Tooltip texto="Añadir una partida en este capítulo">
@@ -768,12 +1116,76 @@ export function RejillaPresupuesto({
         }
       />
 
+      {/* Alternativa sin arrastrar al "Arrastrar al presupuesto" del menú
+          contextual — oculto, lo dispara `pedirFichero` con `.click()`. */}
+      <input
+        ref={inputFicheroRef}
+        type="file"
+        accept=".bc3,.xlsx,application/pdf,image/png,image/jpeg,image/webp"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const archivo = e.target.files?.[0]
+          e.target.value = ''
+          if (archivo && filaParaSubir.current) manejarFichero(filaParaSubir.current, archivo)
+        }}
+      />
+
       {pegando && (
         <PegarModal
           cantidad={pegando.ids.length}
           origenEtiqueta={pegando.origenEtiqueta}
           onElegir={(alcance) => void confirmarPegado(alcance)}
           onClose={() => setPegando(null)}
+        />
+      )}
+
+      {ayudaIA && (
+        <AyudaIAModal
+          contexto={{
+            tipo: ayudaIA.tipo,
+            codigo: ayudaIA.codigo || null,
+            resumen: ayudaIA.resumen,
+            unidad: ayudaIA.tipo === 'partida' ? ayudaIA.unidad : null,
+            precio: ayudaIA.tipo === 'partida' ? ayudaIA.precio : null,
+            presupuesto_id: presupuesto.id,
+            presupuesto_nombre: presupuesto.nombre,
+          }}
+          destinoCapituloId={contenedorDe(ayudaIA)}
+          onCambio={onCambio}
+          onClose={() => setAyudaIA(null)}
+        />
+      )}
+
+      {importandoBc3 && (
+        <ImportarBC3EnCapituloModal
+          fichero={importandoBc3.fichero}
+          presupuestoId={presupuesto.id}
+          capituloId={importandoBc3.capituloId}
+          capituloResumen={importandoBc3.capituloResumen}
+          onImportado={() => {
+            // Lo que acaba de traer el BC3 es autoritativo: aunque hubiera
+            // una edición local a medio teclear en otra celda, que gane el
+            // servidor — si no, la sincronización de más abajo (línea ~337)
+            // la deja esperando a que esa edición se guarde sola, y hasta
+            // entonces el capítulo/partida nuevo no aparece en la rejilla.
+            cambios.current.clear()
+            onCambio()
+          }}
+          onClose={() => setImportandoBc3(null)}
+        />
+      )}
+
+      {documentoIA && (
+        <DocumentoIAModal
+          fichero={documentoIA}
+          entidad="presupuesto"
+          entidadId={presupuesto.id}
+          presupuestoId={presupuesto.id}
+          onClose={() => setDocumentoIA(null)}
+          onCambio={() => {
+            cambios.current.clear()
+            onCambio()
+          }}
         />
       )}
     </>

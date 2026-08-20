@@ -3,9 +3,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.enums import OrigenDato, TipoIVA
+from app.core.html_seguro import sanear_html
 from app.modules.presupuestos.models import NaturalezaConcepto
 from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, MetodoCalculo
 
@@ -110,6 +111,14 @@ class PartidaCreate(BaseModel):
     orden: int = 0
     lineas: list[LineaMedicionCreate] = Field(default_factory=list)
 
+    # `texto` puede traer el HTML de un editor WYSIWYG (Fase 38): saneado
+    # aquí, no al mostrarlo, porque el endpoint también lo puede llamar
+    # cualquiera que no pase por ese editor.
+    @field_validator("texto")
+    @classmethod
+    def _sanear_texto(cls, valor: str | None) -> str | None:
+        return sanear_html(valor)
+
 
 class PartidaUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -131,6 +140,11 @@ class PartidaUpdate(BaseModel):
     # conserva su copia de código/descripción/precio, pero deja de seguir la
     # cascada del cuadro.
     concepto_id: uuid.UUID | None = None
+
+    @field_validator("texto")
+    @classmethod
+    def _sanear_texto(cls, valor: str | None) -> str | None:
+        return sanear_html(valor)
 
 
 class ConvertirLinea(BaseModel):
@@ -226,6 +240,15 @@ class PegarPartidas(BaseModel):
     # `copiar` clona la partida entera —con su descompuesto propio y sus
     # líneas de medición— con ids nuevos; `mover` reengancha la existente al
     # capítulo destino sin tocar lo que cuelga de ella, porque ya es suya.
+    alcance: Literal["copiar", "mover"]
+
+
+class PegarCapitulos(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capitulo_ids: list[uuid.UUID] = Field(min_length=1)
+    # `None` los deja a nivel raíz del presupuesto destino.
+    parent_id: uuid.UUID | None = None
     alcance: Literal["copiar", "mover"]
 
 
@@ -339,6 +362,11 @@ class CapituloCreate(BaseModel):
     texto: str | None = None
     orden: int = 0
 
+    @field_validator("texto")
+    @classmethod
+    def _sanear_texto(cls, valor: str | None) -> str | None:
+        return sanear_html(valor)
+
 
 class CapituloUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -349,6 +377,11 @@ class CapituloUpdate(BaseModel):
     texto: str | None = None
     orden: int | None = None
 
+    @field_validator("texto")
+    @classmethod
+    def _sanear_texto(cls, valor: str | None) -> str | None:
+        return sanear_html(valor)
+
 
 class NodoCapitulo(BaseModel):
     id: uuid.UUID
@@ -357,6 +390,9 @@ class NodoCapitulo(BaseModel):
     texto: str | None = None
     orden: int
     importe: Decimal
+    # Suma de `importe_venta` de todas las partidas que cuelgan de este
+    # capítulo, a cualquier profundidad — igual que `importe`, pero de venta.
+    importe_venta: Decimal
     partidas: list[PartidaOut] = Field(default_factory=list)
     hijos: list["NodoCapitulo"] = Field(default_factory=list)
 

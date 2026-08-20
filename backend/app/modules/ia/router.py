@@ -1,6 +1,8 @@
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import Principal, get_principal
@@ -9,16 +11,20 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.ia import estadisticas, medicion, service
+from app.modules.ia import documento, estadisticas, medicion, service
 from app.modules.ia.deepseek import DeepSeekError
 from app.modules.ia.gemini import GeminiError
 from app.modules.ia.models import LecturaPlano, SugerenciaPatron
 from app.modules.ia.schemas import (
     AplicarLecturaPlano,
+    ConversarAyudaLinea,
     CrearPlantillaDesdeSugerencia,
     EstadisticasOut,
     LecturaPlanoDetalle,
     LecturaPlanoOut,
+    MensajeConversacionIn,
+    RespuestaAyudaLinea,
+    RespuestaDocumento,
     SolicitarSugerencia,
     SugerenciaDetalle,
     SugerenciaOut,
@@ -97,6 +103,7 @@ async def solicitar_sugerencia(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
+    await session.commit()
     return _detalle(sugerencia)
 
 
@@ -148,7 +155,35 @@ async def crear_plantilla(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
+    await session.commit()
     return PresupuestoOut.model_validate(plantilla)
+
+
+@router.post("/ayuda-linea/conversar", response_model=RespuestaAyudaLinea)
+async def ayuda_linea_conversar(
+    datos: ConversarAyudaLinea,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+) -> RespuestaAyudaLinea:
+    """Un turno de "Ayuda con IA" (Fase 1g): conversación libre sobre una
+    partida o capítulo, con acceso de solo lectura a toda la cuenta (puede
+    buscar en cualquier presupuesto o partida propios) y, si hace falta,
+    termina en una propuesta de acción — nunca la ejecuta ella sola, eso lo
+    hace el cliente al confirmarla, contra los endpoints de pegar ya
+    existentes. Nada de esto se guarda en el servidor: cada turno manda el
+    historial completo, como cualquier API de chat sin estado."""
+    try:
+        resultado = await service.ayuda_linea_conversar(session, datos, principal)
+    except DeepSeekError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    # Sin escritura propia (la conversación no se guarda), pero sí queda el
+    # registro de uso para facturación — se confirma para que no se pierda si
+    # la petición siguiente reutiliza la conexión antes de que cierre `get_session`.
+    await session.commit()
+    return RespuestaAyudaLinea(respuesta=resultado.respuesta, propuesta=resultado.propuesta)
 
 
 # --- Lectura de planos (Gemini) ---
@@ -189,6 +224,7 @@ async def leer_plano(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
+    await session.commit()
     return _detalle_lectura(lectura)
 
 
@@ -238,4 +274,69 @@ async def aplicar_lectura(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+    await session.commit()
     return [LineaMedicionOut.model_validate(l) for l in creadas]
+
+
+# --- Conversación sobre un documento arrastrado (Fase "Arrastrar al presupuesto") ---
+
+
+_EXTENSIONES_EXCEL = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+
+@router.post("/documentos/conversar", response_model=RespuestaDocumento)
+async def documento_conversar(
+    fichero: UploadFile = File(...),
+    # JSON en un campo de formulario, no un body Pydantic normal: FastAPI no
+    # admite mezclar `File(...)` con un body JSON en la misma petición.
+    mensajes: str = Form(...),
+    # Cuando se sabe sobre qué presupuesto se abrió la conversación, la IA
+    # puede además proponer un capítulo nuevo con lo que lea del documento
+    # (Fase 39) — sin esto, se queda en solo lectura como antes.
+    presupuesto_id: uuid.UUID | None = Form(default=None),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+) -> RespuestaDocumento:
+    """Un turno de conversación libre sobre un documento (PDF, imagen o
+    Excel) arrastrado a una fila del presupuesto: sin guardar nada en el
+    servidor, cada turno manda el fichero entero más el historial de texto —
+    el fichero en sí se guarda aparte, contra `/api/documentos`, cuando el
+    usuario lo decida desde la pantalla."""
+    try:
+        lista = json.loads(mensajes)
+        historial = [MensajeConversacionIn.model_validate(m) for m in lista]
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"'mensajes' no es una lista de mensajes válida: {exc}",
+        ) from exc
+
+    contenido = await fichero.read()
+    mime_type = fichero.content_type or "application/octet-stream"
+    # El navegador a veces no sabe el tipo MIME correcto de un .xlsx y manda
+    # algo genérico; la extensión es la señal fiable, igual que con el BC3.
+    if mime_type not in documento.MIME_PERMITIDOS:
+        for extension, mime_real in _EXTENSIONES_EXCEL.items():
+            if (fichero.filename or "").lower().endswith(extension):
+                mime_type = mime_real
+                break
+    try:
+        respuesta, propuesta = await documento.conversar(
+            session,
+            contenido,
+            mime_type,
+            historial,
+            principal,
+            presupuesto_id=presupuesto_id,
+        )
+    except documento.DocumentoInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except GeminiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return RespuestaDocumento(respuesta=respuesta, propuesta=propuesta)

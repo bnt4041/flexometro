@@ -1,6 +1,7 @@
 """Cálculo del presupuesto: mediciones, importes y el encadenado PEM → PEC."""
 
 import uuid
+from collections.abc import Callable
 from decimal import Decimal
 
 from sqlalchemy import func, select, text, update
@@ -528,13 +529,18 @@ async def cargar_estructura(
 
 
 def importes_por_capitulo(
-    capitulos: list[Capitulo], partidas: list[Partida]
+    capitulos: list[Capitulo],
+    partidas: list[Partida],
+    campo: Callable[[Partida], Decimal] = lambda p: p.importe,
 ) -> dict[uuid.UUID, Decimal]:
-    """Importe acumulado de cada capítulo, incluidos sus subcapítulos."""
+    """Importe acumulado de cada capítulo, incluidos sus subcapítulos.
+
+    `campo` elige qué del `Partida` sumar: el coste (`importe`, por defecto)
+    o la venta (`importe_venta`) — mismo recorrido del árbol para las dos."""
     directo: dict[uuid.UUID, Decimal] = {c.id: Decimal("0.00") for c in capitulos}
     for partida in partidas:
         if partida.capitulo_id in directo:
-            directo[partida.capitulo_id] += partida.importe
+            directo[partida.capitulo_id] += campo(partida)
 
     hijos: dict[uuid.UUID | None, list[Capitulo]] = {}
     for capitulo in capitulos:

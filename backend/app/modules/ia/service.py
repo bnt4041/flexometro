@@ -21,11 +21,12 @@ from app.core.auth import Principal
 from app.core.enums import OrigenDato
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.modules.core import billing_service
-from app.modules.ia import deepseek
+from app.modules.ia import asistente, deepseek
 from app.modules.ia.estadisticas import Estadisticas, calcular_estadisticas
 from app.modules.ia.models import SugerenciaPatron
 from app.modules.ia.schemas import (
     CapituloSugeridoOut,
+    ConversarAyudaLinea,
     CrearPlantillaDesdeSugerencia,
     PartidaSugeridaLLM,
     PartidaSugeridaOut,
@@ -146,6 +147,32 @@ async def solicitar_sugerencia(
         referencia=str(sugerencia.id),
     )
     return sugerencia
+
+
+async def ayuda_linea_conversar(
+    session: AsyncSession,
+    datos: ConversarAyudaLinea,
+    principal: Principal,
+) -> asistente.ResultadoConversacion:
+    """Un turno de la conversación de "Ayuda con IA" (Fase 1g): puede
+    implicar varias llamadas a DeepSeek por turnos de herramientas, así que
+    el uso se registra una sola vez, ya sumado, al final — no una fila de
+    facturación por cada búsqueda interna que haga el modelo."""
+    org_id = require_organization_id()
+    resultado = await asistente.conversar(session, datos.contexto, datos.mensajes, principal)
+
+    await billing_service.registrar_uso_ia(
+        session,
+        organization_id=org_id,
+        usuario_subject=principal.subject,
+        usuario_nombre=principal.username,
+        proveedor="deepseek",
+        modelo=resultado.modelo,
+        tokens_entrada=resultado.tokens_entrada,
+        tokens_salida=resultado.tokens_salida,
+        referencia=None,
+    )
+    return resultado
 
 
 async def listar_sugerencias(

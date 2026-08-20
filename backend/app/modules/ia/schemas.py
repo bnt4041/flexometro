@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -162,3 +163,93 @@ class LecturaPlanoDetalle(LecturaPlanoOut):
 
 class AplicarLecturaPlano(BaseModel):
     lineas: list[LineaSugeridaLLM] = Field(default_factory=list)
+
+
+# --- Ayuda con IA sobre una línea del presupuesto: conversación con acceso
+# de solo lectura a toda la cuenta (buscar en otros presupuestos, otras
+# partidas) y una propuesta de acción que el usuario tiene que confirmar
+# antes de que se ejecute — nunca escribe nada por su cuenta. ---
+
+
+class ContextoAyudaLinea(BaseModel):
+    tipo: Literal["capitulo", "partida"]
+    codigo: str | None = None
+    resumen: str = Field(min_length=1, max_length=250)
+    unidad: str | None = None
+    precio: Decimal | None = None
+    presupuesto_id: uuid.UUID
+    presupuesto_nombre: str
+
+
+class MensajeConversacionIn(BaseModel):
+    rol: Literal["user", "assistant"]
+    contenido: str = Field(min_length=1, max_length=2000)
+
+
+class ConversarAyudaLinea(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contexto: ContextoAyudaLinea
+    # El historial completo, turno a turno: la conversación no se guarda en
+    # el servidor, así que quien pregunta manda cada vez todo lo dicho hasta
+    # ahora (igual que cualquier API de chat sin estado).
+    mensajes: list[MensajeConversacionIn] = Field(min_length=1, max_length=40)
+
+
+class ComponentePropuestoOut(BaseModel):
+    # Del banco de precios (el caso normal): resuelto contra un `Concepto`
+    # que ya existe.
+    concepto_id: uuid.UUID | None = None
+    codigo: str | None = None
+    resumen: str
+    unidad: str
+    rendimiento: Decimal
+    # Personalizado (Fase 40): el usuario ha dado un precio de palabra (p. ej.
+    # "el carpintero cobra 120€ por puerta") para algo que no está en el
+    # banco de precios. `concepto_id` viene vacío; al confirmar, primero se
+    # da de alta como concepto nuevo (origen manual) y luego se añade igual
+    # que cualquier otro componente — no es una vía de escritura distinta.
+    personalizado: bool = False
+    precio: Decimal | None = None
+    naturaleza: str | None = None
+
+
+class PartidaPropuestaOut(BaseModel):
+    """Una línea que la IA ha leído de un documento externo (Fase 39) y
+    propone colgar de un capítulo nuevo — alzada, sin `concepto_id`: es una
+    copia de lo que dice el papel, no un componente del banco de precios."""
+
+    resumen: str
+    unidad: str
+    precio: Decimal
+    medicion: Decimal = Decimal("1")
+
+
+class PropuestaAccionOut(BaseModel):
+    tipo: Literal["copiar_partida", "crear_partida", "importar_capitulo"]
+    descripcion: str
+    # copiar_partida:
+    partida_id: uuid.UUID | None = None
+    # crear_partida: una partida nueva (alzada), con estos componentes ya
+    # resueltos contra el banco de precios propio.
+    resumen: str | None = None
+    unidad: str | None = None
+    componentes: list[ComponentePropuestoOut] = Field(default_factory=list)
+    # importar_capitulo: un capítulo nuevo entero, leído de un documento
+    # externo (PDF, imagen o Excel) — cada partida es alzada, con el precio
+    # que trae el documento, no del banco de precios propio.
+    capitulo_resumen: str | None = None
+    partidas_propuestas: list[PartidaPropuestaOut] = Field(default_factory=list)
+
+
+class RespuestaAyudaLinea(BaseModel):
+    respuesta: str
+    propuesta: PropuestaAccionOut | None = None
+
+
+# --- Conversación sobre un documento arrastrado (PDF/imagen/Excel) ---
+
+
+class RespuestaDocumento(BaseModel):
+    respuesta: str
+    propuesta: PropuestaAccionOut | None = None
