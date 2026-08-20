@@ -76,6 +76,12 @@
   --shadow: 0 2px 8px rgb(27 41 62 / 0.1);
 
   --sidebar-w: 244px;
+  /* Ancho de barra lateral que hay realmente que reservar en cada momento:
+     `AppShell` lo pone a 0px al recogerla, para que lo que se superpone por
+     encima (el `.modal-pantalla-backdrop` de una ficha, sobre todo) sepa
+     cuánto hueco ceder — sin esto se quedaba reservando el ancho de la barra
+     aunque ya no hubiera barra que mostrar. */
+  --sidebar-w-actual: var(--sidebar-w);
   --topbar-h: 56px;
 }
 

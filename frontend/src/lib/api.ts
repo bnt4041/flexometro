@@ -736,6 +736,7 @@ export interface LineaDescomposicion {
   codigo: string
   resumen: string
   unidad: string
+  naturaleza: NaturalezaConcepto | null
   rendimiento: string
   factor: string
   precio: string
@@ -749,6 +750,13 @@ export interface DescomposicionPartida {
 }
 
 export type AlcancePrecio = 'partida' | 'presupuesto'
+
+/** Portapapeles (Fase 1b): `copiar` clona, `mover` reengancha lo mismo al
+ *  destino sin duplicar. */
+export type AlcancePegado = 'copiar' | 'mover'
+export interface ResultadoPegado {
+  pegadas: number
+}
 
 export interface FormulaMedicion {
   id: string
@@ -777,6 +785,7 @@ export interface LineaReajuste {
 
 export interface Reajuste {
   aplicado: boolean
+  metodo: MetodoCalculo
   objetivo_venta: string
   coste: string
   venta_antes: string
@@ -785,7 +794,11 @@ export interface Reajuste {
   diferencia: string
   margen_antes: string
   margen_despues: string
-  factor: string
+  /** El porcentaje único del método (el %GG+%BI combinado en el clásico) que
+   *  deja la venta en el objetivo — es lo que de verdad cambia: un valor fijo
+   *  y consistente, no un factor de escala ad hoc. */
+  porcentaje_anterior: string
+  porcentaje_nuevo: string
   partidas_afectadas: number
   partidas_bloqueadas: number
   partidas_bajo_coste: number
@@ -1945,6 +1958,8 @@ export const api = {
         orden?: number
       },
     ) => post<Partida>(`/api/capitulos/${id}/partidas`, datos),
+    pegarPartidas: (id: string, datos: { partida_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/capitulos/${id}/partidas/pegar`, datos),
   },
 
   partidas: {
@@ -1961,6 +1976,8 @@ export const api = {
     ) => post<DescomposicionPartida>(`/api/partidas/${id}/descomposicion`, datos),
     quitarComponente: (id: string, lineaId: string) =>
       del<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/${lineaId}`),
+    independizarDescomposicion: (id: string) =>
+      post<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/independizar`, {}),
     cambiarPrecioComponente: (
       id: string,
       datos: { hijo_id: string; precio: string; alcance: AlcancePrecio },
@@ -1971,6 +1988,16 @@ export const api = {
       ),
     cambiarRendimientoComponente: (id: string, datos: { hijo_id: string; rendimiento: string }) =>
       patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/rendimiento`, datos),
+    cambiarResumenComponente: (id: string, datos: { hijo_id: string; resumen: string }) =>
+      patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/resumen`, datos),
+    cambiarNaturalezaComponente: (
+      id: string,
+      datos: { hijo_id: string; naturaleza: NaturalezaConcepto },
+    ) => patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/naturaleza`, datos),
+    cambiarUnidadComponente: (id: string, datos: { hijo_id: string; unidad: string }) =>
+      patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/unidad`, datos),
+    pegarComponentes: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/partidas/${id}/descomposicion/pegar`, datos),
     addLinea: (
       id: string,
       datos: {
@@ -1979,10 +2006,13 @@ export const api = {
         longitud?: string | null
         anchura?: string | null
         altura?: string | null
+        orden?: number
         formula_id?: string | null
         formula_valores?: Record<string, string>
       },
     ) => post<LineaMedicion>(`/api/partidas/${id}/lineas`, datos),
+    pegarLineas: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/partidas/${id}/lineas/pegar`, datos),
   },
 
   mediciones: {

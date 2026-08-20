@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.enums import OrigenDato, TipoIVA
+from app.modules.presupuestos.models import NaturalezaConcepto
 from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, MetodoCalculo
 
 
@@ -147,6 +148,7 @@ class LineaDescomposicionOut(BaseModel):
     codigo: str
     resumen: str
     unidad: str
+    naturaleza: str | None
     rendimiento: Decimal
     factor: Decimal
     precio: Decimal
@@ -178,6 +180,27 @@ class CambioRendimientoComponente(BaseModel):
     rendimiento: Decimal = Field(ge=0)
 
 
+class CambioResumenComponente(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hijo_id: uuid.UUID
+    resumen: str = Field(min_length=1, max_length=250)
+
+
+class CambioNaturalezaComponente(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hijo_id: uuid.UUID
+    naturaleza: NaturalezaConcepto
+
+
+class CambioUnidadComponente(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hijo_id: uuid.UUID
+    unidad: str = Field(min_length=1, max_length=10)
+
+
 class ComponenteNuevo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -191,6 +214,37 @@ class ResultadoCambioPrecio(BaseModel):
     # El descompuesto ya recalculado: evita que el cliente tenga que volver a
     # pedirlo y se cruce con el commit, que ocurre tras enviar la respuesta.
     descomposicion: DescomposicionPartidaOut
+
+
+# --- Copiar/mover (portapapeles) — Fase 1b/1c ---
+
+
+class PegarPartidas(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    partida_ids: list[uuid.UUID] = Field(min_length=1)
+    # `copiar` clona la partida entera —con su descompuesto propio y sus
+    # líneas de medición— con ids nuevos; `mover` reengancha la existente al
+    # capítulo destino sin tocar lo que cuelga de ella, porque ya es suya.
+    alcance: Literal["copiar", "mover"]
+
+
+class PegarLineasMedicion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    linea_ids: list[uuid.UUID] = Field(min_length=1)
+    alcance: Literal["copiar", "mover"]
+
+
+class PegarComponentesDescompuesto(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    linea_ids: list[uuid.UUID] = Field(min_length=1)
+    alcance: Literal["copiar", "mover"]
+
+
+class ResultadoPegado(BaseModel):
+    pegadas: int
 
 
 # --- Reajuste del presupuesto (Fase 36) ---
@@ -221,6 +275,7 @@ class LineaReajusteOut(BaseModel):
 
 class ReajusteOut(BaseModel):
     aplicado: bool
+    metodo: MetodoCalculo
     objetivo_venta: Decimal
     coste: Decimal
     venta_antes: Decimal
@@ -231,7 +286,10 @@ class ReajusteOut(BaseModel):
     diferencia: Decimal
     margen_antes: Decimal
     margen_despues: Decimal
-    factor: Decimal
+    # El porcentaje único del método (el %GG+%BI combinado en el clásico) que
+    # deja la venta conjunta de las partidas sin bloquear en el objetivo.
+    porcentaje_anterior: Decimal
+    porcentaje_nuevo: Decimal
     partidas_afectadas: int
     partidas_bloqueadas: int
     partidas_bajo_coste: int

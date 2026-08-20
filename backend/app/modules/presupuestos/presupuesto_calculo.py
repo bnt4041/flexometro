@@ -236,6 +236,12 @@ class PorcentajeImposible(Exception):
     pass
 
 
+# `porcentaje_metodo`, `gastos_generales` y `beneficio_industrial` son
+# columnas `Numeric(5, 2)`: como mucho 3 dígitos enteros, así que 999.99 es lo
+# más grande que aceptan sin desbordar.
+_LIMITE_PORCENTAJE = Decimal("999.99")
+
+
 def venta_unitaria(coste: Decimal, metodo: MetodoCalculo, porcentaje: Decimal) -> Decimal:
     """Precio de venta de una unidad a partir de su coste.
 
@@ -254,6 +260,80 @@ def venta_unitaria(coste: Decimal, metodo: MetodoCalculo, porcentaje: Decimal) -
             )
         return redondear_precio(coste / (Decimal("1") - porcentaje / Decimal("100")))
     return coste
+
+
+def resolver_porcentaje_objetivo(
+    metodo: MetodoCalculo,
+    gastos_generales_actual: Decimal,
+    beneficio_industrial_actual: Decimal,
+    coste_libre: Decimal,
+    objetivo_libre: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Despeja el único porcentaje del método que, aplicado por igual a
+    `coste_libre`, deja la venta en `objetivo_libre` — la parte de un reajuste
+    (Fase 38) que decide "a qué fijo se sube", separada de tocar partidas para
+    poder probarla sin base de datos.
+
+    Devuelve `(porcentaje_metodo, gastos_generales, beneficio_industrial)`:
+    los dos últimos solo importan de verdad en el clásico, que reparte el
+    recargo entre GG y BI a prorrata de como estaban (si los dos estaban a
+    cero, todo va a gastos generales, por hacer algo determinista antes que
+    inventar una proporción).
+
+    Incremento sobre coste y el clásico comparten fórmula —ambos son un
+    recargo sobre el coste—, así que se despeja igual. Beneficio final es
+    distinto porque su porcentaje es el margen sobre la propia venta, no un
+    recargo sobre el coste, así que hace falta un paso más de conversión:
+    venta = coste·(1+recargo/100) = coste/(1-margen/100) despeja a
+    margen = 100·recargo/(100+recargo).
+
+    El recargo puede salir negativo (vender por debajo de coste): no se
+    fuerza a 0, para acercarse lo más posible al objetivo pedido en vez de
+    negarse a intentarlo. Solo se rechaza cuando el método no tiene ningún
+    porcentaje capaz de representarlo (`PorcentajeImposible`).
+    """
+    if coste_libre <= 0:
+        raise PorcentajeImposible("No hay coste sobre el que calcular un porcentaje")
+
+    recargo_combinado = redondear_precio(
+        (objetivo_libre / coste_libre - Decimal("1")) * Decimal("100")
+    )
+
+    if metodo == MetodoCalculo.BENEFICIO_FINAL:
+        denominador = Decimal("100") + recargo_combinado
+        if denominador <= 0:
+            raise PorcentajeImposible(
+                "El objetivo pide vender muy por debajo del coste: este método no tiene "
+                "un porcentaje que lo represente"
+            )
+        porcentaje = redondear_precio(Decimal("100") * recargo_combinado / denominador)
+        if porcentaje >= Decimal("100"):
+            raise PorcentajeImposible(
+                "El objetivo implica un margen del 100 % o más: no tiene solución con este método"
+            )
+        return porcentaje, gastos_generales_actual, beneficio_industrial_actual
+
+    # Solo para incremento sobre coste y el clásico: su porcentaje (o el GG+BI
+    # combinado) se guarda tal cual en una columna `Numeric(5,2)`, que no
+    # admite valores de magnitud 1000 o más. Beneficio final no pasa por
+    # aquí —el suyo ya queda acotado por debajo de 100 más arriba—, así que
+    # un objetivo desproporcionado frente al coste solo bloquea a estos dos.
+    if abs(recargo_combinado) > _LIMITE_PORCENTAJE:
+        raise PorcentajeImposible(
+            f"El objetivo pide un {'incremento' if recargo_combinado >= 0 else 'descuento'} "
+            f"de más del {_LIMITE_PORCENTAJE} % sobre el coste: revisa que sea el valor correcto"
+        )
+
+    if metodo == MetodoCalculo.CLASICO:
+        anterior = gastos_generales_actual + beneficio_industrial_actual
+        if anterior > 0:
+            gg_nuevo = redondear_precio(recargo_combinado * gastos_generales_actual / anterior)
+        else:
+            gg_nuevo = recargo_combinado
+        bi_nuevo = redondear_precio(recargo_combinado - gg_nuevo)
+        return redondear_precio(gg_nuevo + bi_nuevo), gg_nuevo, bi_nuevo
+
+    return recargo_combinado, gastos_generales_actual, beneficio_industrial_actual
 
 
 def metodo_de(presupuesto: Presupuesto) -> tuple[MetodoCalculo, Decimal]:
@@ -478,7 +558,7 @@ def importes_por_capitulo(
 
 async def explosion_recursos(
     session: AsyncSession, presupuesto_id: uuid.UUID
-) -> list[tuple[Concepto, Decimal]]:
+) -> list[tuple[Concepto, Decimal, str | None, str | None]]:
     """Explota hacia abajo el árbol de descomposición de TODAS las partidas de
     un presupuesto, para saber cuánto se necesita de cada recurso (material,
     mano de obra...) en total. Dirección inversa de `calculo.donde_se_usa`
@@ -491,32 +571,62 @@ async def explosion_recursos(
 
     Devuelve TODOS los conceptos alcanzados en la descomposición (no solo
     materiales o mano de obra) — filtrar por `naturaleza` es cosa de quien
-    llama, esta función no sabe para qué se va a usar el resultado.
+    llama, esta función no sabe para qué se va a usar el resultado. El
+    tercer y cuarto elemento de la tupla son la naturaleza y la unidad
+    CONGELADAS de la línea (Fase 38), si alguna partida las corrigió "solo
+    aquí" (ver `cambiar_naturaleza_componente`/`cambiar_resumen_componente`);
+    `None` si ninguna lo hizo, en cuyo caso quien llama debe caer en las del
+    concepto del banco.
+
+    El primer nivel (de cada partida a sus componentes directos) tiene que
+    mirar DOS sitios: si la partida se independizó (Fase 34), su descompuesto
+    ya no es el del concepto del banco, sino el propio en
+    `partida_descomposicion` — mirar solo `descomposicion` dejaría fuera
+    cualquier componente añadido o quitado desde ahí, que es exactamente lo
+    que hacen los widgets "Descompuesto"/"Recursos humanos"/"Precios
+    básicos". Una alzada con descompuesto propio (sin concepto detrás)
+    también cuenta desde aquí. Los niveles siguientes, en cambio, siempre
+    bajan por `descomposicion`: la independización es de la partida, no de
+    los conceptos que cuelgan de ella.
     """
     org_id = require_organization_id()
     consulta = text(
         """
-        WITH RECURSIVE bajada(hijo_id, acumulado, profundidad) AS (
-            SELECT d.hijo_id, d.rendimiento * d.factor * p.medicion, 1
+        WITH RECURSIVE bajada(hijo_id, acumulado, profundidad, naturaleza_propia, unidad_propia) AS (
+            SELECT pd.hijo_id, pd.rendimiento * pd.factor * p.medicion, 1, pd.naturaleza, pd.unidad
+            FROM presupuestos.partida p
+            JOIN presupuestos.partida_descomposicion pd ON pd.partida_id = p.id
+            WHERE p.presupuesto_id = CAST(:presupuesto_id AS uuid)
+              AND pd.hijo_id IS NOT NULL
+          UNION ALL
+            SELECT d.hijo_id, d.rendimiento * d.factor * p.medicion, 1, NULL, NULL
             FROM presupuestos.partida p
             JOIN presupuestos.descomposicion d ON d.padre_id = p.concepto_id
             WHERE p.presupuesto_id = CAST(:presupuesto_id AS uuid)
               AND p.concepto_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM presupuestos.partida_descomposicion pd2
+                WHERE pd2.partida_id = p.id
+              )
           UNION ALL
-            SELECT d.hijo_id, b.acumulado * d.rendimiento * d.factor, b.profundidad + 1
+            SELECT d.hijo_id, b.acumulado * d.rendimiento * d.factor, b.profundidad + 1, NULL, NULL
             FROM presupuestos.descomposicion d
             JOIN bajada b ON d.padre_id = b.hijo_id
             WHERE b.profundidad < :max_prof
         )
-        SELECT hijo_id, SUM(acumulado)
+        SELECT hijo_id, SUM(acumulado), MAX(naturaleza_propia), MAX(unidad_propia)
         FROM bajada
         GROUP BY hijo_id
         """
     )
-    filas = await session.execute(
-        consulta, {"presupuesto_id": str(presupuesto_id), "max_prof": PROFUNDIDAD_MAXIMA}
-    )
-    acumulado: dict[uuid.UUID, Decimal] = {fila[0]: fila[1] for fila in filas.all()}
+    filas = (
+        await session.execute(
+            consulta, {"presupuesto_id": str(presupuesto_id), "max_prof": PROFUNDIDAD_MAXIMA}
+        )
+    ).all()
+    acumulado: dict[uuid.UUID, Decimal] = {fila[0]: fila[1] for fila in filas}
+    naturaleza_propia: dict[uuid.UUID, str | None] = {fila[0]: fila[2] for fila in filas}
+    unidad_propia: dict[uuid.UUID, str | None] = {fila[0]: fila[3] for fila in filas}
     if not acumulado:
         return []
 
@@ -528,7 +638,15 @@ async def explosion_recursos(
         )
     ).scalars()
     return sorted(
-        ((concepto, acumulado[concepto.id]) for concepto in conceptos),
+        (
+            (
+                concepto,
+                acumulado[concepto.id],
+                naturaleza_propia.get(concepto.id),
+                unidad_propia.get(concepto.id),
+            )
+            for concepto in conceptos
+        ),
         key=lambda par: par[0].codigo,
     )
 

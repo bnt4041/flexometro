@@ -428,6 +428,285 @@ async def eliminar_partida(session: AsyncSession, partida_id: uuid.UUID) -> bool
     return True
 
 
+# --- Portapapeles: copiar/mover entre capítulos y entre partidas (Fase 1b) ---
+#
+# Los tres reciben una lista de ids "de origen" (de cualquier capítulo o
+# partida de la misma organización, del mismo presupuesto o de otro — la
+# fase 1b los usa solo dentro del mismo, pero nada aquí lo exige) y solo
+# actúan sobre los que de verdad existen y son de la organización actual: el
+# resto se cuentan como "no pegados" en vez de fallar entero, para que
+# arrastrar una selección con algo ya borrado entretanto no tire todo el
+# pegado abajo.
+
+
+async def pegar_partidas(
+    session: AsyncSession, capitulo_id: uuid.UUID, partida_ids: list[uuid.UUID], alcance: str
+) -> int:
+    """Copia o mueve partidas enteras a otro capítulo.
+
+    Copiar clona la partida, su descompuesto propio (si lo tiene) y sus
+    líneas de medición, todo con ids nuevos — el banco de precios no se toca.
+    Mover solo reengancha `capitulo_id`/`presupuesto_id`: lo que cuelga de la
+    partida ya es suyo, no hay nada que clonar.
+    """
+    org_id = require_organization_id()
+    capitulo = await session.scalar(
+        select(Capitulo).where(Capitulo.id == capitulo_id, Capitulo.organization_id == org_id)
+    )
+    if capitulo is None:
+        return 0
+
+    origen = list(
+        (
+            await session.execute(
+                select(Partida).where(
+                    Partida.id.in_(partida_ids), Partida.organization_id == org_id
+                )
+            )
+        ).scalars()
+    )
+    if not origen:
+        return 0
+    origen_por_id = {p.id: p for p in origen}
+    orden_pedido = [origen_por_id[pid] for pid in partida_ids if pid in origen_por_id]
+
+    siguiente = await session.scalar(
+        select(func.max(Partida.orden)).where(Partida.capitulo_id == capitulo_id)
+    )
+    orden = int(siguiente + 1) if siguiente is not None else 0
+
+    afectadas: list[Partida] = []
+    for partida in orden_pedido:
+        if alcance == "mover":
+            partida.capitulo_id = capitulo_id
+            partida.presupuesto_id = capitulo.presupuesto_id
+            partida.orden = orden
+            afectadas.append(partida)
+        else:
+            nueva = Partida(
+                organization_id=org_id,
+                presupuesto_id=capitulo.presupuesto_id,
+                capitulo_id=capitulo_id,
+                concepto_id=partida.concepto_id,
+                codigo=partida.codigo,
+                resumen=partida.resumen,
+                texto=partida.texto,
+                unidad=partida.unidad,
+                precio=partida.precio,
+                costes_indirectos=partida.costes_indirectos,
+                precio_venta=partida.precio_venta,
+                # Un precio pactado a mano en el origen no se hereda: es un
+                # candado puesto para ESA partida, no para la copia.
+                venta_bloqueada=False,
+                importe_venta=partida.importe_venta,
+                medicion=partida.medicion,
+                importe=partida.importe,
+                orden=orden,
+            )
+            session.add(nueva)
+            await session.flush()
+
+            propias = (
+                await session.execute(
+                    select(PartidaDescomposicion)
+                    .where(PartidaDescomposicion.partida_id == partida.id)
+                    .order_by(PartidaDescomposicion.orden)
+                )
+            ).scalars()
+            for linea in propias:
+                session.add(
+                    PartidaDescomposicion(
+                        organization_id=org_id,
+                        partida_id=nueva.id,
+                        hijo_id=linea.hijo_id,
+                        codigo=linea.codigo,
+                        resumen=linea.resumen,
+                        unidad=linea.unidad,
+                        naturaleza=linea.naturaleza,
+                        rendimiento=linea.rendimiento,
+                        factor=linea.factor,
+                        precio=linea.precio,
+                        orden=linea.orden,
+                    )
+                )
+
+            mediciones = (
+                await session.execute(
+                    select(LineaMedicion)
+                    .where(LineaMedicion.partida_id == partida.id)
+                    .order_by(LineaMedicion.orden)
+                )
+            ).scalars()
+            for medicion in mediciones:
+                session.add(
+                    LineaMedicion(
+                        organization_id=org_id,
+                        partida_id=nueva.id,
+                        formula_id=medicion.formula_id,
+                        formula_expresion=medicion.formula_expresion,
+                        formula_valores=medicion.formula_valores,
+                        comentario=medicion.comentario,
+                        uds=medicion.uds,
+                        longitud=medicion.longitud,
+                        anchura=medicion.anchura,
+                        altura=medicion.altura,
+                        parcial=medicion.parcial,
+                        orden=medicion.orden,
+                    )
+                )
+            afectadas.append(nueva)
+        orden += 1
+
+    await session.flush()
+    for p in afectadas:
+        await _refrescar_venta(session, p)
+    return len(afectadas)
+
+
+async def pegar_lineas_medicion(
+    session: AsyncSession, partida_id: uuid.UUID, linea_ids: list[uuid.UUID], alcance: str
+) -> int:
+    """Copia o mueve líneas de medición sueltas a otra partida."""
+    org_id = require_organization_id()
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return 0
+
+    origen = list(
+        (
+            await session.execute(
+                select(LineaMedicion).where(
+                    LineaMedicion.id.in_(linea_ids), LineaMedicion.organization_id == org_id
+                )
+            )
+        ).scalars()
+    )
+    if not origen:
+        return 0
+    origen_por_id = {l.id: l for l in origen}
+    orden_pedido = [origen_por_id[lid] for lid in linea_ids if lid in origen_por_id]
+
+    siguiente = await session.scalar(
+        select(func.max(LineaMedicion.orden)).where(LineaMedicion.partida_id == partida_id)
+    )
+    orden = int(siguiente + 1) if siguiente is not None else 0
+
+    partidas_origen: set[uuid.UUID] = set()
+    for linea in orden_pedido:
+        partidas_origen.add(linea.partida_id)
+        if alcance == "mover":
+            linea.partida_id = partida_id
+            linea.orden = orden
+        else:
+            session.add(
+                LineaMedicion(
+                    organization_id=org_id,
+                    partida_id=partida_id,
+                    formula_id=linea.formula_id,
+                    formula_expresion=linea.formula_expresion,
+                    formula_valores=linea.formula_valores,
+                    comentario=linea.comentario,
+                    uds=linea.uds,
+                    longitud=linea.longitud,
+                    anchura=linea.anchura,
+                    altura=linea.altura,
+                    parcial=linea.parcial,
+                    orden=orden,
+                )
+            )
+        orden += 1
+    await session.flush()
+
+    await calc.recalcular_partida(session, partida)
+    await _refrescar_venta(session, partida)
+    if alcance == "mover":
+        for origen_id in partidas_origen - {partida_id}:
+            origen_partida = await obtener_partida(session, origen_id)
+            if origen_partida is not None:
+                # Si se llevó la última línea, la partida de origen se queda
+                # sin desglose y `recalcular_partida` ya no toca la medición
+                # (para no pisar una manual) — pero lo que había ahí era la
+                # suma de unas líneas que ya no son suyas, así que aquí sí
+                # hay que ponerla a cero explícitamente (mismo caso que
+                # `eliminar_linea`).
+                if not await _tiene_desglose(session, origen_id):
+                    origen_partida.medicion = Decimal("0.000")
+                await calc.recalcular_partida(session, origen_partida)
+                await _refrescar_venta(session, origen_partida)
+    return len(orden_pedido)
+
+
+async def pegar_componentes_descompuesto(
+    session: AsyncSession, partida_id: uuid.UUID, linea_ids: list[uuid.UUID], alcance: str
+) -> int:
+    """Copia o mueve componentes de un descompuesto a otra partida.
+
+    Independiza la partida destino si todavía heredaba del banco, igual que
+    al añadir un componente a mano — el banco no se toca."""
+    org_id = require_organization_id()
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return 0
+
+    origen = list(
+        (
+            await session.execute(
+                select(PartidaDescomposicion).where(
+                    PartidaDescomposicion.id.in_(linea_ids),
+                    PartidaDescomposicion.organization_id == org_id,
+                )
+            )
+        ).scalars()
+    )
+    if not origen:
+        return 0
+    origen_por_id = {l.id: l for l in origen}
+    orden_pedido = [origen_por_id[lid] for lid in linea_ids if lid in origen_por_id]
+
+    await independizar_descomposicion(session, partida)
+    siguiente = await session.scalar(
+        select(func.max(PartidaDescomposicion.orden)).where(
+            PartidaDescomposicion.partida_id == partida_id
+        )
+    )
+    orden = int(siguiente + 1) if siguiente is not None else 0
+
+    partidas_origen: set[uuid.UUID] = set()
+    for linea in orden_pedido:
+        partidas_origen.add(linea.partida_id)
+        if alcance == "mover":
+            linea.partida_id = partida_id
+            linea.orden = orden
+        else:
+            session.add(
+                PartidaDescomposicion(
+                    organization_id=org_id,
+                    partida_id=partida_id,
+                    hijo_id=linea.hijo_id,
+                    codigo=linea.codigo,
+                    resumen=linea.resumen,
+                    unidad=linea.unidad,
+                    naturaleza=linea.naturaleza,
+                    rendimiento=linea.rendimiento,
+                    factor=linea.factor,
+                    precio=linea.precio,
+                    orden=orden,
+                )
+            )
+        orden += 1
+    await session.flush()
+
+    await calc.recalcular_desde_descomposicion(session, partida)
+    await _refrescar_venta(session, partida)
+    if alcance == "mover":
+        for origen_id in partidas_origen - {partida_id}:
+            origen_partida = await obtener_partida(session, origen_id)
+            if origen_partida is not None:
+                await calc.recalcular_desde_descomposicion(session, origen_partida)
+                await _refrescar_venta(session, origen_partida)
+    return len(orden_pedido)
+
+
 async def integrar_en_banco_precios(session: AsyncSession, partida_id: uuid.UUID) -> Partida | None:
     """Da de alta un concepto nuevo a partir de una partida alzada, y liga la
     partida a él.
@@ -780,6 +1059,7 @@ async def descomposicion_de_partida(
                 "codigo": f.codigo,
                 "resumen": f.resumen,
                 "unidad": f.unidad,
+                "naturaleza": f.naturaleza,
                 "rendimiento": f.rendimiento,
                 "factor": f.factor,
                 "precio": f.precio,
@@ -797,6 +1077,7 @@ async def descomposicion_de_partida(
             "codigo": hijo.codigo,
             "resumen": hijo.resumen,
             "unidad": hijo.unidad,
+            "naturaleza": hijo.naturaleza,
             "rendimiento": linea.rendimiento,
             "factor": linea.factor,
             "precio": hijo.precio,
@@ -968,6 +1249,72 @@ async def cambiar_rendimiento_componente(
     return True
 
 
+async def cambiar_resumen_componente(
+    session: AsyncSession, partida_id: uuid.UUID, hijo_id: uuid.UUID, resumen: str
+) -> bool:
+    """Cambia el texto de un componente del descompuesto (Fase 38).
+
+    Igual que el rendimiento: no afecta al precio, así que no hace falta
+    recalcular nada, solo independizar si la partida todavía heredaba del
+    banco. El concepto del banco tampoco se toca — es la etiqueta que se ve
+    en ESTE descompuesto, no un renombrado global."""
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+    lineas = await independizar_descomposicion(session, partida)
+    tocada = False
+    for linea in lineas:
+        if linea.hijo_id == hijo_id:
+            linea.resumen = resumen
+            tocada = True
+    if not tocada:
+        return False
+    await session.flush()
+    return True
+
+
+async def cambiar_unidad_componente(
+    session: AsyncSession, partida_id: uuid.UUID, hijo_id: uuid.UUID, unidad: str
+) -> bool:
+    """Cambia la unidad de un componente ya en el descompuesto (Fase 38) —
+    para corregir, por ejemplo, una mano de obra que se dio de alta en "ud"
+    en vez de en "h", y que por eso no contaba en las horas presupuestadas."""
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+    lineas = await independizar_descomposicion(session, partida)
+    tocada = False
+    for linea in lineas:
+        if linea.hijo_id == hijo_id:
+            linea.unidad = unidad
+            tocada = True
+    if not tocada:
+        return False
+    await session.flush()
+    return True
+
+
+async def cambiar_naturaleza_componente(
+    session: AsyncSession, partida_id: uuid.UUID, hijo_id: uuid.UUID, naturaleza: str
+) -> bool:
+    """Cambia la clasificación (material/mano de obra/...) de un componente
+    ya en el descompuesto (Fase 38) — para corregir líneas que se quedaron
+    "sin clasificar" de antes de que se pudiera elegir al crearlas."""
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return False
+    lineas = await independizar_descomposicion(session, partida)
+    tocada = False
+    for linea in lineas:
+        if linea.hijo_id == hijo_id:
+            linea.naturaleza = naturaleza
+            tocada = True
+    if not tocada:
+        return False
+    await session.flush()
+    return True
+
+
 async def convertir_linea(
     session: AsyncSession, linea_id: uuid.UUID, tipo_destino: str
 ) -> tuple[str, uuid.UUID] | None:
@@ -1065,10 +1412,23 @@ async def reajustar(
 ) -> dict | None:
     """Lleva el presupuesto a un importe o a un margen objetivo (Fase 36).
 
+    No escala cada precio de venta por su cuenta: despeja el ÚNICO porcentaje
+    del método del presupuesto que, aplicado por igual a todas las partidas
+    sin bloquear, deja la venta conjunta en el objetivo. Es lo mismo que hacer
+    a mano "sube el %GG+%BI" o "sube el %incremento" hasta cuadrar, pero sin
+    tanteo — y el resultado queda igual de "fijo" y consistente que si se
+    hubiera tecleado ese porcentaje en la cabecera del presupuesto.
+
+    Cada método traduce el objetivo a su propio porcentaje: incremento sobre
+    coste y el clásico (%GG+%BI) comparten fórmula —son un recargo sobre el
+    coste—, así que se despeja igual y para el clásico se reparte el recargo
+    entre GG y BI a prorrata de como estaban. Beneficio final es distinto
+    porque su porcentaje no es un recargo sobre el coste sino el margen sobre
+    la propia venta, así que hace falta un paso más de conversión.
+
     Solo se mueven las partidas con la venta SIN bloquear: las bloqueadas son
     precios pactados y el reajuste tiene que respetarlos, así que el resto
-    absorbe toda la diferencia. Se escala el precio unitario de cada una por un
-    factor común, que es lo que reparte proporcionalmente.
+    absorbe toda la diferencia.
 
     Con `aplicar=False` no toca nada: devuelve exactamente el mismo cálculo
     para poder enseñarlo antes de decidir.
@@ -1119,22 +1479,37 @@ async def reajustar(
             f"Las ventas bloqueadas suman {venta_bloqueada} €, ya por encima del objetivo de {objetivo} €"
         )
 
-    venta_libre = redondear_precio(sum((p.importe_venta for p in libres), Decimal("0.00")))
     coste_libre = redondear_precio(sum((p.importe for p in libres), Decimal("0.00")))
-
-    # Se reparte en proporción a la venta actual. Si todavía no hay venta (todo
-    # a cero), se reparte en proporción al coste, que es la única referencia
-    # que queda.
-    if venta_libre > 0:
-        factor = objetivo_libre / venta_libre
-        base = "venta"
-    elif coste_libre > 0:
-        factor = objetivo_libre / coste_libre
-        base = "coste"
-    else:
+    if coste_libre <= 0:
         raise ReajusteImposible(
-            "Las partidas a reajustar no tienen ni venta ni coste: no hay nada que escalar"
+            "Las partidas a reajustar no tienen coste: no hay ningún porcentaje que aplicar"
         )
+
+    metodo, porcentaje_actual = calc.metodo_de(presupuesto)
+    if metodo == MetodoCalculo.CLASICO:
+        porcentaje_anterior = presupuesto.gastos_generales + presupuesto.beneficio_industrial
+    else:
+        porcentaje_anterior = porcentaje_actual
+
+    try:
+        porcentaje_nuevo, gg_nuevo, bi_nuevo = calc.resolver_porcentaje_objetivo(
+            metodo,
+            presupuesto.gastos_generales,
+            presupuesto.beneficio_industrial,
+            coste_libre,
+            objetivo_libre,
+        )
+    except calc.PorcentajeImposible as exc:
+        raise ReajusteImposible(str(exc)) from exc
+
+    def venta_de(coste_partida: Decimal) -> Decimal:
+        if metodo == MetodoCalculo.BENEFICIO_FINAL:
+            return calc.venta_unitaria(coste_partida, metodo, porcentaje_nuevo)
+        # El clásico no lo resuelve `venta_unitaria` (necesita el GG+BI del
+        # presupuesto, no un único porcentaje), pero su fórmula es idéntica a
+        # la de incremento sobre coste una vez que se tiene el recargo
+        # combinado, así que se reutiliza esa rama.
+        return calc.venta_unitaria(coste_partida, MetodoCalculo.INCREMENTO_SOBRE_COSTE, porcentaje_nuevo)
 
     lineas = []
     bajo_coste = 0
@@ -1143,8 +1518,7 @@ async def reajustar(
             nueva_venta = partida.precio_venta
             nuevo_importe = partida.importe_venta
         else:
-            referencia = partida.precio_venta if base == "venta" else partida.precio
-            nueva_venta = redondear_precio(referencia * factor)
+            nueva_venta = venta_de(partida.precio)
             nuevo_importe = redondear_precio(partida.medicion * nueva_venta)
             if nueva_venta < partida.precio:
                 bajo_coste += 1
@@ -1167,6 +1541,11 @@ async def reajustar(
     )
 
     if aplicar:
+        if metodo == MetodoCalculo.CLASICO:
+            presupuesto.gastos_generales = gg_nuevo
+            presupuesto.beneficio_industrial = bi_nuevo
+        else:
+            presupuesto.porcentaje_metodo = porcentaje_nuevo
         for partida, linea in zip(partidas, lineas, strict=True):
             if partida.venta_bloqueada:
                 continue
@@ -1179,6 +1558,7 @@ async def reajustar(
 
     return {
         "aplicado": aplicar,
+        "metodo": metodo,
         "objetivo_venta": objetivo,
         "coste": coste,
         "venta_antes": venta_antes,
@@ -1186,7 +1566,8 @@ async def reajustar(
         "diferencia": venta_despues - objetivo,
         "margen_antes": margen_pct(venta_antes),
         "margen_despues": margen_pct(venta_despues),
-        "factor": factor.quantize(Decimal("0.000001")),
+        "porcentaje_anterior": porcentaje_anterior,
+        "porcentaje_nuevo": porcentaje_nuevo,
         "partidas_afectadas": len(libres),
         "partidas_bloqueadas": len(bloqueadas),
         "partidas_bajo_coste": bajo_coste,
@@ -1354,27 +1735,47 @@ async def recursos(session: AsyncSession, presupuesto_id: uuid.UUID) -> Recursos
     `presupuesto_calculo.explosion_recursos`."""
     pares = await calc.explosion_recursos(session, presupuesto_id)
 
-    def recurso(concepto: Concepto, cantidad: Decimal) -> RecursoAgregado:
+    def recurso(concepto: Concepto, cantidad: Decimal, unidad_propia: str | None) -> RecursoAgregado:
         cantidad_r = redondear_medicion(cantidad)
+        unidad = unidad_propia or concepto.unidad
         return RecursoAgregado(
             concepto_id=concepto.id,
             codigo=concepto.codigo,
             resumen=concepto.resumen,
-            unidad=concepto.unidad,
+            unidad=unidad,
             cantidad=cantidad_r,
             precio=concepto.precio,
             importe=redondear_precio(cantidad_r * concepto.precio),
         )
 
+    # Si alguna partida corrigió el componente "solo aquí" (Fase 38), esa
+    # naturaleza/unidad congeladas mandan sobre las del concepto del banco —
+    # son las que el usuario acaba de arreglar a mano precisamente para que
+    # cuenten bien aquí.
+    def naturaleza_de(concepto: Concepto, propia: str | None) -> str:
+        return propia or concepto.naturaleza
+
+    def unidad_de(concepto: Concepto, propia: str | None) -> str:
+        return propia or concepto.unidad
+
     materiales = [
-        recurso(c, cantidad) for c, cantidad in pares if c.naturaleza == NaturalezaConcepto.MATERIAL
+        recurso(c, cantidad, u_propia)
+        for c, cantidad, n_propia, u_propia in pares
+        if naturaleza_de(c, n_propia) == NaturalezaConcepto.MATERIAL
     ]
     mano_obra = [
-        recurso(c, cantidad) for c, cantidad in pares if c.naturaleza == NaturalezaConcepto.MANO_OBRA
+        recurso(c, cantidad, u_propia)
+        for c, cantidad, n_propia, u_propia in pares
+        if naturaleza_de(c, n_propia) == NaturalezaConcepto.MANO_OBRA
     ]
     horas_totales = redondear_medicion(
         sum(
-            (cantidad for c, cantidad in pares if c.naturaleza == NaturalezaConcepto.MANO_OBRA and c.unidad == _UNIDAD_HORAS),
+            (
+                cantidad
+                for c, cantidad, n_propia, u_propia in pares
+                if naturaleza_de(c, n_propia) == NaturalezaConcepto.MANO_OBRA
+                and unidad_de(c, u_propia) == _UNIDAD_HORAS
+            ),
             Decimal("0"),
         )
     )

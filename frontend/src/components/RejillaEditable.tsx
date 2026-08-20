@@ -48,6 +48,27 @@ interface Props<F> {
   onIndentar?: (fila: F, direccion: 1 | -1) => void
   onSeleccionar?: (fila: F | null) => void
   seleccionadaId?: string | null
+  /** El conjunto de filas marcadas (Mayús+clic o Ctrl/Cmd+clic para varias
+   *  sueltas, Mayús+flecha por teclado) — la base para copiar/arrastrar
+   *  varias a la vez. Se llama cada vez que cambia; nunca con el conjunto
+   *  vacío, que se representa como "nada marcado" sin más. */
+  onMarcarVarias?: (ids: string[]) => void
+  /** Ctrl/Cmd+C con el foco en la rejilla (no editando una celda): ids de las
+   *  filas marcadas, o solo la activa si no hay marca. */
+  onCopiar?: (ids: string[]) => void
+  /** Ctrl/Cmd+V con el foco en la rejilla. No depende de que haya nada
+   *  activo — pegar tiene sentido incluso con la rejilla vacía. */
+  onPegar?: () => void
+  /** Arrastrar y soltar (Fase 1d): al soltar sobre esta fila (`null` si se
+   *  suelta sobre la rejilla vacía, sin ninguna fila todavía). Coger la fila
+   *  (`onDragStart`) ya usa `onCopiar` tal cual —es la misma foto que
+   *  Ctrl+C—, así que solo hace falta este evento nuevo para el destino. Sin
+   *  `onSoltarEn` las filas no se pueden arrastrar. */
+  onSoltarEn?: (fila: F | null) => void
+  /** Filas que no tiene sentido coger (un capítulo en vez de una partida, la
+   *  fila de borrador de un alta en marcha…). Por defecto, todas se pueden
+   *  arrastrar; devolver `false` aquí también las deja fuera de `onCopiar`. */
+  puedeArrastrar?: (fila: F) => boolean
   acciones?: (fila: F) => ReactNode
   vacia?: ReactNode
   /** Abre esta celda en edición desde fuera (un botón "+ Línea" que crea una
@@ -85,6 +106,11 @@ export function RejillaEditable<F>({
   onIndentar,
   onSeleccionar,
   seleccionadaId,
+  onMarcarVarias,
+  onCopiar,
+  onPegar,
+  onSoltarEn,
+  puedeArrastrar,
   acciones,
   vacia,
   filaAEditarId,
@@ -92,6 +118,16 @@ export function RejillaEditable<F>({
 }: Props<F>) {
   const [activa, setActiva] = useState<{ f: number; c: number } | null>(null)
   const [editando, setEditando] = useState(false)
+  // Varias filas marcadas a la vez (Fase 1a de arrastrar/copiar): un
+  // conjunto de ids, más el índice "ancla" desde el que Mayús+clic o
+  // Mayús+flecha extiende el rango. Separado de `activa`, que sigue siendo
+  // la única celda con foco de teclado/edición.
+  const [marcadas, setMarcadas] = useState<Set<string>>(new Set())
+  const anclaMarcado = useRef<number | null>(null)
+  // Arrastrar y soltar (Fase 1d): índices de fila, no ids — no hace falta
+  // que sobrevivan a que la lista cambie a mitad de un arrastre.
+  const [arrastrando, setArrastrando] = useState<number | null>(null)
+  const [sobreDestino, setSobreDestino] = useState<number | null>(null)
   const [borrador, setBorrador] = useState('')
   const [sugerencias, setSugerencias] = useState<OpcionCelda[]>([])
   const [sugerenciaActiva, setSugerenciaActiva] = useState(0)
@@ -162,6 +198,19 @@ export function RejillaEditable<F>({
     }
   }, [filas.length, activa])
 
+  // Si una fila marcada desaparece (se borró, o se aplicó lo que fuera que
+  // estaba marcado), que no quede colgado su id — evita que un futuro
+  // pegado/arrastre lo intente usar.
+  useEffect(() => {
+    setMarcadas((actuales) => {
+      if (actuales.size === 0) return actuales
+      const vivos = new Set(filas.map(idDe))
+      const filtradas = new Set([...actuales].filter((id) => vivos.has(id)))
+      return filtradas.size === actuales.size ? actuales : filtradas
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filas])
+
   useEffect(() => {
     if (!filaAEditarId || !columnaAEditarId) {
       aEditarProcesada.current = null
@@ -197,11 +246,53 @@ export function RejillaEditable<F>({
     }
   }, [editando])
 
-  function irA(f: number, c: number) {
+  // Se avisa hacia fuera solo cuando cambia de verdad — evita un aviso en
+  // cada tecla mientras se navega sin tocar la marca.
+  useEffect(() => {
+    onMarcarVarias?.([...marcadas])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marcadas])
+
+  function marcarSolo(f: number) {
+    anclaMarcado.current = f
+    const fila = filas[f]
+    setMarcadas(fila ? new Set([idDe(fila)]) : new Set())
+  }
+
+  function extenderMarcado(f: number) {
+    const ancla = anclaMarcado.current ?? f
+    const desde = Math.max(0, Math.min(ancla, f))
+    const hasta = Math.min(filas.length - 1, Math.max(ancla, f))
+    const nueva = new Set<string>()
+    for (let i = desde; i <= hasta; i++) nueva.add(idDe(filas[i]))
+    setMarcadas(nueva)
+  }
+
+  function alternarMarcado(f: number) {
+    anclaMarcado.current = f
+    const fila = filas[f]
+    if (!fila) return
+    const id = idDe(fila)
+    setMarcadas((actual) => {
+      const nueva = new Set(actual)
+      if (nueva.has(id)) nueva.delete(id)
+      else nueva.add(id)
+      return nueva
+    })
+  }
+
+  /** Mueve el cursor de celda. Sin `modo`, deja marcada solo la fila de
+   *  destino — es lo que se espera al navegar sin Mayús/Ctrl, igual que en
+   *  Excel: cualquier movimiento "normal" limpia una marca de varias filas
+   *  anterior. */
+  function irA(f: number, c: number, modo?: 'extender' | 'alternar') {
     const filaDestino = Math.max(0, Math.min(filas.length - 1, f))
     const colDestino = Math.max(0, Math.min(maxCol, c))
     setActiva({ f: filaDestino, c: colDestino })
     setEditando(false)
+    if (modo === 'extender') extenderMarcado(filaDestino)
+    else if (modo === 'alternar') alternarMarcado(filaDestino)
+    else marcarSolo(filaDestino)
     onSeleccionar?.(filas[filaDestino] ?? null)
     contenedorRef.current?.focus()
   }
@@ -265,6 +356,23 @@ export function RejillaEditable<F>({
 
   // --- Modo navegación ---
   function alPulsarNavegando(e: React.KeyboardEvent) {
+    // Van antes que el `if (!activa)`: pegar tiene sentido con la rejilla
+    // vacía (crear la primera fila desde lo copiado), y copiar solo hace
+    // falta que haya algo marcado o activo, no ambas cosas a la vez.
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && onPegar) {
+      e.preventDefault()
+      onPegar()
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && onCopiar) {
+      const filaActiva = activa ? filas[activa.f] : undefined
+      const ids = marcadas.size > 0 ? [...marcadas] : filaActiva ? [idDe(filaActiva)] : []
+      if (ids.length > 0) {
+        e.preventDefault()
+        onCopiar(ids)
+      }
+      return
+    }
     if (!activa) {
       if (filas.length > 0 && (e.key === 'ArrowDown' || e.key === 'Tab')) {
         e.preventDefault()
@@ -293,11 +401,15 @@ export function RejillaEditable<F>({
     switch (e.key) {
       case 'ArrowUp':
         e.preventDefault()
-        irA(activa.f - 1, activa.c)
+        if (e.shiftKey) irA(activa.f - 1, activa.c, 'extender')
+        else irA(activa.f - 1, activa.c)
         return
       case 'ArrowDown':
         e.preventDefault()
-        void bajarOCrear(activa.f, activa.c)
+        // Mayús+abajo extiende la marca; sin Mayús, en la última fila crea
+        // una nueva — extenderla no debería disparar un alta.
+        if (e.shiftKey) irA(activa.f + 1, activa.c, 'extender')
+        else void bajarOCrear(activa.f, activa.c)
         return
       case 'ArrowLeft':
         e.preventDefault()
@@ -349,6 +461,15 @@ export function RejillaEditable<F>({
         if (fila && columna && esEditable(fila, columna)) onEditar(fila, columna.id, '')
         return
       }
+      case 'Escape':
+        // Solo si hay de verdad varias filas marcadas: si no, Esc no es cosa
+        // de la rejilla y tiene que subir a cerrar la ficha, como siempre.
+        if (marcadas.size > 1) {
+          e.preventDefault()
+          e.stopPropagation()
+          marcarSolo(activa.f)
+        }
+        return
       default:
         break
     }
@@ -459,7 +580,36 @@ export function RejillaEditable<F>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [borrador, editando, activa?.f, activa?.c])
 
-  if (filas.length === 0 && vacia) return <>{vacia}</>
+  // Ojo: aunque no haya filas, el contenedor con el `onKeyDown` tiene que
+  // seguir montado — si no, Ctrl+V no tiene dónde engancharse y pegar en una
+  // rejilla vacía (el caso más típico: la primera vez que se pega algo aquí)
+  // no funcionaría nunca.
+  if (filas.length === 0 && vacia) {
+    return (
+      <div
+        className={sobreDestino === -1 ? 'rejilla is-destino-arrastre' : 'rejilla'}
+        ref={contenedorRef}
+        tabIndex={0}
+        onMouseDown={() => contenedorRef.current?.focus()}
+        onKeyDown={(e) => {
+          if (!editando) alPulsarNavegando(e)
+        }}
+        onDragOver={(e) => {
+          if (!onSoltarEn) return
+          e.preventDefault()
+          if (sobreDestino !== -1) setSobreDestino(-1)
+        }}
+        onDragLeave={() => setSobreDestino((actual) => (actual === -1 ? null : actual))}
+        onDrop={(e) => {
+          e.preventDefault()
+          setSobreDestino(null)
+          onSoltarEn?.(null)
+        }}
+      >
+        {vacia}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -493,9 +643,48 @@ export function RejillaEditable<F>({
             const propia = claseDe?.(fila)
             if (propia) clases.push(propia)
             if (id === seleccionadaId) clases.push('is-seleccionada')
+            // Distinta de `is-seleccionada` (esa es "la partida que siguen
+            // los demás widgets", una sola). Esta es "están marcadas para
+            // copiar/arrastrar juntas", puede ser ninguna, una o varias.
+            if (marcadas.has(id)) clases.push('is-marcada')
+            if (arrastrando === f) clases.push('is-arrastrando')
+            if (sobreDestino === f && arrastrando !== f) clases.push('is-destino-arrastre')
+            const filaEditandoseAqui = editando && activa?.f === f
+            const arrastrableAqui = Boolean(onCopiar) && !filaEditandoseAqui && (puedeArrastrar?.(fila) ?? true)
 
             return (
-              <tr key={id} className={clases.join(' ')}>
+              <tr
+                key={id}
+                className={clases.join(' ')}
+                draggable={arrastrableAqui}
+                onDragStart={(e) => {
+                  const yaMarcada = marcadas.has(id)
+                  if (!yaMarcada) marcarSolo(f)
+                  const idsArrastre = yaMarcada ? [...marcadas] : [id]
+                  setArrastrando(f)
+                  e.dataTransfer.effectAllowed = 'copyMove'
+                  // Firefox exige `setData` con algo para dejar arrastrar.
+                  e.dataTransfer.setData('text/plain', id)
+                  onCopiar?.(idsArrastre)
+                }}
+                onDragEnd={() => {
+                  setArrastrando(null)
+                  setSobreDestino(null)
+                }}
+                onDragOver={(e) => {
+                  if (!onSoltarEn || arrastrando === null) return
+                  // Sin esto el navegador no deja soltar: por defecto un
+                  // `dragover` no autoriza el `drop` que le sigue.
+                  e.preventDefault()
+                  if (sobreDestino !== f) setSobreDestino(f)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setArrastrando(null)
+                  setSobreDestino(null)
+                  onSoltarEn?.(fila)
+                }}
+              >
                 {columnas.map((col, c) => {
                   const esActiva = activa?.f === f && activa?.c === c
                   const editableAqui = esEditable(fila, col)
@@ -509,8 +698,19 @@ export function RejillaEditable<F>({
                       key={col.id}
                       className={clasesCelda.join(' ')}
                       style={col.sangrada ? { paddingLeft: `calc(var(--sp-3) + ${nivel} * 18px)` } : undefined}
-                      onMouseDown={() => {
-                        if (!esActiva || !editando) irA(f, c)
+                      onMouseDown={(e) => {
+                        if (esActiva && editando) return
+                        if (e.shiftKey) {
+                          // Evita que el navegador arrastre una selección de
+                          // texto nativa mientras se marca con Mayús.
+                          e.preventDefault()
+                          irA(f, c, 'extender')
+                        } else if (e.ctrlKey || e.metaKey) {
+                          e.preventDefault()
+                          irA(f, c, 'alternar')
+                        } else {
+                          irA(f, c)
+                        }
                       }}
                       onDoubleClick={() => editableAqui && empezarEdicion()}
                     >

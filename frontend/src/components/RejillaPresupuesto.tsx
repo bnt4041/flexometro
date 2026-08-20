@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Boxes,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -14,11 +15,14 @@ import {
 } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
+import { PegarModal } from './PegarModal'
 import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
-import type { CambioLinea, NodoCapitulo, Partida, PresupuestoDetalle } from '../lib/api'
+import type { AlcancePegado, CambioLinea, NodoCapitulo, Partida, PresupuestoDetalle } from '../lib/api'
+import { useDiccionario } from '../lib/useDiccionario'
+import { copiarAlPortapapeles, leerPortapapeles } from '../lib/portapapeles'
 import { useToast } from '../toast'
 
 /** Una línea de la rejilla: capítulos y partidas aplanados en una sola lista,
@@ -113,13 +117,24 @@ export function RejillaPresupuesto({
   seleccionadaId?: string | null
 }) {
   const { notificar } = useToast()
+  const unidadesMedida = useDiccionario('unidad_medida')
   const [filas, setFilas] = useState<FilaPresupuesto[]>(() => aplanar(presupuesto.capitulos))
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [pendiente, setPendiente] = useState(false)
   const [replegados, setReplegados] = useState<Set<string>>(new Set())
+  const [pegando, setPegando] = useState<{
+    ids: string[]
+    origenEtiqueta: string
+    capituloId: string
+  } | null>(null)
   const cambios = useRef<Map<string, CambioLinea>>(new Map())
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Para saber dónde pegar (Ctrl+V): el capítulo de la fila con el cursor
+  // encima en ese momento, que `onSeleccionar` va actualizando a cada
+  // movimiento — no vale `seleccionadaId`, que sigue a la fila que la ficha
+  // externa tiene abierta y puede ir por libre.
+  const filaActiva = useRef<FilaPresupuesto | null>(null)
 
   const filasDelServidor = useMemo(() => aplanar(presupuesto.capitulos), [presupuesto])
 
@@ -361,6 +376,61 @@ export function RejillaPresupuesto({
     }
   }
 
+  function copiarPartidas(ids: string[]) {
+    // Solo partidas: copiar un capítulo entero (con sus partidas) no es lo
+    // que pide la Fase 1b, así que si hay capítulos marcados junto a
+    // partidas se descartan en silencio en vez de fallar todo el copiado.
+    const partidas = ids.filter((id) => porId.get(id)?.tipo === 'partida')
+    if (partidas.length === 0) {
+      notificar('Marca una o varias partidas para copiar')
+      return
+    }
+    copiarAlPortapapeles({
+      tipo: 'partidas',
+      ids: partidas,
+      origenEtiqueta: presupuesto.nombre,
+    })
+    notificar(partidas.length === 1 ? 'Partida copiada' : `${partidas.length} partidas copiadas`)
+  }
+
+  /** Ctrl+V usa la fila con el cursor encima (`filaActiva`); soltar un
+   *  arrastre (Fase 1d) manda la fila sobre la que se soltó en su lugar —
+   *  puede ser distinta de la que tenía el foco de teclado. */
+  function pegar(filaDestino?: FilaPresupuesto | null) {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    if (contenido.tipo !== 'partidas') {
+      notificar('Lo copiado no se puede pegar aquí')
+      return
+    }
+    const actual = filaDestino ?? filaActiva.current
+    const capituloId = actual ? (actual.tipo === 'capitulo' ? actual.id : actual.padreId) : null
+    if (!capituloId) {
+      notificar('Selecciona antes un capítulo, o una partida dentro de uno, para pegar ahí')
+      return
+    }
+    setPegando({ ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta, capituloId })
+  }
+
+  async function confirmarPegado(alcance: AlcancePegado) {
+    if (!pegando) return
+    try {
+      const resultado = await api.capitulos.pegarPartidas(pegando.capituloId, {
+        partida_ids: pegando.ids,
+        alcance,
+      })
+      setPegando(null)
+      onCambio()
+      notificar(resultado.pegadas === 1 ? 'Partida pegada' : `${resultado.pegadas} partidas pegadas`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPegando(null)
+    }
+  }
+
   /** Alt+→ / Alt+←: mueve la línea un nivel dentro del árbol. */
   async function indentar(fila: FilaPresupuesto, direccion: 1 | -1) {
     setError(null)
@@ -437,6 +507,11 @@ export function RejillaPresupuesto({
     {
       id: 'resumen',
       etiqueta: 'Descripción',
+      // Sin ancho fijo, `table-layout: fixed` le daba solo lo que sobraba
+      // tras repartir las demás columnas — a veces apenas 20px. Con esto,
+      // si no cabe todo, el widget scrollea en horizontal antes que
+      // aplastar justo la columna que hay que poder leer.
+      ancho: '260px',
       valor: (f) => f.resumen,
       editable: () => true,
       tipo: 'autocompletado',
@@ -455,13 +530,38 @@ export function RejillaPresupuesto({
         })
         return sugerencias
       },
+      // Iconos de aviso, no de acción: se ven de un vistazo qué partidas
+      // llevan descompuesto propio o mediciones detalladas, sin entrar en
+      // cada una para comprobarlo.
+      prefijo: (f) => {
+        if (f.tipo !== 'partida' || !f.partida) return null
+        const avisos: { icono: typeof Boxes; texto: string }[] = []
+        if (f.partida.descomposicion_propia) {
+          avisos.push({ icono: Boxes, texto: 'Tiene descompuesto propio' })
+        }
+        if (f.tieneDesglose) {
+          avisos.push({ icono: Ruler, texto: 'Tiene mediciones detalladas' })
+        }
+        if (avisos.length === 0) return null
+        return (
+          <span className="rejilla__avisos">
+            {avisos.map(({ icono: Icono, texto }) => (
+              <Tooltip key={texto} texto={texto}>
+                <Icono size={12} aria-hidden="true" className="rejilla__aviso" />
+              </Tooltip>
+            ))}
+          </span>
+        )
+      },
     },
     {
       id: 'unidad',
       etiqueta: 'Ud.',
-      ancho: '80px',
+      ancho: '100px',
+      tipo: 'select',
       valor: (f) => f.unidad,
       editable: (f) => f.tipo === 'partida',
+      opciones: () => unidadesMedida.map((u) => ({ valor: u.clave, etiqueta: u.etiqueta })),
     },
     {
       id: 'medicion',
@@ -565,8 +665,15 @@ export function RejillaPresupuesto({
         onNuevaFila={nuevaFila}
         onEliminarFila={(f) => void eliminarFila(f)}
         onIndentar={(f, d) => void indentar(f, d)}
-        onSeleccionar={onSeleccionar}
+        onSeleccionar={(f) => {
+          filaActiva.current = f
+          onSeleccionar?.(f)
+        }}
         seleccionadaId={seleccionadaId}
+        onCopiar={copiarPartidas}
+        onPegar={pegar}
+        onSoltarEn={(f) => pegar(f)}
+        puedeArrastrar={(f) => f.tipo === 'partida'}
         vacia={
           <EmptyState title="Presupuesto vacío">
             Empieza creando un capítulo; dentro irán las partidas con su medición.
@@ -660,6 +767,15 @@ export function RejillaPresupuesto({
           )
         }
       />
+
+      {pegando && (
+        <PegarModal
+          cantidad={pegando.ids.length}
+          origenEtiqueta={pegando.origenEtiqueta}
+          onElegir={(alcance) => void confirmarPegado(alcance)}
+          onClose={() => setPegando(null)}
+        />
+      )}
     </>
   )
 }

@@ -2,22 +2,52 @@ import { useCallback, useEffect, useState } from 'react'
 import { Plus, Save, Trash2, Unlink, X } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
+import { PegarModal } from './PegarModal'
 import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Modal, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
 import type {
+  AlcancePegado,
   AlcancePrecio,
   ConceptoDetalle,
   DescomposicionPartida,
   LineaDescomposicion,
+  NaturalezaConcepto,
   Partida,
 } from '../lib/api'
+import { ETIQUETA_NATURALEZA } from '../lib/api'
+import { copiarAlPortapapeles, leerPortapapeles } from '../lib/portapapeles'
+import { useDiccionario } from '../lib/useDiccionario'
 import { useToast } from '../toast'
 
 /** Fila que solo vive en el navegador mientras se está montando un componente
  *  nuevo — nunca llega a `datos.lineas`, que es lo que devuelve el backend. */
 const ID_BORRADOR = '__nuevo__'
+
+/** "Tipo de línea" al crear un componente nuevo: las cuatro naturalezas
+ *  normales (Fase 38) más la opción de anidar un unitario entero como
+ *  auxiliar de esta partida — un caso raro, de ahí la coletilla. */
+type TipoLinea = 'material' | 'mano_obra' | 'maquinaria' | 'servicio' | 'unitario'
+
+const OPCIONES_TIPO_LINEA: OpcionCelda[] = [
+  { valor: 'material', etiqueta: 'Material' },
+  { valor: 'mano_obra', etiqueta: 'Mano de obra' },
+  { valor: 'maquinaria', etiqueta: 'Maquinaria' },
+  { valor: 'servicio', etiqueta: 'Servicio' },
+  { valor: 'unitario', etiqueta: 'Auxiliar (unitario) — poco uso' },
+]
+
+/** Para reclasificar una línea ya guardada: sin "Auxiliar (unitario)", que
+ *  no es una naturaleza sino el tipo del concepto en sí —no se puede
+ *  convertir un componente básico ya puesto en uno unitario desde aquí. */
+const OPCIONES_NATURALEZA_EXISTENTE: OpcionCelda[] = [
+  { valor: 'sin_clasificar', etiqueta: 'Sin clasificar' },
+  { valor: 'material', etiqueta: 'Material' },
+  { valor: 'mano_obra', etiqueta: 'Mano de obra' },
+  { valor: 'maquinaria', etiqueta: 'Maquinaria' },
+  { valor: 'servicio', etiqueta: 'Servicio' },
+]
 
 /** Descompuesto de la partida seleccionada (Fase 34).
  *
@@ -39,12 +69,20 @@ export function DescompuestoPartida({
   const [pendiente, setPendiente] = useState<{ linea: LineaDescomposicion; precio: string } | null>(
     null,
   )
-  // Dos pasos, igual que capítulos/partidas: primero se busca o se crea el
-  // concepto (celda "Descripción"), y solo al confirmarlo se abre la celda de
-  // rendimiento — hasta entonces no hay nada que enviar al backend, porque
-  // `anadir_componente` exige un `hijo_id` real desde el principio.
+  // Búsqueda o alta: primero se busca o se crea el concepto (celda
+  // "Descripción"). Elegir uno existente pasa directo a rendimiento; crear
+  // uno nuevo pide antes su tipo de línea y su unidad —hasta entonces no hay
+  // nada que enviar al backend, porque `anadir_componente` exige un
+  // `hijo_id` real desde el principio, y el concepto en sí necesita tipo,
+  // naturaleza y unidad antes de poder darlo de alta.
   const [conceptoNuevo, setConceptoNuevo] = useState<ConceptoDetalle | null>(null)
+  const [borradorNuevo, setBorradorNuevo] = useState<{
+    resumen: string
+    tipoLinea?: TipoLinea
+  } | null>(null)
   const [anadiendo, setAnadiendo] = useState(false)
+  const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
+  const unidadesMedida = useDiccionario('unidad_medida')
 
   const cargar = useCallback(async () => {
     try {
@@ -95,27 +133,140 @@ export function DescompuestoPartida({
     }
   }
 
+  async function copiarComponentes(ids: string[]) {
+    const reales = ids.filter((id) => id !== ID_BORRADOR)
+    if (reales.length === 0 || !datos) return
+    // Mientras la partida solo hereda del banco, el id que se ve en pantalla
+    // es el de la línea del banco (`Descomposicion.id`): no identifica a esta
+    // partida y el backend no lo va a encontrar al pegar. Se independiza
+    // primero —como ya hace cualquier otro toque a una línea— y se recupera
+    // qué línea es cuál por `hijo_id`, lo único que no cambia al clonarlas.
+    let base = datos
+    if (!base.propia) {
+      const hijoIds = new Set(
+        reales
+          .map((id) => base?.lineas.find((l) => l.id === id)?.hijo_id)
+          .filter((x): x is string => Boolean(x)),
+      )
+      try {
+        base = await api.partidas.independizarDescomposicion(partida.id)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Error desconocido')
+        return
+      }
+      setDatos(base)
+      onCambio()
+      const idsFinales = base.lineas
+        .filter((l) => l.hijo_id && hijoIds.has(l.hijo_id))
+        .map((l) => l.id)
+      if (idsFinales.length === 0) return
+      copiarAlPortapapeles({
+        tipo: 'componentes_descompuesto',
+        ids: idsFinales,
+        origenEtiqueta: `${partida.codigo} · ${partida.resumen}`,
+      })
+      notificar(
+        idsFinales.length === 1 ? 'Componente copiado' : `${idsFinales.length} componentes copiados`,
+      )
+      return
+    }
+    copiarAlPortapapeles({
+      tipo: 'componentes_descompuesto',
+      ids: reales,
+      origenEtiqueta: `${partida.codigo} · ${partida.resumen}`,
+    })
+    notificar(reales.length === 1 ? 'Componente copiado' : `${reales.length} componentes copiados`)
+  }
+
+  function pegar() {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    if (contenido.tipo !== 'componentes_descompuesto') {
+      notificar('Lo copiado no se puede pegar aquí')
+      return
+    }
+    setPegando({ ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta })
+  }
+
+  async function confirmarPegado(alcance: AlcancePegado) {
+    if (!pegando) return
+    try {
+      const resultado = await api.partidas.pegarComponentes(partida.id, {
+        linea_ids: pegando.ids,
+        alcance,
+      })
+      setPegando(null)
+      await cargar()
+      onCambio()
+      notificar(
+        resultado.pegadas === 1 ? 'Componente pegado' : `${resultado.pegadas} componentes pegados`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPegando(null)
+    }
+  }
+
   function empezarAlta() {
     if (anadiendo) return
     setConceptoNuevo(null)
+    setBorradorNuevo(null)
     setAnadiendo(true)
   }
 
   function cancelarAlta() {
     setAnadiendo(false)
     setConceptoNuevo(null)
+    setBorradorNuevo(null)
   }
 
-  async function elegirConcepto(opcion?: OpcionCelda) {
+  function elegirConcepto(opcion?: OpcionCelda) {
     if (!opcion) {
       cancelarAlta()
       return
     }
+    if (opcion.esAccion) {
+      // Crear nuevo: todavía no hay concepto real, así que no se puede
+      // llamar a la API — antes hacen falta su tipo de línea y su unidad.
+      setBorradorNuevo({ resumen: opcion.valor })
+      return
+    }
+    void elegirConceptoExistente(opcion.valor)
+  }
+
+  async function elegirConceptoExistente(conceptoId: string) {
     try {
-      const concepto = opcion.esAccion
-        ? await api.conceptos.create({ resumen: opcion.valor, unidad: 'ud', precio: '0', tipo: 'basico' })
-        : await api.conceptos.get(opcion.valor)
-      if (opcion.esAccion) notificar(`«${opcion.valor}» dado de alta en el banco de precios`)
+      setConceptoNuevo(await api.conceptos.get(conceptoId))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      cancelarAlta()
+    }
+  }
+
+  function elegirTipoLinea(opcion?: OpcionCelda) {
+    if (!opcion) return
+    setBorradorNuevo((actual) => (actual ? { ...actual, tipoLinea: opcion.valor as TipoLinea } : actual))
+  }
+
+  async function confirmarCreacion(unidad: string) {
+    if (!borradorNuevo?.tipoLinea) return
+    const esUnitario = borradorNuevo.tipoLinea === 'unitario'
+    try {
+      const concepto = await api.conceptos.create({
+        resumen: borradorNuevo.resumen,
+        unidad,
+        precio: '0',
+        tipo: esUnitario ? 'unitario' : 'basico',
+        // Un unitario es un ítem compuesto en sí mismo (una partida
+        // anidada): la clasificación material/mano de obra/etc. es de los
+        // recursos básicos que lo componen, no del unitario en conjunto.
+        naturaleza: esUnitario ? 'sin_clasificar' : (borradorNuevo.tipoLinea as NaturalezaConcepto),
+      })
+      notificar(`«${borradorNuevo.resumen}» dado de alta en el banco de precios`)
+      setBorradorNuevo(null)
       setConceptoNuevo(concepto)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -163,6 +314,53 @@ export function DescompuestoPartida({
     }
   }
 
+  async function cambiarResumen(linea: LineaDescomposicion, valor: string) {
+    if (!linea.hijo_id) return
+    const limpio = valor.trim()
+    if (limpio === '' || limpio === linea.resumen) return
+    try {
+      setDatos(
+        await api.partidas.cambiarResumenComponente(partida.id, { hijo_id: linea.hijo_id, resumen: limpio }),
+      )
+      onCambio()
+      notificar('Descripción actualizada')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  async function cambiarUnidad(linea: LineaDescomposicion, opcion?: OpcionCelda) {
+    if (!linea.hijo_id || !opcion || opcion.valor === linea.unidad) return
+    try {
+      setDatos(
+        await api.partidas.cambiarUnidadComponente(partida.id, {
+          hijo_id: linea.hijo_id,
+          unidad: opcion.valor,
+        }),
+      )
+      onCambio()
+      notificar('Unidad actualizada')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  async function cambiarNaturaleza(linea: LineaDescomposicion, opcion?: OpcionCelda) {
+    if (!linea.hijo_id || !opcion || opcion.valor === linea.naturaleza) return
+    try {
+      setDatos(
+        await api.partidas.cambiarNaturalezaComponente(partida.id, {
+          hijo_id: linea.hijo_id,
+          naturaleza: opcion.valor as NaturalezaConcepto,
+        }),
+      )
+      onCambio()
+      notificar('Tipo de línea actualizado')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
   const lineaBorrador: LineaDescomposicion = conceptoNuevo
     ? {
         id: ID_BORRADOR,
@@ -170,6 +368,7 @@ export function DescompuestoPartida({
         codigo: conceptoNuevo.codigo,
         resumen: conceptoNuevo.resumen,
         unidad: conceptoNuevo.unidad,
+        naturaleza: conceptoNuevo.naturaleza,
         rendimiento: '1',
         factor: '1',
         precio: conceptoNuevo.precio,
@@ -178,9 +377,10 @@ export function DescompuestoPartida({
     : {
         id: ID_BORRADOR,
         hijo_id: null,
-        codigo: '',
-        resumen: '',
+        codigo: borradorNuevo ? '(nuevo)' : '',
+        resumen: borradorNuevo?.resumen ?? '',
         unidad: '',
+        naturaleza: null,
         rendimiento: '1',
         factor: '1',
         precio: '0',
@@ -192,10 +392,18 @@ export function DescompuestoPartida({
     {
       id: 'resumen',
       etiqueta: 'Descripción',
+      // Sin ancho fijo, `table-layout: fixed` la aplastaba a lo que
+      // sobrase tras repartir las demás columnas (a veces ~20px).
+      ancho: '220px',
       valor: (l) => l.resumen,
-      editable: (l) => l.id === ID_BORRADOR && !conceptoNuevo,
+      // Con el borrador se busca o se crea en el banco; una línea ya
+      // guardada solo permite retocar el texto (`buscar` no llega a
+      // consultar nada para ella, ver más abajo) — el concepto en sí no
+      // cambia, es la etiqueta que se ve en este descompuesto.
+      editable: (l) => (l.id === ID_BORRADOR ? !conceptoNuevo && !borradorNuevo : l.hijo_id !== null),
       tipo: 'autocompletado',
-      buscar: async (q) => {
+      buscar: async (q, fila) => {
+        if (fila.id !== ID_BORRADOR) return []
         if (q.trim().length < 2) return []
         const pagina = await api.conceptos.list({ q, activo: true, limit: 8 })
         const sugerencias: OpcionCelda[] = pagina.items
@@ -213,7 +421,42 @@ export function DescompuestoPartida({
         return sugerencias
       },
     },
-    { id: 'unidad', etiqueta: 'Ud.', ancho: '70px', valor: (l) => l.unidad },
+    {
+      id: 'tipoLinea',
+      etiqueta: 'Tipo',
+      ancho: '170px',
+      tipo: 'select',
+      valor: (l) => {
+        if (l.id !== ID_BORRADOR) {
+          return l.naturaleza ? ETIQUETA_NATURALEZA[l.naturaleza] : ''
+        }
+        const elegido = OPCIONES_TIPO_LINEA.find((o) => o.valor === borradorNuevo?.tipoLinea)
+        return elegido?.etiqueta ?? ''
+      },
+      // En el borrador, solo tras elegir "crear nuevo" (segundo paso). En
+      // una línea ya guardada, reclasifica —para poder corregir las que se
+      // quedaron "sin clasificar" antes de que hubiera dónde elegirlo.
+      editable: (l) =>
+        l.id === ID_BORRADOR
+          ? Boolean(borradorNuevo) && !borradorNuevo?.tipoLinea
+          : l.hijo_id !== null,
+      opciones: (l) => (l.id === ID_BORRADOR ? OPCIONES_TIPO_LINEA : OPCIONES_NATURALEZA_EXISTENTE),
+    },
+    {
+      id: 'unidad',
+      etiqueta: 'Ud.',
+      ancho: '110px',
+      tipo: 'select',
+      valor: (l) => l.unidad,
+      // En el borrador, el último paso antes de dar de alta el concepto: en
+      // cuanto se confirma, se llama a la API (ver `confirmarCreacion`). En
+      // una línea ya guardada, corrige la unidad congelada —por ejemplo, una
+      // mano de obra que se dio de alta en "ud" en vez de en "h", y que por
+      // eso no contaba en las horas presupuestadas.
+      editable: (l) =>
+        l.id === ID_BORRADOR ? Boolean(borradorNuevo?.tipoLinea) : l.hijo_id !== null,
+      opciones: () => unidadesMedida.map((u) => ({ valor: u.clave, etiqueta: u.etiqueta })),
+    },
     {
       id: 'rendimiento',
       etiqueta: 'Rendim.',
@@ -281,12 +524,43 @@ export function DescompuestoPartida({
         filas={filas}
         columnas={columnas}
         idDe={(l) => l.id}
+        // ↓ en la última fila, o Tab al final de la fila: empieza el mismo
+        // alta que el botón "+ Línea" (no-op si ya hay una en marcha).
+        onNuevaFila={empezarAlta}
+        onCopiar={copiarComponentes}
+        onPegar={pegar}
+        onSoltarEn={() => pegar()}
+        puedeArrastrar={(l) => l.id !== ID_BORRADOR}
         filaAEditarId={anadiendo ? ID_BORRADOR : null}
-        columnaAEditarId={anadiendo ? (conceptoNuevo ? 'rendimiento' : 'resumen') : null}
+        columnaAEditarId={
+          anadiendo
+            ? conceptoNuevo
+              ? 'rendimiento'
+              : borradorNuevo?.tipoLinea
+                ? 'unidad'
+                : borradorNuevo
+                  ? 'tipoLinea'
+                  : 'resumen'
+            : null
+        }
         onEditar={(linea, columnaId, valor, opcion) => {
           if (linea.id === ID_BORRADOR) {
-            if (columnaId === 'resumen') void elegirConcepto(opcion)
+            if (columnaId === 'resumen') elegirConcepto(opcion)
+            else if (columnaId === 'tipoLinea') elegirTipoLinea(opcion)
+            else if (columnaId === 'unidad') void confirmarCreacion(valor)
             else if (columnaId === 'rendimiento') void confirmarRendimiento(valor)
+            return
+          }
+          if (columnaId === 'resumen') {
+            void cambiarResumen(linea, valor)
+            return
+          }
+          if (columnaId === 'tipoLinea') {
+            void cambiarNaturaleza(linea, opcion)
+            return
+          }
+          if (columnaId === 'unidad') {
+            void cambiarUnidad(linea, opcion)
             return
           }
           if (columnaId === 'rendimiento') {
@@ -377,6 +651,15 @@ export function DescompuestoPartida({
             </button>
           </div>
         </Modal>
+      )}
+
+      {pegando && (
+        <PegarModal
+          cantidad={pegando.ids.length}
+          origenEtiqueta={pegando.origenEtiqueta}
+          onElegir={(alcance) => void confirmarPegado(alcance)}
+          onClose={() => setPegando(null)}
+        />
       )}
     </>
   )

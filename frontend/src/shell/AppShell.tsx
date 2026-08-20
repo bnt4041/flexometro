@@ -45,6 +45,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   )
   useEffect(() => {
     localStorage.setItem('obrai:sidebar-colapsada', colapsada ? '1' : '0')
+    // La ficha a pantalla completa (`ModalPantalla`) se porta a `document.body`,
+    // fuera de `.shell` — no hay forma de que un selector CSS anidado la
+    // entere de que la barra se ha recogido. Esta variable en `:root` es el
+    // puente: sin ella, su hueco a la izquierda se quedaba reservado aunque
+    // la barra ya no estuviera.
+    document.documentElement.style.setProperty(
+      '--sidebar-w-actual',
+      colapsada ? '0px' : 'var(--sidebar-w)',
+    )
   }, [colapsada])
 
   const clasesShell = ['shell', menuAbierto && 'shell--menu-abierto', colapsada && 'shell--sidebar-colapsada']

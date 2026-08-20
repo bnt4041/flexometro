@@ -19,8 +19,11 @@ from app.modules.presupuestos.presupuesto_schemas import (
     CambioOut,
     CapituloCreate,
     CapituloUpdate,
+    CambioNaturalezaComponente,
     CambioPrecioComponente,
     CambioRendimientoComponente,
+    CambioResumenComponente,
+    CambioUnidadComponente,
     ComparacionOut,
     ComponenteNuevo,
     ConvertirLinea,
@@ -41,10 +44,14 @@ from app.modules.presupuestos.presupuesto_schemas import (
     PartidaDetalle,
     PartidaOut,
     PartidaUpdate,
+    PegarComponentesDescompuesto,
+    PegarLineasMedicion,
+    PegarPartidas,
     PresupuestoCreate,
     PresupuestoDetalle,
     PresupuestoOut,
     PresupuestoResumen,
+    ResultadoPegado,
     PresupuestoUpdate,
     LineaReajusteOut,
     ReajusteIn,
@@ -351,6 +358,28 @@ async def crear_partida(
     return PartidaOut.model_validate(partida)
 
 
+@capitulos_router.post("/{capitulo_id}/partidas/pegar", response_model=ResultadoPegado)
+async def pegar_partidas(
+    capitulo_id: uuid.UUID,
+    datos: PegarPartidas,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoPegado:
+    """Copia o mueve partidas enteras —con su descompuesto y sus mediciones—
+    a este capítulo (Fase 1b/1c: portapapeles, del mismo presupuesto o de
+    otro). Las partidas de origen que ya no existan o no sean de esta
+    organización se cuentan como no pegadas en vez de hacer fallar el resto."""
+    await _capitulo_propio(session, capitulo_id, alcance, principal)
+    pegadas = await service.pegar_partidas(session, capitulo_id, datos.partida_ids, datos.alcance)
+    # Se confirma aquí, no se deja al cierre de `get_session`: esa confirmación
+    # ocurre DESPUÉS de enviar la respuesta, y el cliente recarga el
+    # presupuesto en cuanto la recibe (ver nota de la carrera lectura-tras-
+    # escritura en `cambiar_precio_componente`).
+    await session.commit()
+    return ResultadoPegado(pegadas=pegadas)
+
+
 async def _partida_propia(
     session: AsyncSession, partida_id: uuid.UUID, alcance: Alcance, principal: Principal
 ):
@@ -485,6 +514,27 @@ async def anadir_componente(
     return salida
 
 
+@partidas_router.post(
+    "/{partida_id}/descomposicion/independizar", response_model=DescomposicionPartidaOut
+)
+async def independizar_descomposicion_partida(
+    partida_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Independiza el descompuesto del banco de precios sin cambiar nada más
+    (Fase 1b/1c). Hace falta antes de copiar un componente que la partida
+    todavía hereda: el id que se enseña en pantalla para esas líneas es el de
+    la fila del banco (`Descomposicion.id`), que no sirve para pegar en otro
+    sitio porque no identifica a esta partida."""
+    partida = await _partida_propia(session, partida_id, alcance, principal)
+    await service.independizar_descomposicion(session, partida)
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
 @partidas_router.delete(
     "/{partida_id}/descomposicion/{linea_id}", response_model=DescomposicionPartidaOut
 )
@@ -563,6 +613,92 @@ async def cambiar_rendimiento_componente(
     return salida
 
 
+@partidas_router.patch(
+    "/{partida_id}/descomposicion/resumen", response_model=DescomposicionPartidaOut
+)
+async def cambiar_resumen_componente(
+    partida_id: uuid.UUID,
+    datos: CambioResumenComponente,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Cambia el texto de un componente ya en el descompuesto — el concepto
+    del banco no se toca, solo la etiqueta que se ve en esta partida."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    if not await service.cambiar_resumen_componente(
+        session, partida_id, datos.hijo_id, datos.resumen
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Componente no encontrado")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
+@partidas_router.patch(
+    "/{partida_id}/descomposicion/naturaleza", response_model=DescomposicionPartidaOut
+)
+async def cambiar_naturaleza_componente(
+    partida_id: uuid.UUID,
+    datos: CambioNaturalezaComponente,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Cambia la clasificación (material/mano de obra/...) de un componente
+    ya en el descompuesto, para corregir líneas que se quedaron sin
+    clasificar antes de que se pudiera elegir al crearlas."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    if not await service.cambiar_naturaleza_componente(
+        session, partida_id, datos.hijo_id, datos.naturaleza
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Componente no encontrado")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
+@partidas_router.patch(
+    "/{partida_id}/descomposicion/unidad", response_model=DescomposicionPartidaOut
+)
+async def cambiar_unidad_componente(
+    partida_id: uuid.UUID,
+    datos: CambioUnidadComponente,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> DescomposicionPartidaOut:
+    """Cambia la unidad de un componente ya en el descompuesto, para
+    corregir por ejemplo una mano de obra dada de alta en "ud" en vez de en
+    "h" (y que por eso no contaba en las horas presupuestadas)."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    if not await service.cambiar_unidad_componente(
+        session, partida_id, datos.hijo_id, datos.unidad
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Componente no encontrado")
+    salida = await _descomposicion_fresca(session, partida_id)
+    await session.commit()
+    return salida
+
+
+@partidas_router.post("/{partida_id}/descomposicion/pegar", response_model=ResultadoPegado)
+async def pegar_componentes(
+    partida_id: uuid.UUID,
+    datos: PegarComponentesDescompuesto,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoPegado:
+    """Copia o mueve componentes de un descompuesto a esta partida (Fase
+    1b/1c), independizándola del banco de precios si aún lo heredaba."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    pegadas = await service.pegar_componentes_descompuesto(
+        session, partida_id, datos.linea_ids, datos.alcance
+    )
+    await session.commit()
+    return ResultadoPegado(pegadas=pegadas)
+
+
 @partidas_router.post(
     "/{partida_id}/lineas", response_model=LineaMedicionOut, status_code=status.HTTP_201_CREATED
 )
@@ -577,6 +713,23 @@ async def crear_linea(
     linea = await service.crear_linea(session, partida_id, datos)
     assert linea is not None
     return LineaMedicionOut.model_validate(linea)
+
+
+@partidas_router.post("/{partida_id}/lineas/pegar", response_model=ResultadoPegado)
+async def pegar_lineas(
+    partida_id: uuid.UUID,
+    datos: PegarLineasMedicion,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoPegado:
+    """Copia o mueve líneas de medición sueltas a esta partida (Fase 1b/1c)."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    pegadas = await service.pegar_lineas_medicion(
+        session, partida_id, datos.linea_ids, datos.alcance
+    )
+    await session.commit()
+    return ResultadoPegado(pegadas=pegadas)
 
 
 async def _linea_medicion_propia(

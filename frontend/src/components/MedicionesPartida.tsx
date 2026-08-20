@@ -3,11 +3,14 @@ import { FunctionSquare, Plus, Scan, Trash2 } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
 import { FormulasModal } from './FormulasModal'
+import { PegarModal } from './PegarModal'
 import type { ColumnaRejilla } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
-import type { FormulaMedicion, LineaMedicion, Partida, PartidaDetalle } from '../lib/api'
+import type { AlcancePegado, FormulaMedicion, LineaMedicion, Partida, PartidaDetalle } from '../lib/api'
+import { copiarAlPortapapeles, leerPortapapeles } from '../lib/portapapeles'
+import { useToast } from '../toast'
 import { useWorkspace } from '../workspace'
 
 const RETARDO_GUARDADO = 700
@@ -28,12 +31,14 @@ export function MedicionesPartida({
   onLeerPlano?: () => void
 }) {
   const { modules } = useWorkspace()
+  const { notificar } = useToast()
   const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
   const [detalle, setDetalle] = useState<PartidaDetalle | null>(null)
   const [formulas, setFormulas] = useState<FormulaMedicion[]>([])
   const [error, setError] = useState<string | null>(null)
   const [pendiente, setPendiente] = useState(false)
   const [gestionandoFormulas, setGestionandoFormulas] = useState(false)
+  const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
   const cambios = useRef<Map<string, Record<string, string | null>>>(new Map())
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -97,7 +102,18 @@ export function MedicionesPartida({
   async function anadir(formulaId?: string) {
     setError(null)
     try {
-      await api.partidas.addLinea(partida.id, formulaId ? { formula_id: formulaId } : { uds: '1' })
+      // Sin `orden` explícito, el backend la crea con 0 — empataba con
+      // cualquier otra línea ya a 0 y el orden de desempate de la consulta no
+      // garantiza que la nueva quede al final. Va siempre después de la que
+      // más alto tenga.
+      const siguienteOrden =
+        (detalle?.lineas ?? []).reduce((maximo, l) => Math.max(maximo, l.orden), -1) + 1
+      await api.partidas.addLinea(
+        partida.id,
+        formulaId
+          ? { formula_id: formulaId, orden: siguienteOrden }
+          : { uds: '1', orden: siguienteOrden },
+      )
       await cargar()
       onCambio()
     } catch (err) {
@@ -112,6 +128,46 @@ export function MedicionesPartida({
       onCambio()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
+  function copiarLineas(ids: string[]) {
+    if (ids.length === 0) return
+    copiarAlPortapapeles({
+      tipo: 'lineas_medicion',
+      ids,
+      origenEtiqueta: partida.resumen,
+    })
+    notificar(ids.length === 1 ? 'Línea copiada' : `${ids.length} líneas copiadas`)
+  }
+
+  function pegar() {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    if (contenido.tipo !== 'lineas_medicion') {
+      notificar('Lo copiado no se puede pegar aquí')
+      return
+    }
+    setPegando({ ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta })
+  }
+
+  async function confirmarPegado(alcance: AlcancePegado) {
+    if (!pegando) return
+    try {
+      const resultado = await api.partidas.pegarLineas(partida.id, {
+        linea_ids: pegando.ids,
+        alcance,
+      })
+      setPegando(null)
+      await cargar()
+      onCambio()
+      notificar(resultado.pegadas === 1 ? 'Línea pegada' : `${resultado.pegadas} líneas pegadas`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPegando(null)
     }
   }
 
@@ -135,6 +191,9 @@ export function MedicionesPartida({
     {
       id: 'comentario',
       etiqueta: 'Comentario',
+      // Sin ancho fijo, `table-layout: fixed` la aplastaba a lo que
+      // sobrase tras repartir las demás columnas (a veces ~20px).
+      ancho: '200px',
       valor: (l) => l.comentario ?? '',
       editable: () => true,
     },
@@ -267,6 +326,9 @@ export function MedicionesPartida({
         }}
         onNuevaFila={() => anadir()}
         onEliminarFila={(l) => void eliminar(l)}
+        onCopiar={copiarLineas}
+        onPegar={pegar}
+        onSoltarEn={() => pegar()}
         vacia={
           <EmptyState title="Sin líneas de medición">
             Añade una línea, o mide con una fórmula.
@@ -338,6 +400,15 @@ export function MedicionesPartida({
         <FormulasModal
           onClose={() => setGestionandoFormulas(false)}
           onCambio={() => void api.formulasMedicion.list().then(setFormulas)}
+        />
+      )}
+
+      {pegando && (
+        <PegarModal
+          cantidad={pegando.ids.length}
+          origenEtiqueta={pegando.origenEtiqueta}
+          onElegir={(alcance) => void confirmarPegado(alcance)}
+          onClose={() => setPegando(null)}
         />
       )}
     </>

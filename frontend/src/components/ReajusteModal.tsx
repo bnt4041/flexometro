@@ -3,8 +3,17 @@ import { Lock, RefreshCw, Save, X } from 'lucide-react'
 
 import { ErrorNotice, Field, Modal, formatoImporte } from './ui'
 import { api } from '../lib/api'
-import type { Reajuste, TipoReajuste } from '../lib/api'
+import type { MetodoCalculo, Reajuste, TipoReajuste } from '../lib/api'
 import { useToast } from '../toast'
+
+/** Cómo se llama el porcentaje único que fija el reajuste, según el método
+ *  de cálculo del presupuesto (Fase 38): no es un factor de escala ad hoc,
+ *  es el mismo parámetro que se editaría a mano en la cabecera. */
+const ETIQUETA_PORCENTAJE: Record<MetodoCalculo, string> = {
+  clasico: 'Gastos generales + Beneficio industrial',
+  incremento_sobre_coste: 'Incremento sobre el coste',
+  beneficio_final: 'Beneficio final (margen sobre la venta)',
+}
 
 /** Reajuste del presupuesto a un importe o a un margen objetivo (Fase 36).
  *
@@ -61,8 +70,9 @@ export function ReajusteModal({
       <div className="form-section">
         <ErrorNotice error={error} />
         <p className="form-section__note">
-          Las partidas con la venta bloqueada (candado) no se tocan: el resto absorbe la
-          diferencia, repartida en proporción a lo que vale cada una.
+          Sube o baja un único porcentaje fijo del método de cálculo del presupuesto —igual que
+          teclearlo en la cabecera—, y lo aplica por igual a todas las partidas. Las que tengan la
+          venta bloqueada (candado) no se tocan.
         </p>
         <div className="form-grid">
           <Field label="Objetivo">
@@ -135,6 +145,12 @@ export function ReajusteModal({
                   <span />
                 </div>
               )}
+              <div className="resumen-totales__fila is-suave">
+                <span>{ETIQUETA_PORCENTAJE[vista.metodo]} (%)</span>
+                <span className="resumen-totales__valor">
+                  {formatoImporte(vista.porcentaje_anterior)} % → {formatoImporte(vista.porcentaje_nuevo)} %
+                </span>
+              </div>
             </div>
 
             {vista.partidas_bajo_coste > 0 && (

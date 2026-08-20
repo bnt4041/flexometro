@@ -839,10 +839,11 @@ textarea.input {
 
 .modal-pantalla-backdrop {
   position: fixed;
-  inset: 0 0 0 var(--sidebar-w);
+  inset: 0 0 0 var(--sidebar-w-actual);
   background: rgb(15 20 28 / 0.4);
   z-index: 40;
   display: flex;
+  transition: left 180ms ease;
 }
 
 .modal-pantalla {
@@ -990,6 +991,21 @@ textarea.input {
   outline-offset: 1px;
 }
 
+/* Avisos de "esta partida tiene descompuesto/mediciones" delante de la
+ * descripción — informativos, no interactivos, de ahí el color apagado. */
+.rejilla__avisos {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: var(--sp-2);
+  flex: none;
+  vertical-align: middle;
+}
+
+.rejilla__aviso {
+  color: var(--c-text-subtle);
+}
+
 .rejilla-barra__ayuda {
   font-size: var(--fs-xs);
 }
@@ -1025,6 +1041,37 @@ textarea.input {
 
 .rejilla:focus-visible .rejilla__celda.is-activa {
   box-shadow: inset 0 0 0 2px var(--c-accent-strong);
+}
+
+/* Varias filas marcadas para copiar/arrastrar juntas (Fase 1a) — un tinte de
+ * fondo continuo, distinto del anillo de `is-activa` (esa sigue marcando la
+ * única celda con foco de teclado, aunque haya más filas marcadas). */
+.rejilla__fila.is-marcada .rejilla__celda,
+.rejilla__fila.is-marcada .table__actions {
+  background: var(--c-accent-soft);
+}
+
+/* Arrastrar y soltar (Fase 1d). La fila que se coge se atenúa donde estaba
+ * (el navegador ya pinta su propia miniatura siguiendo al cursor); la fila
+ * sobre la que se pasa por encima se marca como destino con un borde
+ * discontinuo, para que quede claro dónde caería al soltar. */
+.rejilla__fila[draggable='true'] {
+  cursor: grab;
+}
+
+.rejilla__fila.is-arrastrando {
+  opacity: 0.4;
+}
+
+.rejilla__fila.is-destino-arrastre .rejilla__celda {
+  box-shadow: inset 0 0 0 2px var(--c-accent-strong);
+}
+
+/* Misma marca de destino cuando se suelta sobre una rejilla todavía vacía
+ * (el contenedor entero hace de fila única, no hay `<tr>` que resaltar). */
+.rejilla.is-destino-arrastre {
+  box-shadow: inset 0 0 0 2px var(--c-accent-strong);
+  border-radius: var(--radius-sm);
 }
 
 .rejilla__editor {
