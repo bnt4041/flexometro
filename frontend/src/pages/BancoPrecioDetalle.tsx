@@ -5,6 +5,7 @@ import { Plus, Save, Star, Trash2, X } from 'lucide-react'
 import { CamposLibres } from '../components/CamposLibres'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
 import {
   Checkbox,
   EmptyState,
@@ -582,6 +583,12 @@ export function BancoPrecioDetalle() {
     { id: 'tarifas', etiqueta: 'Tarifas', icono: 'truck', contenido: pestanaTarifas },
     { id: 'uso', etiqueta: 'Dónde participa', icono: 'buscar', contenido: pestanaUso },
     { id: 'historico', etiqueta: 'Histórico', icono: 'recalcular', contenido: pestanaHistorico },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.conceptos.historial(id)} />,
+    },
   ]
 
   return (

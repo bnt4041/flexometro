@@ -4,14 +4,17 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auditoria import tabla_de
 from app.core.auth import Principal, get_principal
 from app.core.database import get_session
 from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.terceros import service
-from app.modules.terceros.models import EntidadContacto
+from app.modules.terceros.models import EntidadContacto, Tercero
 from app.modules.terceros.schemas import (
     ContactoAsociadoCreate,
     ContactoAsociadoOut,
@@ -89,6 +92,23 @@ async def detalle(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tercero no encontrado")
     verificar_propiedad(alcance, principal, tercero.creado_por_subject)
     return TerceroDetalle.model_validate(tercero)
+
+
+@terceros_router.get("/{tercero_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial(
+    tercero_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    tercero = await service.obtener_tercero_visible(session, tercero_id)
+    if tercero is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tercero no encontrado")
+    verificar_propiedad(alcance, principal, tercero.creado_por_subject)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Tercero), registro_id=tercero_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
 
 
 @terceros_router.patch("/{tercero_id}", response_model=TerceroOut)

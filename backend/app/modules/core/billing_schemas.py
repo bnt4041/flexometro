@@ -24,6 +24,9 @@ class TarifaCreate(BaseModel):
     descripcion: str | None = None
     precio_1000_tokens_deepseek: Decimal = Field(default=Decimal("0.0000"), ge=0)
     precio_1000_tokens_gemini: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    # Créditos IA (Fase 38): ver `app/modules/core/creditos_service.py`.
+    valor_credito_euros: Decimal = Field(default=Decimal("0.001000"), ge=0)
+    creditos_ia_incluidos_mes: int = Field(default=0, ge=0)
     modulos: list[TarifaModuloIn] = Field(default_factory=list)
 
 
@@ -35,6 +38,8 @@ class TarifaUpdate(BaseModel):
     activa: bool | None = None
     precio_1000_tokens_deepseek: Decimal | None = Field(default=None, ge=0)
     precio_1000_tokens_gemini: Decimal | None = Field(default=None, ge=0)
+    valor_credito_euros: Decimal | None = Field(default=None, ge=0)
+    creditos_ia_incluidos_mes: int | None = Field(default=None, ge=0)
     # Si viene, sustituye la lista entera de precios por módulo.
     modulos: list[TarifaModuloIn] | None = None
 
@@ -48,6 +53,8 @@ class TarifaOut(BaseModel):
     activa: bool
     precio_1000_tokens_deepseek: Decimal
     precio_1000_tokens_gemini: Decimal
+    valor_credito_euros: Decimal
+    creditos_ia_incluidos_mes: int
     created_at: datetime
 
 

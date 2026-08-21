@@ -42,6 +42,12 @@ export const es = {
   ajustes: {
     titulo: 'Ajustes',
     descripcion: 'Configuración de la organización: módulos, y los ajustes propios de cada uno.',
+    creditosIA: {
+      titulo: 'Créditos IA',
+      descripcion: 'Este mes has usado {{consumidos}} de {{incluidos}} créditos incluidos.',
+      sobrepasado:
+        'Has superado los créditos incluidos este mes — las funciones de IA siguen disponibles, pero puede haber cargo adicional según tu plan.',
+    },
     modulos: {
       titulo: 'Módulos',
       descripcionHub: 'Activa o desactiva los módulos de la organización.',

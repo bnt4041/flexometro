@@ -17,6 +17,7 @@ import { ContactosAsociados } from '../components/ContactosAsociados'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_CERTIFICACION, ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
@@ -355,6 +356,12 @@ export function ObraDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="obra" entidadId={id} />,
+    },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.obras.historial(id)} />,
     },
   ]
 

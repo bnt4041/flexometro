@@ -84,6 +84,17 @@ class Tarifa(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Numeric(10, 4), nullable=False, default=Decimal("0.0000")
     )
 
+    # "Créditos IA" (Fase 38): unidad propia para que el usuario final no
+    # tenga que pensar en tokens de DeepSeek/Gemini por separado (precios muy
+    # distintos entre sí). 1 crédito vale siempre esto en euros, calculado a
+    # partir del coste real de cada proveedor — ver
+    # `app/modules/core/creditos_service.py`. `0` en `valor_credito_euros`
+    # significa "no calcular créditos" (evita división por cero).
+    valor_credito_euros: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0.001000")
+    )
+    creditos_ia_incluidos_mes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     modulos: Mapped[list["TarifaModulo"]] = relationship(
         back_populates="tarifa", cascade="all, delete-orphan", order_by="TarifaModulo.module_code"
     )

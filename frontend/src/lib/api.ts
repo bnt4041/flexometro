@@ -187,11 +187,21 @@ export interface Tarifa {
   activa: boolean
   precio_1000_tokens_deepseek: string
   precio_1000_tokens_gemini: string
+  // Créditos IA (Fase 38): unidad propia para el usuario final, ver
+  // `api.creditosIA`.
+  valor_credito_euros: string
+  creditos_ia_incluidos_mes: number
   created_at: string
 }
 
 export interface TarifaDetalle extends Tarifa {
   modulos: TarifaModulo[]
+}
+
+export interface CreditosIA {
+  consumidos: number
+  incluidos: number
+  sin_tarifa: boolean
 }
 
 export type TipoDescuento = 'porcentaje' | 'importe_fijo'
@@ -472,6 +482,29 @@ export interface ContactoAsociado {
 
 // --- CRM / notas (Fase 29) ---
 //
+// --- Historial de cambios (Fase 38) ---
+//
+// Cada endpoint vive bajo su propio router (`/api/<recurso>/{id}/historial`),
+// no uno genérico: así el permiso que se comprueba es siempre el mismo que
+// ya protege la ficha (incluido "solo lo mío"), sin duplicar esa lógica aquí.
+
+export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado'
+
+export interface CambioCampo {
+  campo: string
+  antes: unknown
+  despues: unknown
+}
+
+export interface RegistroAuditoria {
+  id: string
+  accion: AccionAuditoria
+  cambios: CambioCampo[] | null
+  usuario_subject: string | null
+  usuario_nombre: string | null
+  created_at: string
+}
+
 // Cuaderno de bitácora del equipo sobre un objeto grande del negocio —
 // mismo alcance de entidades que `EntidadContacto`, más 'tercero'.
 
@@ -1374,6 +1407,12 @@ export const api = {
   modules: () => request<Module[]>('/api/modules'),
   setModuleActive: (code: string, active: boolean) =>
     post<string[]>(`/api/modules/${code}/${active ? 'activate' : 'deactivate'}`, {}),
+  /** Créditos IA (Fase 38): consumo del mes en curso de la cuenta del
+   *  usuario, en la unidad propia que sustituye a hablar de tokens de
+   *  DeepSeek/Gemini por separado — ver `CreditosIA`. */
+  creditosIA: {
+    get: () => request<CreditosIA>('/api/creditos-ia'),
+  },
   exportarPdf: (datos: { titulo: string; columnas: string[]; filas: string[][] }) =>
     pedirBlob('/api/exportar/pdf', datos),
 
@@ -1678,6 +1717,8 @@ export const api = {
         descripcion?: string | null
         precio_1000_tokens_deepseek?: string
         precio_1000_tokens_gemini?: string
+        valor_credito_euros?: string
+        creditos_ia_incluidos_mes?: number
         modulos: TarifaModulo[]
       }) => post<TarifaDetalle>('/api/admin/tarifas', datos),
       update: (
@@ -1688,6 +1729,8 @@ export const api = {
           activa?: boolean
           precio_1000_tokens_deepseek?: string
           precio_1000_tokens_gemini?: string
+          valor_credito_euros?: string
+          creditos_ia_incluidos_mes?: number
           modulos?: TarifaModulo[]
         },
       ) => patch<TarifaDetalle>(`/api/admin/tarifas/${id}`, datos),
@@ -1822,6 +1865,7 @@ export const api = {
     update: (id: string, datos: Partial<Tercero>) =>
       patch<Tercero>(`/api/terceros/${id}`, datos),
     remove: (id: string) => del(`/api/terceros/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/terceros/${id}/historial`),
   },
 
   contactos: {
@@ -1890,6 +1934,7 @@ export const api = {
     update: (id: string, datos: Partial<Concepto>) =>
       patch<ConceptoDetalle>(`/api/conceptos/${id}`, datos),
     remove: (id: string) => del(`/api/conceptos/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/conceptos/${id}/historial`),
     addLinea: (id: string, datos: { hijo_id: string; rendimiento: string; factor?: string }) =>
       post<Linea>(`/api/conceptos/${id}/lineas`, datos),
     addSuministro: (conceptoId: string, datos: Partial<PrecioSuministro>) =>
@@ -1941,6 +1986,7 @@ export const api = {
     update: (id: string, datos: Partial<Presupuesto>) =>
       patch<Presupuesto>(`/api/presupuestos/${id}`, datos),
     remove: (id: string) => del(`/api/presupuestos/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/presupuestos/${id}/historial`),
     addCapitulo: (
       id: string,
       datos: { resumen: string; parent_id?: string | null; orden?: number },
@@ -2127,6 +2173,7 @@ export const api = {
       post<Obra>('/api/obras', datos),
     update: (id: string, datos: Partial<Obra>) => patch<Obra>(`/api/obras/${id}`, datos),
     remove: (id: string) => del(`/api/obras/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/obras/${id}/historial`),
     asignaciones: (id: string) =>
       request<AsignacionDetalle[]>(`/api/obras/${id}/asignaciones`),
     addAsignacion: (
@@ -2199,6 +2246,8 @@ export const api = {
     update: (id: string, datos: { fecha?: string; retencion_garantia_pct?: string; notas?: string | null }) =>
       patch<CertificacionDetalle>(`/api/certificaciones/${id}`, datos),
     remove: (id: string) => del(`/api/certificaciones/${id}`),
+    historial: (id: string) =>
+      request<RegistroAuditoria[]>(`/api/certificaciones/${id}/historial`),
     emitir: (id: string) => post<CertificacionDetalle>(`/api/certificaciones/${id}/emitir`, {}),
     generarFactura: (id: string, datos: { concepto?: string; serie?: string; fecha_vencimiento?: string | null }) =>
       post<Factura>(`/api/certificaciones/${id}/factura`, datos),
@@ -2222,6 +2271,7 @@ export const api = {
     update: (id: string, datos: { concepto?: string; fecha_vencimiento?: string | null; notas?: string | null }) =>
       patch<Factura>(`/api/facturas/${id}`, datos),
     remove: (id: string) => del(`/api/facturas/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/facturas/${id}/historial`),
     emitir: (id: string) => post<Factura>(`/api/facturas/${id}/emitir`, {}),
     anular: (id: string, motivo: string) => post<Factura>(`/api/facturas/${id}/anular`, { motivo }),
     notificar: (id: string) => post<Factura>(`/api/facturas/${id}/notificar`, {}),

@@ -3,14 +3,17 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auditoria import tabla_de
 from app.core.auth import Principal, get_principal
 from app.core.database import get_session
 from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.presupuestos import calculo, service
-from app.modules.presupuestos.models import TipoConcepto
+from app.modules.presupuestos.models import Concepto, TipoConcepto
 from app.modules.presupuestos.schemas import (
     ConceptoCreate,
     ConceptoDetalle,
@@ -113,6 +116,23 @@ async def detalle(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
     verificar_propiedad(alcance, principal, concepto.creado_por_subject)
     return _detalle(concepto)
+
+
+@conceptos_router.get("/{concepto_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial(
+    concepto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    concepto = await service.obtener_concepto_visible(session, concepto_id)
+    if concepto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
+    verificar_propiedad(alcance, principal, concepto.creado_por_subject)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Concepto), registro_id=concepto_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
 
 
 @conceptos_router.patch("/{concepto_id}", response_model=ConceptoDetalle)

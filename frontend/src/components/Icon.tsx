@@ -13,6 +13,7 @@ import {
   FilePlus,
   FileText,
   HardHat,
+  History,
   MessageSquareText,
   Layers,
   ListPlus,
@@ -94,6 +95,7 @@ const ICONOS: Record<string, LucideIcon> = {
   contactos: Users,
   crm: MessageSquareText,
   documentos: FilePlus,
+  historial: History,
 }
 
 export type NombreIcono = keyof typeof ICONOS | (string & {})

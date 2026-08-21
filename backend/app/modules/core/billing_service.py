@@ -92,6 +92,8 @@ async def crear_tarifa(session: AsyncSession, datos: TarifaCreate) -> Tarifa:
         descripcion=datos.descripcion,
         precio_1000_tokens_deepseek=datos.precio_1000_tokens_deepseek,
         precio_1000_tokens_gemini=datos.precio_1000_tokens_gemini,
+        valor_credito_euros=datos.valor_credito_euros,
+        creditos_ia_incluidos_mes=datos.creditos_ia_incluidos_mes,
     )
     session.add(tarifa)
     await session.flush()

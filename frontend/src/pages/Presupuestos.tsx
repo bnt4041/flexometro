@@ -3,10 +3,11 @@ import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
+import { CrearTerceroModal } from '../components/CrearTerceroModal'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
-import { ETIQUETA_ESTADO, api } from '../lib/api'
-import type { PresupuestoResumen, Tercero } from '../lib/api'
+import { ETIQUETA_METODO, ETIQUETA_ESTADO, api } from '../lib/api'
+import type { MetodoCalculo, PresupuestoResumen, Tercero } from '../lib/api'
 
 // El listado ya no pagina en el servidor: el `DataTable` pagina, ordena y
 // filtra en el navegador sobre este lote — 500 es el máximo que admite el
@@ -304,9 +305,12 @@ export function PresupuestoCrear() {
   const [emplazamiento, setEmplazamiento] = useState('')
   const [clienteId, setClienteId] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
+  const [metodo, setMetodo] = useState<MetodoCalculo>('clasico')
   const [gg, setGg] = useState('13.00')
   const [bi, setBi] = useState('6.00')
+  const [porcentajeMetodo, setPorcentajeMetodo] = useState('0.00')
   const [clientes, setClientes] = useState<Tercero[]>([])
+  const [creandoCliente, setCreandoCliente] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
@@ -330,8 +334,10 @@ export function PresupuestoCrear() {
         emplazamiento: emplazamiento || null,
         cliente_id: clienteId || null,
         fecha,
+        metodo_calculo: metodo,
         gastos_generales: gg,
         beneficio_industrial: bi,
+        porcentaje_metodo: porcentajeMetodo,
       })
       onCambio()
       cerrar()
@@ -364,18 +370,30 @@ export function PresupuestoCrear() {
               />
             </Field>
             <Field label="Cliente">
-              <select
-                className="select"
-                value={clienteId}
-                onChange={(e) => setClienteId(e.target.value)}
-              >
-                <option value="">Sin asignar</option>
-                {clientes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.razon_social}
-                  </option>
-                ))}
-              </select>
+              <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+                <select
+                  className="select"
+                  style={{ flex: 1 }}
+                  value={clienteId}
+                  onChange={(e) => setClienteId(e.target.value)}
+                >
+                  <option value="">Sin asignar</option>
+                  {clientes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.razon_social}
+                    </option>
+                  ))}
+                </select>
+                <Tooltip texto="Crear un cliente nuevo">
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--solo-icono"
+                    onClick={() => setCreandoCliente(true)}
+                  >
+                    <Plus size={16} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              </div>
             </Field>
             <Field label="Fecha">
               <input
@@ -385,24 +403,57 @@ export function PresupuestoCrear() {
                 onChange={(e) => setFecha(e.target.value)}
               />
             </Field>
-            <Field label="Gastos generales (%)" hint="13 % por defecto (RD 1098/2001)">
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                value={gg}
-                onChange={(e) => setGg(e.target.value)}
-              />
+            <Field label="Método de cálculo">
+              <select
+                className="select"
+                value={metodo}
+                onChange={(e) => setMetodo(e.target.value as MetodoCalculo)}
+              >
+                {Object.entries(ETIQUETA_METODO).map(([clave, etiqueta]) => (
+                  <option key={clave} value={clave}>
+                    {etiqueta}
+                  </option>
+                ))}
+              </select>
             </Field>
-            <Field label="Beneficio industrial (%)" hint="6 % por defecto">
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                value={bi}
-                onChange={(e) => setBi(e.target.value)}
-              />
-            </Field>
+            {metodo === 'clasico' ? (
+              <>
+                <Field label="Gastos generales (%)" hint="13 % por defecto (RD 1098/2001)">
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={gg}
+                    onChange={(e) => setGg(e.target.value)}
+                  />
+                </Field>
+                <Field label="Beneficio industrial (%)" hint="6 % por defecto">
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={bi}
+                    onChange={(e) => setBi(e.target.value)}
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field
+                label={
+                  metodo === 'incremento_sobre_coste'
+                    ? 'Incremento sobre el coste (%)'
+                    : 'Beneficio final sobre la venta (%)'
+                }
+              >
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={porcentajeMetodo}
+                  onChange={(e) => setPorcentajeMetodo(e.target.value)}
+                />
+              </Field>
+            )}
           </div>
         </div>
         <div className="form-actions">
@@ -418,6 +469,17 @@ export function PresupuestoCrear() {
           </button>
         </div>
       </div>
+      {creandoCliente && (
+        <CrearTerceroModal
+          rolPorDefecto="cliente"
+          onClose={() => setCreandoCliente(false)}
+          onCreado={(tercero) => {
+            setClientes((prev) => [...prev, tercero])
+            setClienteId(tercero.id)
+            setCreandoCliente(false)
+          }}
+        />
+      )}
     </ModalPantalla>
   )
 }

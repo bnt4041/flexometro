@@ -326,6 +326,21 @@ button {
   color: var(--c-accent);
 }
 
+.badge--success {
+  background: var(--c-success-soft);
+  color: var(--c-success);
+}
+
+.badge--info {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.badge--danger {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -2153,6 +2168,57 @@ kbd {
 .timeline__cuerpo {
   white-space: pre-wrap;
   padding-right: var(--sp-6);
+}
+
+.creditos-ia__barra {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.creditos-ia__relleno {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--c-accent-strong);
+  transition: width 200ms ease;
+}
+
+.creditos-ia__relleno--exceso {
+  background: var(--c-danger);
+}
+
+.historial__cambios {
+  margin-top: var(--sp-2);
+}
+
+.historial__cambios td {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: none;
+  font-size: var(--fs-sm);
+}
+
+.historial__campo {
+  color: var(--c-text-muted);
+  white-space: nowrap;
+  padding-right: var(--sp-4) !important;
+}
+
+.historial__antes {
+  color: var(--c-danger);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-danger);
+  opacity: 0.75;
+}
+
+.historial__flecha {
+  color: var(--c-text-subtle);
+  padding-inline: var(--sp-2) !important;
+}
+
+.historial__despues {
+  color: var(--c-success);
+  font-weight: 500;
 }
 
 .timeline__eliminar {

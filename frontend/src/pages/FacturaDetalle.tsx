@@ -6,6 +6,7 @@ import { ContactosAsociados } from '../components/ContactosAsociados'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
@@ -264,6 +265,12 @@ export function FacturaDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="factura" entidadId={id} />,
+    },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.facturas.historial(id)} />,
     },
   ]
 

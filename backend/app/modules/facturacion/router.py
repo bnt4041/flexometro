@@ -3,14 +3,17 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auditoria import tabla_de
 from app.core.auth import Principal, get_principal
 from app.core.database import get_session
 from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.facturacion import informes, service, ventas_concepto, webhook
-from app.modules.facturacion.models import EstadoFactura
+from app.modules.facturacion.models import Certificacion, EstadoFactura, Factura
 from app.modules.facturacion.schemas import (
     AnularFactura,
     CertificacionCreate,
@@ -126,6 +129,22 @@ async def detalle_certificacion(
 ) -> CertificacionDetalle:
     certificacion = await _certificacion_propia(session, certificacion_id, alcance, principal)
     return await _detalle_certificacion(session, certificacion)
+
+
+@certificaciones_router.get(
+    "/{certificacion_id}/historial", response_model=list[RegistroAuditoriaOut]
+)
+async def historial_certificacion(
+    certificacion_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("facturacion", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    await _certificacion_propia(session, certificacion_id, alcance, principal)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Certificacion), registro_id=certificacion_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
 
 
 @certificaciones_router.patch("/{certificacion_id}", response_model=CertificacionDetalle)
@@ -287,6 +306,20 @@ async def detalle_factura(
         **resumen.model_dump(),
         cobros=[CobroOut.model_validate(c) for c in factura.cobros],
     )
+
+
+@facturas_router.get("/{factura_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial_factura(
+    factura_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("facturacion", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    await _factura_propia(session, factura_id, alcance, principal)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Factura), registro_id=factura_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
 
 
 @facturas_router.patch("/{factura_id}", response_model=FacturaOut)

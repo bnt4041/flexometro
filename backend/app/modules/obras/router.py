@@ -4,14 +4,17 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auditoria import tabla_de
 from app.core.auth import Principal, get_principal
 from app.core.database import get_session
 from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.obras import service
-from app.modules.obras.models import Asignacion, EstadoObra
+from app.modules.obras.models import Asignacion, EstadoObra, Obra
 from app.modules.obras.schemas import (
     AsignacionCreate,
     AsignacionDetalle,
@@ -212,6 +215,24 @@ async def detalle(
             AsignacionOut.model_validate(a["asignacion"]) for a in asignaciones
         ],
     )
+
+
+@obras_router.get("/{obra_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial(
+    obra_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("obras", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    resultado = await service.obtener_obra_con_presupuesto(session, obra_id)
+    if resultado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada")
+    obra, _pres_codigo, _pres_nombre = resultado
+    verificar_propiedad(alcance, principal, obra.creado_por_subject)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Obra), registro_id=obra_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
 
 
 async def _obra_propia(

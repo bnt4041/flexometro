@@ -11,6 +11,7 @@ from app.core.modules import registry
 from app.modules.core import (
     ajustes_router,
     billing_router,
+    creditos_router,
     cuenta_router,
     diccionario_router,
     moneda_router,
@@ -257,3 +258,4 @@ router.include_router(traduccion_router.router)
 router.include_router(traduccion_router.tenant_router)
 router.include_router(moneda_router.router)
 router.include_router(moneda_router.tenant_router)
+router.include_router(creditos_router.router)

@@ -45,6 +45,9 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             raise
 
 
+from app.core import auditoria  # noqa: E402,F401  registra el listener de historial de cambios
+
+
 async def fijar_organizacion_activa(session: AsyncSession, organization_id: uuid.UUID) -> None:
     """Cambia qué organización ve esta sesión para el resto de la transacción.
 

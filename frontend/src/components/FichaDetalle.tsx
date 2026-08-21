@@ -21,9 +21,10 @@ export interface PestanaFicha {
  *  Convención de pestañas (se va rellenando fase a fase, no todas existen
  *  todavía en cada ficha): la primera es siempre el contenido propio de la
  *  entidad; "Contactos" es la segunda cuando la entidad los tiene
- *  (Fase 27/28); "CRM" y "Documentos" son las últimas dos cuando existan
- *  (Fase 29/30) — de ahí que este componente no las imponga, solo las ordene
- *  si la pantalla que lo usa las incluye en `pestanas`.
+ *  (Fase 27/28); "CRM" y "Documentos" van después cuando existan
+ *  (Fase 29/30); "Historial" (Fase 38) es siempre la última — de ahí que
+ *  este componente no las imponga, solo las ordene si la pantalla que lo usa
+ *  las incluye en `pestanas`.
  *
  *  Reemplaza a `ModalPantalla` para estas pantallas (mismo look de modal a
  *  pantalla completa, misma tecla Escape para cerrar) — `ModalPantalla` sigue

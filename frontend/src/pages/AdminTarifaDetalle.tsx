@@ -17,6 +17,8 @@ export function AdminTarifaDetalle() {
   const [descripcion, setDescripcion] = useState('')
   const [precioDeepseek, setPrecioDeepseek] = useState('0.0000')
   const [precioGemini, setPrecioGemini] = useState('0.0000')
+  const [valorCredito, setValorCredito] = useState('0.001000')
+  const [creditosIncluidos, setCreditosIncluidos] = useState('0')
   const [activa, setActiva] = useState(true)
   const [filasModulos, setFilasModulos] = useState<TarifaModulo[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -30,6 +32,8 @@ export function AdminTarifaDetalle() {
       setDescripcion(datos.descripcion ?? '')
       setPrecioDeepseek(datos.precio_1000_tokens_deepseek)
       setPrecioGemini(datos.precio_1000_tokens_gemini)
+      setValorCredito(datos.valor_credito_euros)
+      setCreditosIncluidos(String(datos.creditos_ia_incluidos_mes))
       setActiva(datos.activa)
       setFilasModulos(datos.modulos)
       setError(null)
@@ -69,6 +73,8 @@ export function AdminTarifaDetalle() {
         activa,
         precio_1000_tokens_deepseek: precioDeepseek,
         precio_1000_tokens_gemini: precioGemini,
+        valor_credito_euros: valorCredito,
+        creditos_ia_incluidos_mes: Number(creditosIncluidos) || 0,
         modulos: filasModulos,
       })
       await cargar()
@@ -108,6 +114,22 @@ export function AdminTarifaDetalle() {
                 className="input"
                 value={precioGemini}
                 onChange={(e) => setPrecioGemini(e.target.value)}
+              />
+            </Field>
+            <Field label="€ por crédito IA" hint="Unidad propia que ve el usuario final en vez de tokens">
+              <input
+                className="input"
+                value={valorCredito}
+                onChange={(e) => setValorCredito(e.target.value)}
+              />
+            </Field>
+            <Field label="Créditos IA incluidos al mes">
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={creditosIncluidos}
+                onChange={(e) => setCreditosIncluidos(e.target.value)}
               />
             </Field>
             <Field label="Estado">

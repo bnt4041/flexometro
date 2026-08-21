@@ -20,6 +20,7 @@ import { DescripcionEditor } from '../components/DescripcionEditor'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import type { FilaPresupuesto } from '../components/RejillaPresupuesto'
 import { ID_RAIZ } from '../components/RejillaPresupuesto'
@@ -629,6 +630,12 @@ export function PresupuestoDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="presupuesto" entidadId={id} />,
+    },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.presupuestos.historial(id)} />,
     },
   ]
 

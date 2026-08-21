@@ -47,6 +47,7 @@ def import_models() -> None:
     from app.modules.compras import models as _compras_models  # noqa: F401
     from app.modules.crm import models as _crm_models  # noqa: F401
     from app.modules.documentos import models as _documentos_models  # noqa: F401
+    from app.modules.core import auditoria_models as _core_auditoria_models  # noqa: F401
     from app.modules.core import billing_models as _core_billing_models  # noqa: F401
     from app.modules.core import diccionario_models as _core_diccionario_models  # noqa: F401
     from app.modules.core import models as _core_models  # noqa: F401

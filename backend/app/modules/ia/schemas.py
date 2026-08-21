@@ -183,7 +183,13 @@ class ContextoAyudaLinea(BaseModel):
 
 class MensajeConversacionIn(BaseModel):
     rol: Literal["user", "assistant"]
-    contenido: str = Field(min_length=1, max_length=2000)
+    # No hay estado en el servidor (ver `ConversarAyudaLinea`/`documento.py`):
+    # cada turno reenvía toda la conversación, incluidas las respuestas
+    # anteriores de la IA — y un presupuesto detallado en markdown supera de
+    # sobra 2000 caracteres. Sin límite de tokens de salida en Gemini/DeepSeek
+    # (ver `gemini.py`/`deepseek.py`), así que el tope se queda generoso, no
+    # ajustado a un caso típico.
+    contenido: str = Field(min_length=1, max_length=20000)
 
 
 class ConversarAyudaLinea(BaseModel):

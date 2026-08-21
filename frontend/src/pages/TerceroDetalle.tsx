@@ -6,6 +6,7 @@ import { CamposLibres } from '../components/CamposLibres'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, EmptyState, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
@@ -403,6 +404,12 @@ export function TerceroDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="tercero" entidadId={id} />,
+    },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.terceros.historial(id)} />,
     },
   ]
 

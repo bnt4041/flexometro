@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Settings } from 'lucide-react'
 
+import { CreditosIA } from '../components/CreditosIA'
 import { useWorkspace } from '../workspace'
 
 /** Vestíbulo de Ajustes (Fase 17): desde aquí se llega a la activación de
@@ -22,6 +23,8 @@ export function Ajustes() {
     <>
       <h1 className="page-title">{t('ajustes.titulo')}</h1>
       <p className="page-lead">{t('ajustes.descripcion')}</p>
+
+      <CreditosIA />
 
       <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
         <div className="module-row">
