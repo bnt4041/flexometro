@@ -21,7 +21,7 @@ from app.core.rls import activar_rls, conceder_privilegios_app, desactivar_rls, 
 revision: str = 'campos_libres_0001'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = ('campos_libres',)
-depends_on: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = ('8fc5b0cfbcbf',)  # core: crea core.cuenta
 
 
 def upgrade() -> None:

@@ -23,7 +23,7 @@ from alembic import op
 revision: str = "presupuestos_0009"
 down_revision: str | None = "presupuestos_0008"
 branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = ("8fc5b0cfbcbf",)  # core: crea core.cuenta
 
 # (nombre, expresión, descripción)
 FORMULAS: list[tuple[str, str, str]] = [

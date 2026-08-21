@@ -18,7 +18,7 @@ from app.core.rls import activar_rls, conceder_privilegios_app, desactivar_rls, 
 revision: str = "ia_0001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = ("ia",)
-depends_on: str | Sequence[str] | None = ("presupuestos",)
+depends_on: str | Sequence[str] | None = ("presupuestos", "core_0003")
 
 
 def upgrade() -> None:

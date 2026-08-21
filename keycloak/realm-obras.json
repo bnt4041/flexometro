@@ -51,16 +51,14 @@
       "directAccessGrantsEnabled": false,
       "implicitFlowEnabled": false,
       "redirectUris": [
-        "http://localhost:5173/*",
-        "http://obras.localhost/*"
+        "https://flexometro.online/*"
       ],
       "webOrigins": [
-        "http://localhost:5173",
-        "http://obras.localhost"
+        "https://flexometro.online"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/*##http://obras.localhost/*"
+        "post.logout.redirect.uris": "https://flexometro.online/*"
       },
       "protocolMappers": [
         {
@@ -94,19 +92,16 @@
   ],
   "users": [
     {
-      "username": "dev",
+      "username": "admin",
       "enabled": true,
       "emailVerified": true,
-      "firstName": "Desarrollo",
-      "lastName": "Obras",
-      "email": "dev@obras.local",
-      "attributes": {
-        "organizacion": ["demo"]
-      },
+      "firstName": "Admin",
+      "lastName": "Flexometro",
+      "email": "beni4041@gmail.com",
       "credentials": [
-        { "type": "password", "value": "dev", "temporary": false }
+        { "type": "password", "value": "kok6spzCxfjv14wcVO28Lf", "temporary": true }
       ],
-      "realmRoles": ["admin", "usuario", "superadmin"]
+      "realmRoles": ["superadmin"]
     }
   ]
 }

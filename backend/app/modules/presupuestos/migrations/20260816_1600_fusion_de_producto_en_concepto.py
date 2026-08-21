@@ -42,7 +42,7 @@ from app.core.rls import activar_rls, conceder_privilegios_app, desactivar_rls
 revision: str = "presupuestos_0005"
 down_revision: str | None = "presupuestos_0004"
 branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = ("catalogo_0002",)
+depends_on: str | Sequence[str] | None = ("catalogo_0002", "compras", "63821d58ff8a")
 
 _DOS_DECIMALES = Decimal("0.01")
 _CUATRO_DECIMALES = Decimal("0.0001")

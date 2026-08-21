@@ -3,12 +3,13 @@ name: obras
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,6 +21,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.3
+    restart: unless-stopped
     # start-dev usa H2 embebida: vale para desarrollo, no para producción.
     # --import-realm crea el realm al arrancar si no existe, así que el stack
     # sale usable sin configurar nada a mano.
@@ -29,38 +31,54 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HTTP_PORT: 8080
       KC_HEALTH_ENABLED: "true"
+      # Se sirve bajo /auth del mismo dominio (ver labels de Traefik más abajo);
+      # KEYCLOAK_PUBLIC_URL/KEYCLOAK_SERVER_URL en .env deben llevar el mismo sufijo.
+      KC_HTTP_RELATIVE_PATH: /auth
+      # Sin esto Keycloak no sabe que Traefik termina TLS por delante y firma
+      # los tokens con emisor http:// en vez de https:// — la API los rechaza
+      # como "emisor no reconocido" porque no coincide con KEYCLOAK_PUBLIC_URL.
+      KC_PROXY_HEADERS: xforwarded
     volumes:
       - ./keycloak/realm-obras.json:/opt/keycloak/data/import/realm-obras.json:ro
       # Tema de login con la marca de Flexómetro. start-dev no cachea temas, así
       # que un reinicio del contenedor basta para recoger cambios aquí.
       - ./keycloak/themes/obrai:/opt/keycloak/themes/obrai
     ports:
-      - "${KEYCLOAK_PORT:-8081}:8080"
+      - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
     healthcheck:
       # La imagen no trae curl ni wget; se usa el cliente HTTP de la JVM.
       test:
         [
           "CMD-SHELL",
-          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'",
         ]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 40s
-    networks: [obras]
+    networks: [obras, traefik_proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
+      - "traefik.http.routers.obras-keycloak.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`) && PathPrefix(`/auth`)"
+      - "traefik.http.routers.obras-keycloak.entrypoints=websecure"
+      - "traefik.http.routers.obras-keycloak.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.obras-keycloak.service=obras-keycloak"
+      - "traefik.http.services.obras-keycloak.loadbalancer.server.port=8080"
 
   # Almacén de objetos compatible con S3 para el gestor documental (Fase 30).
   # Self-hosted, como el resto del stack — mismo criterio que DeepSeek/Gemini
   # para IA: un proveedor fijo, no una abstracción multi-nube.
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-obras}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -113,6 +131,7 @@ services:
   api:
     build:
       context: ./backend
+    restart: unless-stopped
     environment:
       <<: *db_common
       # Rol de mínimo privilegio: sin SUPERUSER, sin BYPASSRLS. Es lo que hace
@@ -138,8 +157,11 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-obras}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET:-documentos}
+      # URL pública para enlaces en correos (bienvenida...); sin esto cae al
+      # default http://localhost:5173 aunque .env la tenga puesta.
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     volumes:
       # Bind mount para que --reload vea los cambios sin reconstruir la imagen.
       - ./backend:/app
@@ -160,13 +182,17 @@ services:
       start_period: 15s
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
       - "traefik.http.routers.obras-api.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.obras-api.entrypoints=websecure"
+      - "traefik.http.routers.obras-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.obras-api.loadbalancer.server.port=8000"
-    networks: [obras]
+    networks: [obras, traefik_proxy]
 
   web:
     build:
       context: ./frontend
+    restart: unless-stopped
     environment:
       # El navegador habla con Keycloak directamente, así que necesita la URL
       # pública, no la de la red interna de Docker.
@@ -175,7 +201,7 @@ services:
       VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-obras-web}
       VITE_AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
     ports:
-      - "${WEB_PORT:-5173}:5173"
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
       # Volumen anónimo: evita que el bind mount tape el node_modules
@@ -186,9 +212,12 @@ services:
         condition: service_started
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
       - "traefik.http.routers.obras-web.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`)"
+      - "traefik.http.routers.obras-web.entrypoints=websecure"
+      - "traefik.http.routers.obras-web.tls.certresolver=letsencrypt"
       - "traefik.http.services.obras-web.loadbalancer.server.port=5173"
-    networks: [obras]
+    networks: [obras, traefik_proxy]
 
   # Perfil "proxy": en desarrollo se accede por los puertos publicados, pero el
   # enrutado de producción ya está descrito y se puede probar en local con
@@ -215,3 +244,6 @@ volumes:
 networks:
   obras:
     driver: bridge
+  traefik_proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik_proxy}

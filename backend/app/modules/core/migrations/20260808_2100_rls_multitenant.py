@@ -25,7 +25,10 @@ revision: str = "core_0002"
 down_revision: str | None = "core_0001"
 branch_labels: str | Sequence[str] | None = None
 # Las tablas viven en las otras ramas, así que esta migración va después.
-depends_on: str | Sequence[str] | None = ("terceros", "catalogo", "presupuestos")
+# "presupuestos" (la etiqueta) resuelve solo a presupuestos_0001 (concepto/
+# descomposicion) — presupuesto/capitulo/partida/linea_medicion se crean en
+# 6147a90e5552, así que hace falta apuntar ahí explícitamente.
+depends_on: str | Sequence[str] | None = ("terceros", "catalogo", "6147a90e5552")
 
 TABLAS = [
     ("core", "organization_module"),

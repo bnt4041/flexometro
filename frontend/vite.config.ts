@@ -6,6 +6,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Traefik reenvía con Host: flexometro.online; sin esto Vite responde
+    // "Blocked request" (protección anti DNS-rebinding añadida en Vite 6).
+    allowedHosts: ['flexometro.online'],
     // Los bind mounts de Docker Desktop en Windows no propagan eventos inotify;
     // sin polling el hot reload no se entera de los cambios.
     watch: { usePolling: true, interval: 300 },

@@ -24,7 +24,7 @@ from alembic import op
 revision: str = 'cc3da38b179b'
 down_revision: str | None = '63821d58ff8a'
 branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = ("compras", "facturacion")
 
 
 def upgrade() -> None:

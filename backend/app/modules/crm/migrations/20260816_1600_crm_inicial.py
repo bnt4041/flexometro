@@ -19,7 +19,7 @@ from app.core.rls import activar_rls, conceder_privilegios_app, desactivar_rls, 
 revision: str = "crm_0001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = ("crm",)
-depends_on: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = ("core_0003",)
 
 
 def upgrade() -> None:
