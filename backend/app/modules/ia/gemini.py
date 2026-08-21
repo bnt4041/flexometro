@@ -141,7 +141,7 @@ MIME_EXCEL = {
 MAX_FILAS_EXCEL = 500
 
 
-def _tabla_de_excel(contenido: bytes) -> str:
+def tabla_de_excel(contenido: bytes) -> str:
     """Cada hoja como texto delimitado por '|' — Gemini lee esto perfectamente
     bien como texto, y evita depender de que sepa parsear el binario del
     fichero (no lo sabe: sólo imagen/PDF llegan como `inline_data`)."""
@@ -165,16 +165,18 @@ def _tabla_de_excel(contenido: bytes) -> str:
 def _prompt_documento(permite_importar: bool) -> str:
     base = (
         "Eres un asistente de gestión documental de una constructora en España. "
-        "Te mandan un documento (imagen, PDF o la tabla de texto de un Excel) "
-        "sin más contexto que esta conversación. En tu PRIMERA respuesta, "
-        "identifica brevemente qué tipo de documento es (por ejemplo: plano "
-        "acotado, presupuesto de proveedor, factura, albarán, ficha técnica, "
-        "foto de obra, contrato, u otro) y qué contiene, en dos o tres frases, "
-        "y termina preguntando qué quiere que hagas con él (leer una medida "
-        "concreta, resumir un importe, comparar algo con el propio "
-        "presupuesto...). A partir de ahí, responde a lo que se te pida sobre "
-        "el documento: qué dice, qué datos trae, resúmenes, lo que haga falta. "
-        "Responde en español, breve y directo."
+        "Te mandan uno o varios documentos (imagen, PDF o la tabla de texto de "
+        "un Excel) sin más contexto que esta conversación — puede que se vayan "
+        "añadiendo más documentos a lo largo de la charla, no solo al "
+        "principio. En tu PRIMERA respuesta, identifica brevemente qué tipo de "
+        "documento(s) es cada uno (por ejemplo: plano acotado, presupuesto de "
+        "proveedor, factura, albarán, ficha técnica, foto de obra, contrato, u "
+        "otro) y qué contiene cada uno, en dos o tres frases, y termina "
+        "preguntando qué quiere que hagas con ellos (leer una medida concreta, "
+        "resumir un importe, comparar algo con el propio presupuesto, "
+        "comparar los documentos entre sí...). A partir de ahí, responde a lo "
+        "que se te pida sobre ellos: qué dicen, qué datos traen, resúmenes, lo "
+        "que haga falta. Responde en español, breve y directo."
     )
     if not permite_importar:
         return (
@@ -255,21 +257,25 @@ _HERRAMIENTA_IMPORTAR_CAPITULO = [
 
 async def chat_documento(
     session: AsyncSession,
-    contenido: bytes,
-    mime_type: str,
+    documentos: list[tuple[bytes, str]],
     mensajes: list[dict],
     *,
     permitir_propuesta: bool = False,
 ) -> tuple[str, PropuestaAccionOut | None, UsoTokens]:
-    """Conversación de varios turnos sobre un documento (Fase "Arrastrar al
-    presupuesto"). A diferencia de `leer_plano` (un turno, JSON forzado con
-    un esquema fijo), aquí la salida es texto libre y hay hasta N turnos —
-    mismo motivo que `deepseek.chat_con_herramientas` para "Ayuda con IA".
+    """Conversación de varios turnos sobre uno o varios documentos (Fase
+    "Arrastrar al presupuesto"). A diferencia de `leer_plano` (un turno, JSON
+    forzado con un esquema fijo), aquí la salida es texto libre y hay hasta N
+    turnos — mismo motivo que `deepseek.chat_con_herramientas` para "Ayuda
+    con IA".
 
     Sin estado en el servidor: `mensajes` es el historial completo cada vez
-    (`[{"role": "user"|"model", "text": str}]`), y el documento se adjunta
-    solo en el primer turno — Gemini lo mantiene en contexto mientras ese
-    turno siga formando parte de los `contents` que se le manden.
+    (`[{"role": "user"|"model", "text": str}]`) y `documentos` es la lista
+    completa de ficheros conocidos hasta ahora — el cliente la reenvía
+    entera en cada turno (incluidos los añadidos a media conversación), y
+    aquí siempre se cuelgan del primer turno de `contents`: como se
+    reconstruye toda la conversación desde cero en cada llamada, no importa
+    en qué punto los añadió el usuario, solo que Gemini los vea en el
+    contexto que se le manda ahora.
 
     `permitir_propuesta` activa la herramienta `proponer_importar_capitulo`
     (Fase 39) — solo tiene sentido cuando la conversación se abrió sobre un
@@ -282,17 +288,15 @@ async def chat_documento(
             "con documentos"
         )
 
-    es_excel = mime_type in MIME_EXCEL
-    adjunto_excel = _tabla_de_excel(contenido) if es_excel else None
-
-    contents = []
-    for i, mensaje in enumerate(mensajes):
-        texto = mensaje["text"]
-        if i == 0 and adjunto_excel is not None:
-            texto = f"{texto}\n\n--- Contenido del Excel ---\n{adjunto_excel}"
-        parts: list[dict] = [{"text": texto}]
-        if i == 0 and adjunto_excel is None:
-            parts.append(
+    texto_excel_adjunto = ""
+    partes_adjuntas: list[dict] = []
+    for contenido, mime_type in documentos:
+        if mime_type in MIME_EXCEL:
+            texto_excel_adjunto += (
+                f"\n\n--- Contenido de un Excel adjunto ---\n{tabla_de_excel(contenido)}"
+            )
+        else:
+            partes_adjuntas.append(
                 {
                     "inline_data": {
                         "mime_type": mime_type,
@@ -300,6 +304,15 @@ async def chat_documento(
                     }
                 }
             )
+
+    contents = []
+    for i, mensaje in enumerate(mensajes):
+        texto = mensaje["text"]
+        if i == 0 and texto_excel_adjunto:
+            texto = f"{texto}{texto_excel_adjunto}"
+        parts: list[dict] = [{"text": texto}]
+        if i == 0:
+            parts.extend(partes_adjuntas)
         contents.append({"role": mensaje["role"], "parts": parts})
 
     payload: dict = {

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check, FileSpreadsheet, Save, Sparkles, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Check, FileSpreadsheet, FileText, Image as ImageIcon, Plus, Save, Sparkles, X } from 'lucide-react'
 
 import { ErrorNotice, ModalPantalla } from './ui'
 import { api } from '../lib/api'
@@ -11,20 +11,31 @@ interface Mensaje {
 }
 
 const PRIMER_MENSAJE = '¿Qué tipo de documento es este y qué contiene?'
+const EXTENSIONES_ADMITIDAS = '.pdf,.xlsx,image/png,image/jpeg,image/webp,application/pdf'
 
-/** Documento (PDF, imagen o Excel) arrastrado a una fila del presupuesto —
- *  "Arrastrar al presupuesto". Un visor a un lado para poder cotejar lo que
- *  dice la IA contra el documento real, y al otro una conversación libre:
- *  al abrirse, se manda sola una primera pregunta para que la IA identifique
- *  qué es sin que haga falta pedírselo. Guardarlo en Documentos es un botón
+function tipoDe(fichero: File): 'imagen' | 'pdf' | 'excel' | 'otro' {
+  const nombre = fichero.name.toLowerCase()
+  if (fichero.type.startsWith('image/')) return 'imagen'
+  if (fichero.type === 'application/pdf' || nombre.endsWith('.pdf')) return 'pdf'
+  if (nombre.endsWith('.xlsx')) return 'excel'
+  return 'otro'
+}
+
+/** Documento o documentos (PDF, imagen, Excel) arrastrados a una fila del
+ *  presupuesto — "Arrastrar al presupuesto" (Fase 41). Un visor a un lado
+ *  para poder cotejar lo que dice la IA contra el documento real —con
+ *  pestañas si hay más de uno—, y al otro una conversación libre: al
+ *  abrirse, se manda sola una primera pregunta para que la IA identifique
+ *  qué es sin que haga falta pedírselo. Se pueden añadir más documentos a
+ *  media conversación con el botón "+"; guardarlos en Documentos es un botón
  *  aparte, no algo que dispare la conversación.
  *
  *  Si se sabe sobre qué presupuesto se abrió (`presupuestoId`), la IA puede
- *  además terminar proponiendo un capítulo nuevo con lo que lea del
- *  documento — igual que "Ayuda con IA", nunca lo crea ella sola: la
+ *  además terminar proponiendo un capítulo nuevo con lo que lea de los
+ *  documentos — igual que "Ayuda con IA", nunca lo crea ella sola: la
  *  propuesta se enseña como tarjeta aparte y hay que confirmarla. */
 export function DocumentoIAModal({
-  fichero,
+  ficheros: ficherosIniciales,
   entidad,
   entidadId,
   presupuestoId,
@@ -32,7 +43,7 @@ export function DocumentoIAModal({
   onGuardado,
   onCambio,
 }: {
-  fichero: File
+  ficheros: File[]
   entidad: EntidadDocumento
   entidadId: string
   presupuestoId?: string
@@ -40,6 +51,8 @@ export function DocumentoIAModal({
   onGuardado?: () => void
   onCambio?: () => void
 }) {
+  const [ficheros, setFicheros] = useState<File[]>(ficherosIniciales)
+  const [activo, setActivo] = useState(0)
   const [mensajes, setMensajes] = useState<Mensaje[]>([])
   const [entrada, setEntrada] = useState('')
   const [enviando, setEnviando] = useState(false)
@@ -48,16 +61,54 @@ export function DocumentoIAModal({
   const [propuesta, setPropuesta] = useState<PropuestaIA | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [urls, setUrls] = useState<(string | null)[]>([])
+  const [tablasExcel, setTablasExcel] = useState<Record<number, string>>({})
+  const inputAnadirRef = useRef<HTMLInputElement>(null)
 
-  const esImagen = fichero.type.startsWith('image/')
-  const esPdf = fichero.type === 'application/pdf' || fichero.name.toLowerCase().endsWith('.pdf')
-  const url = useMemo(
-    () => (esImagen || esPdf ? URL.createObjectURL(fichero) : null),
-    [fichero, esImagen, esPdf],
-  )
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  // Un blob por fichero (imagen/PDF), creado y revocado en el mismo efecto:
+  // si se crea aparte (p. ej. en un `useMemo`) y solo se revoca en la
+  // limpieza, el doble montaje de StrictMode revoca sin volver a crear y la
+  // vista previa se queda apuntando a una URL ya muerta.
+  useEffect(() => {
+    const nuevas = ficheros.map((f) => {
+      const tipo = tipoDe(f)
+      return tipo === 'imagen' || tipo === 'pdf' ? URL.createObjectURL(f) : null
+    })
+    setUrls(nuevas)
+    return () => {
+      for (const u of nuevas) if (u) URL.revokeObjectURL(u)
+    }
+  }, [ficheros])
 
-  async function enviarMensaje(contenido: string, historialPrevio: Mensaje[]) {
+  // La tabla de un Excel se trae aparte (sin pasar por la IA) solo para
+  // enseñarla en el visor — la misma que ve Gemini, pero al instante.
+  useEffect(() => {
+    let cancelado = false
+    ficheros.forEach((f, i) => {
+      if (tipoDe(f) !== 'excel' || tablasExcel[i] !== undefined) return
+      api.ia
+        .previsualizarExcel(f)
+        .then(({ tabla }) => {
+          if (!cancelado) setTablasExcel((actual) => ({ ...actual, [i]: tabla }))
+        })
+        .catch(() => {
+          if (!cancelado) setTablasExcel((actual) => ({ ...actual, [i]: '' }))
+        })
+    })
+    return () => {
+      cancelado = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ficheros])
+
+  async function enviarMensaje(
+    contenido: string,
+    historialPrevio: Mensaje[],
+    // `ficheros` del estado puede no reflejar todavía un fichero recién
+    // añadido (`setFicheros` no es síncrono) — quien acaba de añadirlo pasa
+    // la lista ya combinada para no mandar la conversación sin él.
+    ficherosActuales: File[] = ficheros,
+  ) {
     setError(null)
     setPropuesta(null)
     const historial = [...historialPrevio, { rol: 'user' as const, contenido }]
@@ -65,7 +116,7 @@ export function DocumentoIAModal({
     setEnviando(true)
     try {
       const { respuesta, propuesta: nueva } = await api.ia.documentoConversar(
-        fichero,
+        ficherosActuales,
         historial.map((m) => ({ rol: m.rol, contenido: m.contenido })),
         presupuestoId,
       )
@@ -92,12 +143,30 @@ export function DocumentoIAModal({
     await enviarMensaje(texto, mensajes)
   }
 
+  function anadirFicheros(nuevos: File[]) {
+    if (nuevos.length === 0) return
+    const combinados = [...ficheros, ...nuevos]
+    setFicheros(combinados)
+    setActivo(ficheros.length) // salta al primero de los recién añadidos
+    setGuardado(false)
+    const nombres = nuevos.map((f) => f.name).join(', ')
+    void enviarMensaje(
+      nuevos.length === 1
+        ? `He añadido otro documento: ${nombres}. ¿Qué es y qué contiene?`
+        : `He añadido más documentos: ${nombres}. ¿Qué son y qué contienen?`,
+      mensajes,
+      combinados,
+    )
+  }
+
   async function guardarEnDocumentos() {
     if (guardando) return
     setGuardando(true)
     setError(null)
     try {
-      await api.documentos.upload(entidad, entidadId, fichero)
+      for (const fichero of ficheros) {
+        await api.documentos.upload(entidad, entidadId, fichero)
+      }
       setGuardado(true)
       onGuardado?.()
     } catch (err) {
@@ -139,21 +208,76 @@ export function DocumentoIAModal({
     }
   }
 
+  const ficheroActivo = ficheros[activo]
+  const tipoActivo = ficheroActivo ? tipoDe(ficheroActivo) : 'otro'
+  const iconoDe = (tipo: ReturnType<typeof tipoDe>) =>
+    tipo === 'excel' ? (
+      <FileSpreadsheet size={13} aria-hidden="true" />
+    ) : tipo === 'imagen' ? (
+      <ImageIcon size={13} aria-hidden="true" />
+    ) : (
+      <FileText size={13} aria-hidden="true" />
+    )
+
   return (
-    <ModalPantalla title={`Documento — ${fichero.name}`} onClose={onClose}>
+    <ModalPantalla
+      title={
+        ficheros.length === 1
+          ? `Documento — ${ficheros[0].name}`
+          : `Documentos — ${ficheros.length} ficheros`
+      }
+      onClose={onClose}
+    >
       <div className="documento-ia">
-        <div className="documento-ia__visor">
-          {esImagen && url ? (
-            <img src={url} alt={fichero.name} />
-          ) : esPdf && url ? (
-            <iframe src={url} title={fichero.name} />
-          ) : (
-            <div className="documento-ia__sin-visor">
-              <FileSpreadsheet size={40} aria-hidden="true" />
-              <p>{fichero.name}</p>
-              <p className="muted">No hay vista previa para este tipo de fichero.</p>
+        <div className="documento-ia__panel">
+          {ficheros.length > 1 && (
+            <div className="documento-ia__pestanas">
+              {ficheros.map((f, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={
+                    i === activo
+                      ? 'documento-ia__pestana is-activa'
+                      : 'documento-ia__pestana'
+                  }
+                  onClick={() => setActivo(i)}
+                  title={f.name}
+                >
+                  {iconoDe(tipoDe(f))}
+                  <span>{f.name}</span>
+                </button>
+              ))}
             </div>
           )}
+          <div className="documento-ia__visor">
+            {tipoActivo === 'imagen' && urls[activo] ? (
+              <img src={urls[activo]!} alt={ficheroActivo.name} />
+            ) : tipoActivo === 'pdf' && urls[activo] ? (
+              <iframe src={urls[activo]!} title={ficheroActivo.name} />
+            ) : tipoActivo === 'excel' ? (
+              tablasExcel[activo] === undefined ? (
+                <div className="documento-ia__sin-visor">
+                  <FileSpreadsheet size={40} aria-hidden="true" />
+                  <p className="muted">Leyendo el Excel…</p>
+                </div>
+              ) : tablasExcel[activo] === '' ? (
+                <div className="documento-ia__sin-visor">
+                  <FileSpreadsheet size={40} aria-hidden="true" />
+                  <p>{ficheroActivo.name}</p>
+                  <p className="muted">No se ha podido leer el contenido.</p>
+                </div>
+              ) : (
+                <pre className="documento-ia__tabla-excel">{tablasExcel[activo]}</pre>
+              )
+            ) : (
+              <div className="documento-ia__sin-visor">
+                <FileText size={40} aria-hidden="true" />
+                <p>{ficheroActivo?.name}</p>
+                <p className="muted">No hay vista previa para este tipo de fichero.</p>
+              </div>
+            )}
+          </div>
         </div>
         <div className="documento-ia__chat">
           <div className="chat-ia">
@@ -211,7 +335,7 @@ export function DocumentoIAModal({
             <textarea
               className="input"
               rows={2}
-              placeholder="¿Qué quieres saber o hacer con este documento?"
+              placeholder="¿Qué quieres saber o hacer con estos documentos?"
               value={entrada}
               onChange={(e) => setEntrada(e.target.value)}
               onKeyDown={(e) => {
@@ -224,6 +348,15 @@ export function DocumentoIAModal({
           </label>
 
           <div className="form-actions">
+            <button
+              className="btn"
+              disabled={enviando}
+              onClick={() => inputAnadirRef.current?.click()}
+              title="Añadir otro documento a esta conversación"
+            >
+              <Plus size={16} aria-hidden="true" />
+              Añadir documento
+            </button>
             <button
               className="btn"
               disabled={guardando || guardado}
@@ -243,6 +376,18 @@ export function DocumentoIAModal({
           </div>
         </div>
       </div>
+      <input
+        ref={inputAnadirRef}
+        type="file"
+        multiple
+        accept={EXTENSIONES_ADMITIDAS}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const nuevos = Array.from(e.target.files ?? [])
+          e.target.value = ''
+          anadirFicheros(nuevos)
+        }}
+      />
     </ModalPantalla>
   )
 }

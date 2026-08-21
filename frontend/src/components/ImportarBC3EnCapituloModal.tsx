@@ -1,31 +1,33 @@
 import { useEffect, useState } from 'react'
-import { Check, FileUp, X } from 'lucide-react'
+import { Check, ChevronRight, FileUp, X } from 'lucide-react'
 
 import { ErrorNotice, Modal } from './ui'
 import { api } from '../lib/api'
 import type { AnalisisBC3, ImportacionBC3 } from '../lib/api'
 
-/** Arrastrar un BC3 sobre un capítulo o sobre la raíz del presupuesto
- *  ("Arrastrar al presupuesto"): analiza el fichero igual que la pantalla
- *  "Importar BC3" (sin escribir nada) y, si el usuario confirma, lo cuelga
- *  ahí en vez de crear un presupuesto nuevo. `capituloId: null` significa
- *  la raíz — los capítulos del fichero se añaden como capítulos de primer
- *  nivel. */
+/** Arrastrar uno o varios BC3 sobre un capítulo o sobre la raíz del
+ *  presupuesto ("Arrastrar al presupuesto", Fase 41): analiza cada fichero
+ *  igual que la pantalla "Importar BC3" (sin escribir nada) y, si el
+ *  usuario confirma, lo cuelga ahí en vez de crear un presupuesto nuevo.
+ *  `capituloId: null` significa la raíz. Con más de un fichero, se procesan
+ *  de uno en uno — cada uno con su propio análisis y confirmación, para no
+ *  colgar nada sin que se haya podido revisar antes. */
 export function ImportarBC3EnCapituloModal({
-  fichero,
+  ficheros,
   presupuestoId,
   capituloResumen,
   capituloId,
   onClose,
   onImportado,
 }: {
-  fichero: File
+  ficheros: File[]
   presupuestoId: string
   capituloResumen: string
   capituloId: string | null
   onClose: () => void
   onImportado: () => void
 }) {
+  const [indice, setIndice] = useState(0)
   const [analisis, setAnalisis] = useState<AnalisisBC3 | null>(null)
   const [estrategia, setEstrategia] = useState<'omitir' | 'actualizar'>('omitir')
   const [analizando, setAnalizando] = useState(true)
@@ -33,9 +35,16 @@ export function ImportarBC3EnCapituloModal({
   const [error, setError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<ImportacionBC3 | null>(null)
 
+  const fichero = ficheros[indice]
+  const varios = ficheros.length > 1
+  const quedanMas = indice < ficheros.length - 1
+
   useEffect(() => {
     let cancelado = false
     setAnalizando(true)
+    setAnalisis(null)
+    setResultado(null)
+    setError(null)
     api.fiebdc
       .analizar(fichero)
       .then((resultado) => {
@@ -50,7 +59,7 @@ export function ImportarBC3EnCapituloModal({
     return () => {
       cancelado = true
     }
-  }, [fichero])
+  }, [fichero, indice])
 
   async function importar() {
     setImportando(true)
@@ -70,7 +79,10 @@ export function ImportarBC3EnCapituloModal({
 
   return (
     <Modal
-      title={capituloId ? 'Importar BC3 en este capítulo' : 'Importar BC3 en la raíz del presupuesto'}
+      title={
+        (capituloId ? 'Importar BC3 en este capítulo' : 'Importar BC3 en la raíz del presupuesto') +
+        (varios ? ` (${indice + 1} de ${ficheros.length})` : '')
+      }
       onClose={onClose}
     >
       <div className="form-section">
@@ -199,10 +211,17 @@ export function ImportarBC3EnCapituloModal({
       </div>
       <div className="form-actions">
         {resultado ? (
-          <button className="btn btn--primary" onClick={onClose}>
-            <Check size={16} aria-hidden="true" />
-            Cerrar
-          </button>
+          quedanMas ? (
+            <button className="btn btn--primary" onClick={() => setIndice((i) => i + 1)}>
+              <ChevronRight size={16} aria-hidden="true" />
+              Siguiente fichero
+            </button>
+          ) : (
+            <button className="btn btn--primary" onClick={onClose}>
+              <Check size={16} aria-hidden="true" />
+              Cerrar
+            </button>
+          )
         ) : (
           <>
             <button className="btn" onClick={onClose}>

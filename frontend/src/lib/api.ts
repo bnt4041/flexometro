@@ -2285,18 +2285,23 @@ export const api = {
       mensajes: { rol: 'user' | 'assistant'; contenido: string }[]
     }) => post<{ respuesta: string; propuesta: PropuestaIA | null }>('/api/ia/ayuda-linea/conversar', datos),
     documentoConversar: (
-      fichero: File,
+      ficheros: File[],
       mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
       presupuestoId?: string,
     ) => {
       const f = new FormData()
-      f.append('fichero', fichero)
+      for (const fichero of ficheros) f.append('ficheros', fichero)
       f.append('mensajes', JSON.stringify(mensajes))
       if (presupuestoId) f.append('presupuesto_id', presupuestoId)
       return subir<{ respuesta: string; propuesta: PropuestaIA | null }>(
         '/api/ia/documentos/conversar',
         f,
       )
+    },
+    previsualizarExcel: (fichero: File) => {
+      const f = new FormData()
+      f.append('fichero', fichero)
+      return subir<{ tabla: string }>('/api/ia/documentos/previsualizar-excel', f)
     },
   },
 }

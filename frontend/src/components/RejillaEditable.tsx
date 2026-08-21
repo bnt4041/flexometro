@@ -83,12 +83,13 @@ interface Props<F> {
    *  Ctrl+C—, así que solo hace falta este evento nuevo para el destino. Sin
    *  `onSoltarEn` las filas no se pueden arrastrar. */
   onSoltarEn?: (fila: F | null) => void
-  /** Soltar un fichero del sistema operativo sobre esta fila ("Arrastrar al
-   *  presupuesto") — un `DataTransfer` con `types` incluyendo `"Files"`, muy
-   *  distinto de arrastrar una fila propia (`onSoltarEn`), aunque comparten
-   *  el mismo gesto visual. Sin `onSoltarFichero` un fichero soltado aquí no
-   *  hace nada especial (lo abriría el navegador, como en cualquier web). */
-  onSoltarFichero?: (fila: F, archivo: File) => void
+  /** Soltar uno o varios ficheros del sistema operativo sobre esta fila
+   *  ("Arrastrar al presupuesto") — un `DataTransfer` con `types` incluyendo
+   *  `"Files"`, muy distinto de arrastrar una fila propia (`onSoltarEn`),
+   *  aunque comparten el mismo gesto visual. Sin `onSoltarFichero` un
+   *  fichero soltado aquí no hace nada especial (lo abriría el navegador,
+   *  como en cualquier web). */
+  onSoltarFichero?: (fila: F, archivos: File[]) => void
   /** Filas que no tiene sentido coger (un capítulo en vez de una partida, la
    *  fila de borrador de un alta en marcha…). Por defecto, todas se pueden
    *  arrastrar; devolver `false` aquí también las deja fuera de `onCopiar`. */
@@ -796,8 +797,8 @@ export function RejillaEditable<F>({
                   setArrastrando(null)
                   setSobreDestino(null)
                   if (e.dataTransfer.types.includes('Files')) {
-                    const archivo = e.dataTransfer.files[0]
-                    if (archivo && onSoltarFichero) onSoltarFichero(fila, archivo)
+                    const archivos = Array.from(e.dataTransfer.files)
+                    if (archivos.length > 0 && onSoltarFichero) onSoltarFichero(fila, archivos)
                     return
                   }
                   onSoltarEn?.(fila)
@@ -810,7 +811,10 @@ export function RejillaEditable<F>({
                   // Sin esto, el `onContextMenu` del contenedor (más abajo,
                   // para `menuVacio`) se dispara también y pisa este menú.
                   e.stopPropagation()
-                  irA(f, 0)
+                  // Si la fila ya estaba marcada, el botón derecho no debe
+                  // colapsar la selección múltiple — se respeta tal cual para
+                  // que el menú pueda actuar sobre todo el grupo.
+                  if (!marcadas.has(id)) irA(f, 0)
                   setMenu({ f, x: e.clientX, y: e.clientY })
                 }}
               >
@@ -829,6 +833,11 @@ export function RejillaEditable<F>({
                       style={col.sangrada ? { paddingLeft: `calc(var(--sp-3) + ${nivel} * 18px)` } : undefined}
                       onMouseDown={(e) => {
                         if (esActiva && editando) return
+                        // El botón derecho no debe tocar la marca aquí: si
+                        // cae sobre una fila ya marcada, `onContextMenu` (más
+                        // abajo, en el `<tr>`) tiene que verla intacta para
+                        // poder abrir el menú sobre todo el grupo.
+                        if (e.button !== 0) return
                         if (e.shiftKey) {
                           // Evita que el navegador arrastre una selección de
                           // texto nativa mientras se marca con Mayús.
@@ -837,9 +846,18 @@ export function RejillaEditable<F>({
                         } else if (e.ctrlKey || e.metaKey) {
                           e.preventDefault()
                           irA(f, c, 'alternar')
-                        } else {
+                        } else if (!marcadas.has(id)) {
+                          // Si la fila ya estaba marcada (posible selección
+                          // múltiple), no se colapsa aquí todavía: podría ser
+                          // el inicio de arrastrar el grupo entero. Si no era
+                          // un arrastre, `onClick` — que el navegador no
+                          // dispara cuando sí lo hubo — la deja en esta sola.
                           irA(f, c)
                         }
+                      }}
+                      onClick={(e) => {
+                        if (e.shiftKey || e.ctrlKey || e.metaKey) return
+                        if (marcadas.has(id)) irA(f, c)
                       }}
                       onDoubleClick={() => editableAqui && empezarEdicion()}
                     >

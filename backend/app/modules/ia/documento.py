@@ -1,14 +1,20 @@
-"""Conversación libre sobre un documento (PDF, imagen o Excel) arrastrado al
-presupuesto — Fase "Arrastrar al presupuesto". Sin estado en el servidor:
-cada turno manda el documento entero más el historial de texto, igual que
-`asistente.py` para "Ayuda con IA" (que es solo texto; aquí además hay un
-fichero, adjunto una única vez por `gemini.chat_documento`).
+"""Conversación libre sobre uno o varios documentos (PDF, imagen o Excel)
+arrastrados al presupuesto — Fase "Arrastrar al presupuesto". Sin estado en
+el servidor: cada turno manda todos los documentos conocidos hasta ahora
+más el historial de texto, igual que `asistente.py` para "Ayuda con IA"
+(que es solo texto; aquí además hay ficheros, adjuntos por
+`gemini.chat_documento`).
 
-Guardar el documento en el presupuesto es una acción aparte del usuario
+Los documentos se pueden ir añadiendo a media conversación (Fase 41): como
+no hay estado en el servidor, el cliente simplemente reenvía la lista
+completa —los de antes y los nuevos— en cada turno.
+
+Guardar un documento en el presupuesto es una acción aparte del usuario
 contra el módulo de `documentos` — esta conversación no escribe nada por su
 cuenta. Lo único que sí puede proponer (Fase 39, cuando se sabe sobre qué
-presupuesto se abrió) es un capítulo nuevo con lo que lea del documento —
-propuesta, nunca una escritura directa (ver el system prompt en `gemini.py`)."""
+presupuesto se abrió) es un capítulo nuevo con lo que lea de los
+documentos — propuesta, nunca una escritura directa (ver el system prompt
+en `gemini.py`)."""
 
 import uuid
 
@@ -20,9 +26,13 @@ from app.modules.ia.schemas import MensajeConversacionIn, PropuestaAccionOut
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MIME_PERMITIDOS = {"application/pdf", "image/png", "image/jpeg", "image/webp", *gemini.MIME_EXCEL}
-# Mismo tope que `medicion.py`: un documento de obra cabe de sobra, y evita
-# que un archivo enorme se cuele entero en cada turno de la conversación.
+# Mismo tope que `medicion.py` para un fichero suelto; el conjunto además no
+# puede pasar de MAX_TOTAL_BYTES ni de MAX_FICHEROS, para que una
+# conversación con varios documentos grandes no se cuele entera en cada
+# turno sin límite.
 MAX_TAMANO_BYTES = 15 * 1024 * 1024
+MAX_TOTAL_BYTES = 40 * 1024 * 1024
+MAX_FICHEROS = 6
 
 
 class DocumentoInvalido(Exception):
@@ -31,18 +41,28 @@ class DocumentoInvalido(Exception):
 
 async def conversar(
     session: AsyncSession,
-    contenido: bytes,
-    mime_type: str,
+    documentos: list[tuple[bytes, str]],
     mensajes: list[MensajeConversacionIn],
     principal: Principal,
     *,
     presupuesto_id: uuid.UUID | None = None,
 ) -> tuple[str, PropuestaAccionOut | None]:
-    if mime_type not in MIME_PERMITIDOS:
-        raise DocumentoInvalido(f"Tipo de fichero no admitido: {mime_type}")
-    if len(contenido) > MAX_TAMANO_BYTES:
+    if not documentos:
+        raise DocumentoInvalido("Hace falta al menos un fichero")
+    if len(documentos) > MAX_FICHEROS:
+        raise DocumentoInvalido(f"No se pueden adjuntar más de {MAX_FICHEROS} ficheros a la vez")
+    for _contenido, mime_type in documentos:
+        if mime_type not in MIME_PERMITIDOS:
+            raise DocumentoInvalido(f"Tipo de fichero no admitido: {mime_type}")
+    for contenido, _mime_type in documentos:
+        if len(contenido) > MAX_TAMANO_BYTES:
+            raise DocumentoInvalido(
+                f"Un fichero supera el máximo de {MAX_TAMANO_BYTES // (1024 * 1024)} MB"
+            )
+    total = sum(len(contenido) for contenido, _ in documentos)
+    if total > MAX_TOTAL_BYTES:
         raise DocumentoInvalido(
-            f"El fichero supera el máximo de {MAX_TAMANO_BYTES // (1024 * 1024)} MB"
+            f"Entre todos los ficheros suman más de {MAX_TOTAL_BYTES // (1024 * 1024)} MB"
         )
 
     org_id = require_organization_id()
@@ -51,8 +71,7 @@ async def conversar(
     ]
     respuesta, propuesta, uso = await gemini.chat_documento(
         session,
-        contenido,
-        mime_type,
+        documentos,
         historial,
         permitir_propuesta=presupuesto_id is not None,
     )

@@ -11,7 +11,7 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.ia import documento, estadisticas, medicion, service
+from app.modules.ia import documento, estadisticas, gemini, medicion, service
 from app.modules.ia.deepseek import DeepSeekError
 from app.modules.ia.gemini import GeminiError
 from app.modules.ia.models import LecturaPlano, SugerenciaPatron
@@ -284,25 +284,39 @@ async def aplicar_lectura(
 _EXTENSIONES_EXCEL = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 
+async def _leer_documento(fichero: UploadFile) -> tuple[bytes, str]:
+    """Bytes + tipo MIME real de un `UploadFile` — el navegador a veces no
+    sabe el tipo correcto de un .xlsx y manda algo genérico; la extensión es
+    la señal fiable, igual que con el BC3."""
+    contenido = await fichero.read()
+    mime_type = fichero.content_type or "application/octet-stream"
+    if mime_type not in documento.MIME_PERMITIDOS:
+        for extension, mime_real in _EXTENSIONES_EXCEL.items():
+            if (fichero.filename or "").lower().endswith(extension):
+                mime_type = mime_real
+                break
+    return contenido, mime_type
+
+
 @router.post("/documentos/conversar", response_model=RespuestaDocumento)
 async def documento_conversar(
-    fichero: UploadFile = File(...),
+    ficheros: list[UploadFile] = File(...),
     # JSON en un campo de formulario, no un body Pydantic normal: FastAPI no
     # admite mezclar `File(...)` con un body JSON en la misma petición.
     mensajes: str = Form(...),
     # Cuando se sabe sobre qué presupuesto se abrió la conversación, la IA
-    # puede además proponer un capítulo nuevo con lo que lea del documento
-    # (Fase 39) — sin esto, se queda en solo lectura como antes.
+    # puede además proponer un capítulo nuevo con lo que lea de los
+    # documentos (Fase 39) — sin esto, se queda en solo lectura como antes.
     presupuesto_id: uuid.UUID | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
     _alcance: Alcance = Depends(require_permiso("ia", "editar")),
 ) -> RespuestaDocumento:
-    """Un turno de conversación libre sobre un documento (PDF, imagen o
-    Excel) arrastrado a una fila del presupuesto: sin guardar nada en el
-    servidor, cada turno manda el fichero entero más el historial de texto —
-    el fichero en sí se guarda aparte, contra `/api/documentos`, cuando el
-    usuario lo decida desde la pantalla."""
+    """Un turno de conversación libre sobre uno o varios documentos (PDF,
+    imagen o Excel) arrastrados a una fila del presupuesto: sin guardar nada
+    en el servidor, cada turno manda los ficheros enteros más el historial
+    de texto — los ficheros en sí se guardan aparte, contra
+    `/api/documentos`, cuando el usuario lo decida desde la pantalla."""
     try:
         lista = json.loads(mensajes)
         historial = [MensajeConversacionIn.model_validate(m) for m in lista]
@@ -312,20 +326,11 @@ async def documento_conversar(
             detail=f"'mensajes' no es una lista de mensajes válida: {exc}",
         ) from exc
 
-    contenido = await fichero.read()
-    mime_type = fichero.content_type or "application/octet-stream"
-    # El navegador a veces no sabe el tipo MIME correcto de un .xlsx y manda
-    # algo genérico; la extensión es la señal fiable, igual que con el BC3.
-    if mime_type not in documento.MIME_PERMITIDOS:
-        for extension, mime_real in _EXTENSIONES_EXCEL.items():
-            if (fichero.filename or "").lower().endswith(extension):
-                mime_type = mime_real
-                break
+    documentos = [await _leer_documento(f) for f in ficheros]
     try:
         respuesta, propuesta = await documento.conversar(
             session,
-            contenido,
-            mime_type,
+            documentos,
             historial,
             principal,
             presupuesto_id=presupuesto_id,
@@ -340,3 +345,20 @@ async def documento_conversar(
         ) from exc
     await session.commit()
     return RespuestaDocumento(respuesta=respuesta, propuesta=propuesta)
+
+
+@router.post("/documentos/previsualizar-excel")
+async def previsualizar_excel(
+    fichero: UploadFile = File(...),
+    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+) -> dict[str, str]:
+    """La misma tabla de texto que ve Gemini de un Excel (Fase 41), para
+    enseñarla en el visor del documento en vez de dejarlo sin vista previa —
+    no hace ninguna llamada a la IA, es solo parsear el fichero."""
+    contenido, mime_type = await _leer_documento(fichero)
+    if mime_type not in gemini.MIME_EXCEL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No es un Excel: {mime_type}",
+        )
+    return {"tabla": gemini.tabla_de_excel(contenido)}

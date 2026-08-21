@@ -195,11 +195,11 @@ export function RejillaPresupuesto({
   // "Subir fichero…" del menú contextual, la alternativa sin arrastrar — el
   // input de fichero en sí está oculto y se dispara con `.click()`.
   const [importandoBc3, setImportandoBc3] = useState<{
-    fichero: File
+    ficheros: File[]
     capituloId: string | null
     capituloResumen: string
   } | null>(null)
-  const [documentoIA, setDocumentoIA] = useState<File | null>(null)
+  const [documentoIA, setDocumentoIA] = useState<File[] | null>(null)
   const inputFicheroRef = useRef<HTMLInputElement>(null)
   const filaParaSubir = useRef<FilaPresupuesto | null>(null)
   const cambios = useRef<Map<string, CambioLinea>>(new Map())
@@ -661,25 +661,36 @@ export function RejillaPresupuesto({
   /** BC3 se cuelga del capítulo (el suyo si `fila` ya es uno, si no el de su
    *  padre — mismo criterio que `contenedorDe`), o de la raíz del presupuesto
    *  si se suelta ahí (`contenedorDe` da `null`); PDF/imagen/Excel no
-   *  necesita capítulo, solo el presupuesto, así que hasta la fila raíz vale. */
-  function manejarFichero(fila: FilaPresupuesto, archivo: File) {
-    const nombre = archivo.name.toLowerCase()
-    const esBc3 = nombre.endsWith('.bc3')
-    const esPdf = archivo.type === 'application/pdf' || nombre.endsWith('.pdf')
-    const esImagen = archivo.type.startsWith('image/')
-    const esExcel = nombre.endsWith('.xlsx')
+   *  necesita capítulo, solo el presupuesto, así que hasta la fila raíz vale.
+   *  Se puede soltar más de un fichero a la vez (Fase 41): los BC3 se
+   *  importan uno detrás de otro en el mismo modal, y los documentos se
+   *  adjuntan todos juntos a una sola conversación con la IA. */
+  function manejarFicheros(fila: FilaPresupuesto, archivos: File[]) {
+    const bc3: File[] = []
+    const docs: File[] = []
+    const rechazados: string[] = []
+    for (const archivo of archivos) {
+      const nombre = archivo.name.toLowerCase()
+      const esBc3 = nombre.endsWith('.bc3')
+      const esPdf = archivo.type === 'application/pdf' || nombre.endsWith('.pdf')
+      const esImagen = archivo.type.startsWith('image/')
+      const esExcel = nombre.endsWith('.xlsx')
+      if (esBc3) bc3.push(archivo)
+      else if (esPdf || esImagen || esExcel) docs.push(archivo)
+      else rechazados.push(archivo.name)
+    }
 
-    if (esBc3) {
+    if (bc3.length > 0) {
       const capituloId = contenedorDe(fila)
       const capitulo = capituloId ? (fila.tipo === 'capitulo' ? fila : porId.get(capituloId)) : null
-      setImportandoBc3({ fichero: archivo, capituloId, capituloResumen: capitulo?.resumen ?? '' })
-      return
+      setImportandoBc3({ ficheros: bc3, capituloId, capituloResumen: capitulo?.resumen ?? '' })
     }
-    if (esPdf || esImagen || esExcel) {
-      setDocumentoIA(archivo)
-      return
+    if (docs.length > 0) setDocumentoIA(docs)
+    if (rechazados.length > 0) {
+      notificar(
+        `No se puede soltar aquí: ${rechazados.join(', ')} (solo BC3, PDF, imagen o Excel)`,
+      )
     }
-    notificar('Solo se pueden soltar aquí ficheros BC3, PDF, imagen o Excel (.xlsx)')
   }
 
   function pedirFichero(fila: FilaPresupuesto) {
@@ -995,7 +1006,7 @@ export function RejillaPresupuesto({
         onPegar={pegar}
         onSoltarEn={(f) => pegar(f)}
         puedeArrastrar={(f) => f.id !== ID_RAIZ}
-        onSoltarFichero={manejarFichero}
+        onSoltarFichero={manejarFicheros}
         menuContextual={menuContextualDe}
         menuVacio={() => [
           {
@@ -1121,12 +1132,15 @@ export function RejillaPresupuesto({
       <input
         ref={inputFicheroRef}
         type="file"
+        multiple
         accept=".bc3,.xlsx,application/pdf,image/png,image/jpeg,image/webp"
         style={{ display: 'none' }}
         onChange={(e) => {
-          const archivo = e.target.files?.[0]
+          const archivos = Array.from(e.target.files ?? [])
           e.target.value = ''
-          if (archivo && filaParaSubir.current) manejarFichero(filaParaSubir.current, archivo)
+          if (archivos.length > 0 && filaParaSubir.current) {
+            manejarFicheros(filaParaSubir.current, archivos)
+          }
         }}
       />
 
@@ -1158,7 +1172,7 @@ export function RejillaPresupuesto({
 
       {importandoBc3 && (
         <ImportarBC3EnCapituloModal
-          fichero={importandoBc3.fichero}
+          ficheros={importandoBc3.ficheros}
           presupuestoId={presupuesto.id}
           capituloId={importandoBc3.capituloId}
           capituloResumen={importandoBc3.capituloResumen}
@@ -1177,7 +1191,7 @@ export function RejillaPresupuesto({
 
       {documentoIA && (
         <DocumentoIAModal
-          fichero={documentoIA}
+          ficheros={documentoIA}
           entidad="presupuesto"
           entidadId={presupuesto.id}
           presupuestoId={presupuesto.id}
