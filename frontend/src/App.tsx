@@ -30,6 +30,7 @@ import { FacturaDetalle } from './pages/FacturaDetalle'
 import { Facturas, FacturaSueltaCrear } from './pages/Facturas'
 import { IaPatrones } from './pages/IaPatrones'
 import { ImportarBC3 } from './pages/ImportarBC3'
+import { Landing } from './pages/Landing'
 import { ObraCrear, Obras } from './pages/Obras'
 import { ObraDetalle } from './pages/ObraDetalle'
 import { Personal } from './pages/Personal'
@@ -126,16 +127,7 @@ function Workspace() {
   }
 
   if (estado === 'sin-sesion') {
-    return (
-      <Portada>
-        <p style={{ color: 'var(--c-text-muted)', marginBottom: 'var(--sp-5)' }}>
-          Necesitas iniciar sesión para entrar.
-        </p>
-        <button className="btn btn--primary" onClick={() => void entrar()}>
-          Iniciar sesión
-        </button>
-      </Portada>
-    )
+    return <Landing onEntrar={() => void entrar()} />
   }
 
   if (estado === 'error') {

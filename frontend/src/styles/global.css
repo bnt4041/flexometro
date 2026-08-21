@@ -2552,3 +2552,188 @@ input[type='file'].input {
     padding: var(--sp-2) var(--sp-3);
   }
 }
+
+/* --- Landing (portada pública, sin sesión) --- */
+
+.btn--lg {
+  padding: var(--sp-3) var(--sp-6);
+  font-size: var(--fs-lg);
+  border-radius: var(--radius);
+}
+
+.landing {
+  min-height: 100%;
+  background: var(--c-bg);
+  color: var(--c-text);
+}
+
+.landing__header {
+  background: var(--c-primary);
+}
+
+.landing__header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--sp-4) var(--sp-6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.landing__logo {
+  height: 34px;
+  width: auto;
+}
+
+.landing__hero {
+  background: linear-gradient(160deg, var(--c-primary) 0%, var(--c-primary-hover) 100%);
+  color: var(--c-primary-contrast);
+}
+
+.landing__hero-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--sp-7) var(--sp-6) var(--sp-7);
+  text-align: center;
+}
+
+.landing__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-accent-strong);
+  margin-bottom: var(--sp-4);
+}
+
+.landing__titulo {
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  line-height: 1.2;
+  font-weight: 700;
+  margin-bottom: var(--sp-5);
+}
+
+.landing__lead {
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+  color: rgb(255 255 255 / 0.82);
+  max-width: 60ch;
+  margin: 0 auto var(--sp-6);
+}
+
+.landing__hero-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.landing__hero-link {
+  color: rgb(255 255 255 / 0.75);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+
+.landing__hero-link:hover {
+  color: var(--c-primary-contrast);
+  text-decoration: underline;
+}
+
+.landing__beneficios {
+  background: var(--c-bg);
+}
+
+.landing__beneficios-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--sp-7) var(--sp-6);
+}
+
+.landing__seccion-titulo {
+  text-align: center;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  margin-bottom: var(--sp-7);
+}
+
+.landing__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-5);
+}
+
+.landing__card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-5);
+}
+
+.landing__card-icono {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  margin-bottom: var(--sp-4);
+}
+
+.landing__card-icono svg {
+  width: 22px;
+  height: 22px;
+}
+
+.landing__card h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--sp-2);
+}
+
+.landing__card p {
+  color: var(--c-text-muted);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+}
+
+.landing__cta-final {
+  background: var(--c-primary-soft);
+  border-top: 1px solid var(--c-border);
+}
+
+.landing__cta-final-inner {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--sp-7) var(--sp-6);
+  text-align: center;
+}
+
+.landing__cta-final-inner h2 {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  margin-bottom: var(--sp-2);
+}
+
+.landing__cta-final-inner p {
+  color: var(--c-text-muted);
+  margin-bottom: var(--sp-5);
+}
+
+.landing__footer {
+  text-align: center;
+  padding: var(--sp-5) var(--sp-6);
+  color: var(--c-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 640px) {
+  .landing__hero-inner {
+    padding: var(--sp-6) var(--sp-4);
+  }
+
+  .landing__beneficios-inner {
+    padding: var(--sp-6) var(--sp-4);
+  }
+}
