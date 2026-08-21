@@ -77,12 +77,17 @@ interface Props<F> {
   /** Ctrl/Cmd+V con el foco en la rejilla. No depende de que haya nada
    *  activo — pegar tiene sentido incluso con la rejilla vacía. */
   onPegar?: () => void
-  /** Arrastrar y soltar (Fase 1d): al soltar sobre esta fila (`null` si se
-   *  suelta sobre la rejilla vacía, sin ninguna fila todavía). Coger la fila
-   *  (`onDragStart`) ya usa `onCopiar` tal cual —es la misma foto que
-   *  Ctrl+C—, así que solo hace falta este evento nuevo para el destino. Sin
-   *  `onSoltarEn` las filas no se pueden arrastrar. */
-  onSoltarEn?: (fila: F | null) => void
+  /** Arrastrar y soltar (Fase 1d/1i): al soltar sobre esta fila (`null` si
+   *  se suelta sobre la rejilla vacía o en la franja bajo la última fila,
+   *  sin ninguna fila real). Coger la fila (`onDragStart`) ya usa `onCopiar`
+   *  tal cual —es la misma foto que Ctrl+C—, así que solo hace falta este
+   *  evento nuevo para el destino. `zona` dice DÓNDE dentro de esa fila:
+   *  `'dentro'` (soltar en el centro) es el comportamiento de siempre —
+   *  meterlo en la fila como contenedor—; `'antes'`/`'despues'` (soltar
+   *  cerca del borde superior/inferior) pide colocarlo como hermano de esa
+   *  fila, justo antes o después, para reordenar sin cambiar de capítulo.
+   *  Sin `onSoltarEn` las filas no se pueden arrastrar. */
+  onSoltarEn?: (fila: F | null, zona: 'antes' | 'despues' | 'dentro') => void
   /** Soltar uno o varios ficheros del sistema operativo sobre esta fila
    *  ("Arrastrar al presupuesto") — un `DataTransfer` con `types` incluyendo
    *  `"Files"`, muy distinto de arrastrar una fila propia (`onSoltarEn`),
@@ -183,6 +188,9 @@ export function RejillaEditable<F>({
   // que sobrevivan a que la lista cambie a mitad de un arrastre.
   const [arrastrando, setArrastrando] = useState<number | null>(null)
   const [sobreDestino, setSobreDestino] = useState<number | null>(null)
+  // Solo importa junto a `sobreDestino`: en qué tercio de esa fila está el
+  // cursor ahora mismo (ver `onSoltarEn`).
+  const [zonaDestino, setZonaDestino] = useState<'antes' | 'despues' | 'dentro'>('dentro')
   // Menú contextual (clic derecho): posición en coordenadas de ventana,
   // portado a `document.body` por el mismo motivo que `.rejilla__sugerencias`
   // (ver ese comentario en el CSS) — sin el portal, un widget con zoom que
@@ -679,7 +687,7 @@ export function RejillaEditable<F>({
         onDrop={(e) => {
           e.preventDefault()
           setSobreDestino(null)
-          onSoltarEn?.(null)
+          onSoltarEn?.(null, 'dentro')
         }}
       >
         {vacia}
@@ -753,7 +761,11 @@ export function RejillaEditable<F>({
             // copiar/arrastrar juntas", puede ser ninguna, una o varias.
             if (marcadas.has(id)) clases.push('is-marcada')
             if (arrastrando === f) clases.push('is-arrastrando')
-            if (sobreDestino === f && arrastrando !== f) clases.push('is-destino-arrastre')
+            if (sobreDestino === f && arrastrando !== f) {
+              clases.push(
+                zonaDestino === 'dentro' ? 'is-destino-arrastre' : `is-destino-arrastre-${zonaDestino}`,
+              )
+            }
             const filaEditandoseAqui = editando && activa?.f === f
             const arrastrableAqui = Boolean(onCopiar) && !filaEditandoseAqui && (puedeArrastrar?.(fila) ?? true)
 
@@ -790,7 +802,14 @@ export function RejillaEditable<F>({
                   // Sin esto el navegador no deja soltar: por defecto un
                   // `dragover` no autoriza el `drop` que le sigue.
                   e.preventDefault()
+                  // Tercio superior/inferior de la fila: reordenar como
+                  // hermano ("antes"/"despues"); el tercio central mantiene
+                  // el comportamiento de siempre ("dentro", como contenedor).
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const relativa = (e.clientY - rect.top) / rect.height
+                  const zona = relativa < 1 / 3 ? 'antes' : relativa > 2 / 3 ? 'despues' : 'dentro'
                   if (sobreDestino !== f) setSobreDestino(f)
+                  if (zonaDestino !== zona) setZonaDestino(zona)
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
@@ -801,7 +820,7 @@ export function RejillaEditable<F>({
                     if (archivos.length > 0 && onSoltarFichero) onSoltarFichero(fila, archivos)
                     return
                   }
-                  onSoltarEn?.(fila)
+                  onSoltarEn?.(fila, zonaDestino)
                 }}
                 onContextMenu={(e) => {
                   if (!menuContextual) return
@@ -961,6 +980,32 @@ export function RejillaEditable<F>({
               </tr>
             )
           })}
+          {onSoltarEn && (
+            // Soltar por debajo de la última fila arrastrable tenía que
+            // caer en algún elemento con su propio `onDrop` — sin esto, el
+            // navegador resolvía el drop contra la última fila de verdad
+            // (normalmente un capítulo), así que "mover a la raíz" acababa
+            // moviendo dentro de ese capítulo en vez de al nivel raíz. Vacía
+            // a propósito: solo existe como zona de destino, `vacia` ya
+            // cubre el mensaje para cuando no hay ninguna fila.
+            <tr
+              className={sobreDestino === -1 ? 'rejilla__fila-raiz is-destino-arrastre' : 'rejilla__fila-raiz'}
+              onDragOver={(e) => {
+                if (arrastrando === null || e.dataTransfer.types.includes('Files')) return
+                e.preventDefault()
+                if (sobreDestino !== -1) setSobreDestino(-1)
+              }}
+              onDragLeave={() => setSobreDestino((actual) => (actual === -1 ? null : actual))}
+              onDrop={(e) => {
+                e.preventDefault()
+                setArrastrando(null)
+                setSobreDestino(null)
+                onSoltarEn(null, 'dentro')
+              }}
+            >
+              <td colSpan={columnas.length + (acciones ? 1 : 0)} />
+            </tr>
+          )}
         </tbody>
       </table>
       {menu &&

@@ -20,9 +20,11 @@ from app.core.auth import Principal
 from app.core.tenancy import require_organization_id
 from app.modules.ia import deepseek
 from app.modules.ia.schemas import (
+    CapituloPropuestoOut,
     ComponentePropuestoOut,
     ContextoAyudaLinea,
     MensajeConversacionIn,
+    PartidaConComponentesOut,
     PropuestaAccionOut,
 )
 from app.modules.presupuestos import service as banco_service
@@ -32,6 +34,10 @@ from app.modules.terceros.models import Tercero
 
 MAX_TURNOS_HERRAMIENTAS = 4
 LIMITE_RESULTADOS = 10
+# Listar TODAS las partidas de UN presupuesto (sin texto de búsqueda, acotado
+# por presupuesto_id) es un caso ya bien delimitado — no la búsqueda abierta
+# sobre toda la cuenta, que sí necesita un tope bajo.
+LIMITE_RESULTADOS_PRESUPUESTO = 200
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,51 @@ class ResultadoConversacion:
     tokens_entrada: int
     tokens_salida: int
 
+
+# Compartido entre `proponer_crear_partida` (un array de esto) y
+# `proponer_capitulos` (un array de capítulos, cada uno con un array de
+# partidas, cada una con un array de esto) — mismo descompuesto, en los dos
+# casos resuelto contra el banco o personalizado.
+_ESQUEMA_COMPONENTE = {
+    "type": "object",
+    "properties": {
+        "concepto_id": {
+            "type": "string",
+            "description": "uuid del concepto (de buscar_conceptos_banco) — omite esto si personalizado es true",
+        },
+        "rendimiento": {
+            "type": "number",
+            "description": "Cantidad de este componente por unidad de la partida",
+        },
+        "personalizado": {
+            "type": "boolean",
+            "description": (
+                "true si este componente no está en el banco de precios y el "
+                "usuario ha dado su propio precio (p. ej. \"el carpintero cobra "
+                "120€ por puerta\"). En ese caso rellena resumen/unidad/precio/"
+                "naturaleza en vez de concepto_id."
+            ),
+        },
+        "resumen": {
+            "type": "string",
+            "description": "Descripción del componente personalizado (solo si personalizado es true)",
+        },
+        "unidad": {
+            "type": "string",
+            "description": "Unidad del componente personalizado: h, ud, m2... (solo si personalizado es true)",
+        },
+        "precio": {
+            "type": "number",
+            "description": "Precio unitario del componente personalizado, tal cual lo ha dado el usuario (solo si personalizado es true)",
+        },
+        "naturaleza": {
+            "type": "string",
+            "enum": ["mano_obra", "material", "maquinaria", "servicio", "otro"],
+            "description": "Tipo de recurso del componente personalizado (solo si personalizado es true)",
+        },
+    },
+    "required": ["rendimiento"],
+}
 
 _HERRAMIENTAS = [
     {
@@ -72,18 +123,24 @@ _HERRAMIENTAS = [
             "description": (
                 "Busca partidas por código o descripción, en toda la cuenta o "
                 "dentro de un presupuesto concreto si se sabe su id. Devuelve "
-                f"como mucho {LIMITE_RESULTADOS}."
+                f"como mucho {LIMITE_RESULTADOS}. Para ver TODAS las partidas que "
+                "ya tiene un presupuesto (para organizarlas en capítulos, por "
+                "ejemplo) — no busques por una palabra suelta que puede no "
+                "aparecer en ninguna descripción: omite `texto` y da solo "
+                f"`presupuesto_id`, así devuelve hasta {LIMITE_RESULTADOS_PRESUPUESTO}."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "texto": {"type": "string", "description": "Texto a buscar en código o descripción"},
+                    "texto": {
+                        "type": "string",
+                        "description": "Texto a buscar en código o descripción — omítelo para listarlas todas",
+                    },
                     "presupuesto_id": {
                         "type": "string",
                         "description": "uuid de un presupuesto para limitar la búsqueda a él",
                     },
                 },
-                "required": ["texto"],
             },
         },
     },
@@ -154,52 +211,7 @@ _HERRAMIENTAS = [
                     "componentes": {
                         "type": "array",
                         "description": "Componentes de su descompuesto",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "concepto_id": {
-                                    "type": "string",
-                                    "description": "uuid del concepto (de buscar_conceptos_banco) — omite esto si personalizado es true",
-                                },
-                                "rendimiento": {
-                                    "type": "number",
-                                    "description": "Cantidad de este componente por unidad de la partida",
-                                },
-                                "personalizado": {
-                                    "type": "boolean",
-                                    "description": (
-                                        "true si este componente no está en el banco de precios y el "
-                                        "usuario ha dado su propio precio (p. ej. \"el carpintero cobra "
-                                        "120€ por puerta\"). En ese caso rellena resumen/unidad/precio/"
-                                        "naturaleza en vez de concepto_id."
-                                    ),
-                                },
-                                "resumen": {
-                                    "type": "string",
-                                    "description": "Descripción del componente personalizado (solo si personalizado es true)",
-                                },
-                                "unidad": {
-                                    "type": "string",
-                                    "description": "Unidad del componente personalizado: h, ud, m2... (solo si personalizado es true)",
-                                },
-                                "precio": {
-                                    "type": "number",
-                                    "description": "Precio unitario del componente personalizado, tal cual lo ha dado el usuario (solo si personalizado es true)",
-                                },
-                                "naturaleza": {
-                                    "type": "string",
-                                    "enum": [
-                                        "mano_obra",
-                                        "material",
-                                        "maquinaria",
-                                        "servicio",
-                                        "otro",
-                                    ],
-                                    "description": "Tipo de recurso del componente personalizado (solo si personalizado es true)",
-                                },
-                            },
-                            "required": ["rendimiento"],
-                        },
+                        "items": _ESQUEMA_COMPONENTE,
                     },
                     "descripcion": {
                         "type": "string",
@@ -207,6 +219,87 @@ _HERRAMIENTAS = [
                     },
                 },
                 "required": ["resumen", "unidad", "componentes", "descripcion"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "proponer_capitulos",
+            "description": (
+                "Propón uno o VARIOS capítulos nuevos de una vez — por ejemplo, "
+                "todas las fases de obra de un presupuesto (demolición, "
+                "albañilería, fontanería, electricidad, acabados...) en una sola "
+                "llamada, no una por mensaje: el usuario confirma el plan entero "
+                "de golpe, porque no hay forma de encadenar una propuesta con la "
+                "siguiente sin que confirme la anterior primero. Si el usuario "
+                "pide organizar todo el presupuesto en fases, pon aquí TODOS los "
+                "capítulos que hagan falta en un único array `capitulos`, no "
+                "llames a esta herramienta varias veces. Cada partida de cada "
+                "capítulo puede ser de dos tipos: (a) una partida que YA EXISTE "
+                "en el presupuesto y solo hay que mover aquí — dale `partida_id` "
+                "(encuéntrala antes con `buscar_partidas`, dando el "
+                "`presupuesto_id` y sin `texto` para verlas todas); o (b) una "
+                "partida NUEVA — dale `resumen`, `unidad` y `componentes` con su "
+                "descompuesto, igual que en `proponer_crear_partida` (busca los "
+                "componentes del banco antes con `buscar_conceptos_banco`). "
+                "Puedes mezclar ambos tipos en el mismo capítulo. Cuando el "
+                "usuario pida organizar o reordenar un presupuesto que ya tiene "
+                "partidas, casi siempre quiere el tipo (a) — mover lo que ya "
+                "existe, no inventarlo de nuevo. Los capítulos y sus partidas "
+                "quedan en el orden en que los mandes, así que ordénalos tú de "
+                "forma lógica (secuencia de ejecución). No mueve ni crea nada "
+                "todavía: solo deja lista la propuesta para que se confirme."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "capitulos": {
+                        "type": "array",
+                        "description": "Todos los capítulos a proponer, en el orden en que deben quedar",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "capitulo_resumen": {
+                                    "type": "string",
+                                    "description": "Nombre del capítulo (la fase de obra)",
+                                },
+                                "partidas": {
+                                    "type": "array",
+                                    "description": "Partidas del capítulo, en el orden en que deben quedar",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "partida_id": {
+                                                "type": "string",
+                                                "description": "uuid de una partida YA EXISTENTE (de buscar_partidas) para moverla aquí — si va esto, no hacen falta resumen/unidad/componentes",
+                                            },
+                                            "resumen": {
+                                                "type": "string",
+                                                "description": "Descripción de la partida nueva (solo si no hay partida_id)",
+                                            },
+                                            "unidad": {
+                                                "type": "string",
+                                                "description": "Unidad de medida de la partida nueva: ud, m2, m, h... (solo si no hay partida_id)",
+                                            },
+                                            "componentes": {
+                                                "type": "array",
+                                                "description": "Componentes del descompuesto de la partida nueva (solo si no hay partida_id)",
+                                                "items": _ESQUEMA_COMPONENTE,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            "required": ["capitulo_resumen", "partidas"],
+                        },
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Frase corta resumiendo el plan: cuántos capítulos y qué llevan",
+                    },
+                },
+                "required": ["capitulos", "descripcion"],
             },
         },
     },
@@ -235,8 +328,27 @@ def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
         "exista un concepto para eso: usa ese componente como personalizado "
         "(marca `personalizado: true` y rellena resumen/unidad/precio/"
         "naturaleza con lo que ha dicho el usuario) — se da de alta como "
-        "concepto nuevo al confirmar, no es una limitación real. En los tres "
-        "casos: nunca digas que ya está copiada, creada o dada de alta, "
+        "concepto nuevo al confirmar, no es una limitación real. Si el "
+        "usuario quiere organizar el presupuesto por fases de obra (\"un "
+        "capítulo de demolición\", \"monta la fase de fontanería\", "
+        "\"organízame esto en capítulos\", \"hazlo todo de una vez\"...), usa "
+        "`proponer_capitulos` en vez de `proponer_crear_partida` — y pon TODOS "
+        "los capítulos que hagan falta en la misma llamada (un array), no uno "
+        "por mensaje: no hay forma de proponer un capítulo, que lo confirme, y "
+        "encadenar el siguiente sin que el usuario tenga que pedirlo otra vez, "
+        "así que si sabes que hacen falta 4 fases, propónlas las 4 juntas. "
+        "Esto casi siempre significa MOVER partidas que el presupuesto YA "
+        "TIENE, no inventarlas de nuevo: antes de nada, llama a "
+        "`buscar_partidas` con el `presupuesto_id` de este presupuesto y SIN "
+        "`texto` para verlas todas (una palabra suelta puede no aparecer en "
+        "ninguna descripción y parecer, por error, que el presupuesto está "
+        "vacío) — si ya hay partidas, agrúpalas por fase dando su "
+        "`partida_id` en cada entrada, no montes partidas nuevas con datos "
+        "inventados. Solo crea partidas nuevas (`resumen`/`unidad`/"
+        "`componentes`, resueltos contra el banco o personalizados) si el "
+        "usuario pide contenido que de verdad no existe todavía. En los "
+        "cuatro casos: nunca digas que ya está "
+        "copiada, creada, movida o dada de alta, "
         "porque no lo está — solo lo propones, y quien pregunta decide si "
         "confirma. Responde siempre en español, breve y directo. No inventes "
         "precios que nadie te haya dado: los del banco salen de una búsqueda, "
@@ -276,7 +388,7 @@ async def _buscar_presupuestos(
 
 
 async def _buscar_partidas(
-    session: AsyncSession, org_id: uuid.UUID, texto: str, presupuesto_id: str | None
+    session: AsyncSession, org_id: uuid.UUID, texto: str | None, presupuesto_id: str | None
 ) -> list[dict]:
     condiciones = [Partida.organization_id == org_id]
     if presupuesto_id:
@@ -284,15 +396,21 @@ async def _buscar_partidas(
             condiciones.append(Partida.presupuesto_id == uuid.UUID(presupuesto_id))
         except ValueError:
             return [{"error": "presupuesto_id no es un uuid válido"}]
-    patron = f"%{texto}%"
-    condiciones.append(or_(Partida.resumen.ilike(patron), Partida.codigo.ilike(patron)))
+    if texto:
+        patron = f"%{texto}%"
+        condiciones.append(or_(Partida.resumen.ilike(patron), Partida.codigo.ilike(patron)))
     stmt = (
         select(Partida, Capitulo.resumen, Presupuesto.nombre, Presupuesto.codigo)
         .join(Capitulo, Capitulo.id == Partida.capitulo_id)
         .join(Presupuesto, Presupuesto.id == Partida.presupuesto_id)
         .where(*condiciones)
         .order_by(Presupuesto.fecha.desc().nullslast())
-        .limit(LIMITE_RESULTADOS)
+        # Sin texto de por medio pero acotado a UN presupuesto (listar TODO
+        # lo que tiene, no buscar algo concreto): el límite genérico de la
+        # cuenta entera se queda corto, un presupuesto normal ya tiene más
+        # de 10 líneas. Sin texto Y sin presupuesto sigue siendo una
+        # búsqueda abierta sobre toda la cuenta — se queda con el tope bajo.
+        .limit(LIMITE_RESULTADOS_PRESUPUESTO if (not texto and presupuesto_id) else LIMITE_RESULTADOS)
     )
     filas = (await session.execute(stmt)).all()
     return [
@@ -301,6 +419,7 @@ async def _buscar_partidas(
             "presupuesto_id": str(p.presupuesto_id),
             "presupuesto_codigo": pres_codigo,
             "presupuesto_nombre": pres_nombre,
+            "capitulo_id": str(p.capitulo_id),
             "capitulo": cap_resumen,
             "codigo": p.codigo,
             "resumen": p.resumen,
@@ -326,6 +445,100 @@ async def _buscar_conceptos_banco(session: AsyncSession, texto: str) -> list[dic
         }
         for c in conceptos
     ]
+
+
+async def _resolver_componentes(
+    session: AsyncSession, org_id: uuid.UUID, brutos: list[dict]
+) -> tuple[list[ComponentePropuestoOut], list[str]]:
+    """Componentes del descompuesto de una partida propuesta, del banco
+    (resueltos contra `Concepto`) o personalizados — usado tanto por
+    `proponer_crear_partida` (una partida suelta) como por
+    `proponer_capitulos` (varias, una por partida de cada capítulo). Devuelve los
+    componentes válidos y, aparte, qué no se pudo resolver (para que el
+    modelo sepa qué le falló sin reventar toda la propuesta)."""
+    componentes: list[ComponentePropuestoOut] = []
+    no_encontrados: list[str] = []
+    for bruto in brutos:
+        rendimiento = bruto.get("rendimiento")
+        if rendimiento is None:
+            no_encontrados.append("(sin rendimiento)")
+            continue
+
+        if bruto.get("personalizado"):
+            resumen_comp = bruto.get("resumen")
+            unidad_comp = bruto.get("unidad")
+            precio_comp = bruto.get("precio")
+            if not resumen_comp or not unidad_comp or precio_comp is None:
+                no_encontrados.append(f"personalizado incompleto: {bruto}")
+                continue
+            componentes.append(
+                ComponentePropuestoOut(
+                    resumen=resumen_comp,
+                    unidad=unidad_comp,
+                    rendimiento=rendimiento,
+                    personalizado=True,
+                    precio=precio_comp,
+                    naturaleza=bruto.get("naturaleza") or "sin_clasificar",
+                )
+            )
+            continue
+
+        concepto_id = bruto.get("concepto_id")
+        concepto = None
+        if concepto_id:
+            try:
+                concepto = await session.get(Concepto, uuid.UUID(concepto_id))
+            except ValueError:
+                concepto = None
+        if concepto is None or concepto.organization_id != org_id:
+            no_encontrados.append(str(concepto_id))
+            continue
+        componentes.append(
+            ComponentePropuestoOut(
+                concepto_id=concepto.id,
+                codigo=concepto.codigo,
+                resumen=concepto.resumen,
+                unidad=concepto.unidad,
+                rendimiento=rendimiento,
+            )
+        )
+    return componentes, no_encontrados
+
+
+async def _resolver_partida_item(
+    session: AsyncSession, org_id: uuid.UUID, bruto_partida: dict
+) -> tuple[PartidaConComponentesOut | None, str | None]:
+    """Una entrada de `partidas` dentro de un capítulo propuesto: movida
+    (`partida_id`, ya existe) o nueva (`resumen`/`unidad`/`componentes`,
+    resueltos contra el banco o personalizados) — usado por
+    `proponer_capitulos` para cada partida de cada capítulo."""
+    partida_id_bruto = bruto_partida.get("partida_id")
+    if partida_id_bruto:
+        partida_existente = None
+        try:
+            partida_existente = await session.get(Partida, uuid.UUID(partida_id_bruto))
+        except ValueError:
+            pass
+        if partida_existente is None or partida_existente.organization_id != org_id:
+            return None, f"partida_id no existe en esta cuenta: {partida_id_bruto}"
+        return (
+            PartidaConComponentesOut(
+                partida_id=partida_existente.id,
+                resumen=partida_existente.resumen,
+                unidad=partida_existente.unidad,
+            ),
+            None,
+        )
+
+    resumen_p = bruto_partida.get("resumen")
+    unidad_p = bruto_partida.get("unidad")
+    brutos_comp = bruto_partida.get("componentes") or []
+    if not resumen_p or not unidad_p or not brutos_comp:
+        return None, f"partida incompleta: {bruto_partida}"
+    comp_ok, comp_no_encontrados = await _resolver_componentes(session, org_id, brutos_comp)
+    if not comp_ok:
+        return None, f"«{resumen_p}»: ningún componente válido ({comp_no_encontrados})"
+    return PartidaConComponentesOut(resumen=resumen_p, unidad=unidad_p, componentes=comp_ok), None
 
 
 async def conversar(
@@ -380,13 +593,9 @@ async def conversar(
                     session, org_id, argumentos.get("cliente"), argumentos.get("texto")
                 )
             elif nombre == "buscar_partidas":
-                texto = argumentos.get("texto")
-                if not texto:
-                    resultado = {"error": "Hace falta un texto para buscar"}
-                else:
-                    resultado = await _buscar_partidas(
-                        session, org_id, texto, argumentos.get("presupuesto_id")
-                    )
+                resultado = await _buscar_partidas(
+                    session, org_id, argumentos.get("texto"), argumentos.get("presupuesto_id")
+                )
             elif nombre == "proponer_copiar_partida":
                 partida_id = argumentos.get("partida_id")
                 partida = None
@@ -420,54 +629,9 @@ async def conversar(
                         "error": "Faltan datos: hacen falta resumen, unidad y al menos un componente"
                     }
                 else:
-                    componentes: list[ComponentePropuestoOut] = []
-                    ids_no_encontrados: list[str] = []
-                    for bruto in brutos:
-                        rendimiento = bruto.get("rendimiento")
-                        if rendimiento is None:
-                            ids_no_encontrados.append("(sin rendimiento)")
-                            continue
-
-                        if bruto.get("personalizado"):
-                            resumen_comp = bruto.get("resumen")
-                            unidad_comp = bruto.get("unidad")
-                            precio_comp = bruto.get("precio")
-                            if not resumen_comp or not unidad_comp or precio_comp is None:
-                                ids_no_encontrados.append(
-                                    f"personalizado incompleto: {bruto}"
-                                )
-                                continue
-                            componentes.append(
-                                ComponentePropuestoOut(
-                                    resumen=resumen_comp,
-                                    unidad=unidad_comp,
-                                    rendimiento=rendimiento,
-                                    personalizado=True,
-                                    precio=precio_comp,
-                                    naturaleza=bruto.get("naturaleza") or "sin_clasificar",
-                                )
-                            )
-                            continue
-
-                        concepto_id = bruto.get("concepto_id")
-                        concepto = None
-                        if concepto_id:
-                            try:
-                                concepto = await session.get(Concepto, uuid.UUID(concepto_id))
-                            except ValueError:
-                                concepto = None
-                        if concepto is None or concepto.organization_id != org_id:
-                            ids_no_encontrados.append(str(concepto_id))
-                            continue
-                        componentes.append(
-                            ComponentePropuestoOut(
-                                concepto_id=concepto.id,
-                                codigo=concepto.codigo,
-                                resumen=concepto.resumen,
-                                unidad=concepto.unidad,
-                                rendimiento=rendimiento,
-                            )
-                        )
+                    componentes, ids_no_encontrados = await _resolver_componentes(
+                        session, org_id, brutos
+                    )
                     if not componentes:
                         resultado = {
                             "error": "Ninguno de los componentes indicados es válido"
@@ -484,6 +648,56 @@ async def conversar(
                         resultado = {
                             "ok": True,
                             "componentes_no_encontrados": ids_no_encontrados or None,
+                        }
+            elif nombre == "proponer_capitulos":
+                brutos_capitulos = argumentos.get("capitulos") or []
+                if not brutos_capitulos:
+                    resultado = {"error": "Falta al menos un capítulo en 'capitulos'"}
+                else:
+                    capitulos_ok: list[CapituloPropuestoOut] = []
+                    capitulos_con_error: list[str] = []
+                    for bruto_capitulo in brutos_capitulos:
+                        resumen_capitulo = bruto_capitulo.get("capitulo_resumen")
+                        brutos_partidas = bruto_capitulo.get("partidas") or []
+                        if not resumen_capitulo or not brutos_partidas:
+                            capitulos_con_error.append(f"capítulo incompleto: {bruto_capitulo}")
+                            continue
+                        partidas_ok: list[PartidaConComponentesOut] = []
+                        partidas_con_error: list[str] = []
+                        for bruto_partida in brutos_partidas:
+                            item, error = await _resolver_partida_item(session, org_id, bruto_partida)
+                            if item is not None:
+                                partidas_ok.append(item)
+                            else:
+                                partidas_con_error.append(error or "partida inválida")
+                        if not partidas_ok:
+                            capitulos_con_error.append(
+                                f"«{resumen_capitulo}»: ninguna partida válida ({partidas_con_error})"
+                            )
+                            continue
+                        capitulos_ok.append(
+                            CapituloPropuestoOut(resumen=resumen_capitulo, partidas=partidas_ok)
+                        )
+                    if not capitulos_ok:
+                        resultado = {
+                            "error": "Ninguno de los capítulos indicados es válido",
+                            "detalle": capitulos_con_error,
+                        }
+                    else:
+                        total_partidas = sum(len(c.partidas) for c in capitulos_ok)
+                        propuesta = PropuestaAccionOut(
+                            tipo="crear_capitulos",
+                            capitulos_propuestos=capitulos_ok,
+                            descripcion=argumentos.get("descripcion")
+                            or (
+                                f"Crear {len(capitulos_ok)} capítulo"
+                                f"{'s' if len(capitulos_ok) != 1 else ''} con "
+                                f"{total_partidas} partidas en total"
+                            ),
+                        )
+                        resultado = {
+                            "ok": True,
+                            "capitulos_con_error": capitulos_con_error or None,
                         }
             else:
                 resultado = {"error": f"Herramienta desconocida: {nombre}"}

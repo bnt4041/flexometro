@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,6 +31,12 @@ class AccionAuditoria(StrEnum):
     CREADO = "creado"
     MODIFICADO = "modificado"
     ELIMINADO = "eliminado"
+    # No es un diff de columnas de la propia entidad: una acción del servidor
+    # digna de aparecer en el historial pero que ocurre en otra tabla sin
+    # `AutoriaMixin` (la IA añade un capítulo con partidas a un presupuesto,
+    # por ejemplo — ni `Capitulo` ni `Partida` llevan autoría propia). Lleva
+    # `descripcion` en vez de `cambios`.
+    EVENTO = "evento"
 
 
 class RegistroAuditoria(UUIDPrimaryKeyMixin, Base):
@@ -58,8 +64,11 @@ class RegistroAuditoria(UUIDPrimaryKeyMixin, Base):
         enum_column(AccionAuditoria, "accion_auditoria"), nullable=False
     )
     # Lista de {"campo", "antes", "despues"}; None en creado/eliminado (el
-    # propio `accion` ya lo dice, no hace falta listar todas las columnas).
+    # propio `accion` ya lo dice, no hace falta listar todas las columnas) y
+    # en evento (usa `descripcion` en su lugar).
     cambios: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Solo para accion=evento: texto libre de lo ocurrido.
+    descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Igual que `UsoIA.usuario_subject`: el usuario vive en Keycloak, no aquí.
     usuario_subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
     usuario_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)

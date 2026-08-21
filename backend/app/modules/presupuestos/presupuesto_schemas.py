@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.enums import OrigenDato, TipoIVA
 from app.core.html_seguro import sanear_html
@@ -368,6 +368,75 @@ class CapituloCreate(BaseModel):
         return sanear_html(valor)
 
 
+class PartidaPropuestaIA(BaseModel):
+    """Una línea que la IA ha leído de un documento y propone — igual que
+    `ia.schemas.PartidaPropuestaOut`, redeclarado aquí en vez de importado:
+    `presupuestos` no depende de `ia`, es al revés."""
+
+    resumen: str = Field(min_length=1, max_length=250)
+    unidad: str = Field(min_length=1, max_length=10)
+    precio: Decimal = Field(ge=0)
+    medicion: Decimal = Decimal("1")
+
+
+class AplicarPropuestaIA(BaseModel):
+    """Crea de una vez el capítulo + partidas que la IA propuso al leer un
+    documento arrastrado (Fase 39/41), en una sola transacción — sustituye a
+    la secuencia de llamadas sueltas `POST capitulos` + `POST partidas` que
+    hacía antes el cliente, para poder dejar un único evento en el
+    historial (ver `app.modules.core.auditoria_service.registrar_evento`)
+    en vez de que la creación pase desapercibida (`Capitulo`/`Partida` no
+    llevan `AutoriaMixin`)."""
+
+    capitulo_resumen: str = Field(min_length=1, max_length=250)
+    partidas: list[PartidaPropuestaIA] = Field(min_length=1)
+
+
+class ComponentePropuestoIA(BaseModel):
+    """Un componente del descompuesto de una partida propuesta por la IA —
+    del banco de precios (`concepto_id`) o personalizado (se da de alta como
+    concepto nuevo al aplicar la propuesta, ver `ia.asistente`)."""
+
+    concepto_id: uuid.UUID | None = None
+    rendimiento: Decimal
+    personalizado: bool = False
+    resumen: str | None = Field(default=None, max_length=250)
+    unidad: str | None = Field(default=None, max_length=10)
+    precio: Decimal | None = Field(default=None, ge=0)
+    naturaleza: NaturalezaConcepto = NaturalezaConcepto.SIN_CLASIFICAR
+
+
+class PartidaConComponentesIA(BaseModel):
+    """Una partida bajo el capítulo nuevo: movida (`partida_id`, ya existe
+    en el presupuesto) o creada de cero (`resumen`/`unidad`/`componentes`)."""
+
+    partida_id: uuid.UUID | None = None
+    resumen: str | None = Field(default=None, max_length=250)
+    unidad: str | None = Field(default=None, max_length=10)
+    componentes: list[ComponentePropuestoIA] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _mover_xor_crear(self) -> "PartidaConComponentesIA":
+        if self.partida_id is not None:
+            return self
+        if not self.resumen or not self.unidad or not self.componentes:
+            raise ValueError(
+                "Cada partida necesita partida_id (para moverla) o "
+                "resumen + unidad + al menos un componente (para crearla)"
+            )
+        return self
+
+
+class AplicarCapituloConComponentesIA(BaseModel):
+    """Como `AplicarPropuestaIA`, pero para partidas con descompuesto real
+    contra el banco de precios (Fase 42) en vez de alzadas — lo que propone
+    `ia.asistente.proponer_crear_capitulo` en la conversación de "Ayuda con
+    IA", no el chat de documentos."""
+
+    capitulo_resumen: str = Field(min_length=1, max_length=250)
+    partidas: list[PartidaConComponentesIA] = Field(min_length=1)
+
+
 class CapituloUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -429,7 +498,12 @@ class PresupuestoBase(BaseModel):
     tipo_iva: TipoIVA = TipoIVA.GENERAL
     inversion_sujeto_pasivo: bool = False
     metodo_calculo: MetodoCalculo = MetodoCalculo.CLASICO
-    porcentaje_metodo: Decimal = Field(default=Decimal("0.00"), ge=0, le=99.99)
+    # Sin ge/le: el reajuste (`presupuesto_service.simular_reajuste`) puede
+    # dejarlo negativo a propósito (vender por debajo de coste, ver su
+    # docstring) escribiendo directo por ORM, sin pasar por este schema —
+    # una cota aquí solo rompería la LECTURA de esos presupuestos después
+    # (`PresupuestoOut` hereda este campo), no impediría escribirlos.
+    porcentaje_metodo: Decimal = Decimal("0.00")
     tipo_obra: str | None = Field(default=None, max_length=120)
     notas: str | None = None
 
@@ -454,7 +528,7 @@ class PresupuestoUpdate(BaseModel):
     tipo_iva: TipoIVA | None = None
     inversion_sujeto_pasivo: bool | None = None
     metodo_calculo: MetodoCalculo | None = None
-    porcentaje_metodo: Decimal | None = Field(default=None, ge=0, le=99.99)
+    porcentaje_metodo: Decimal | None = None
     precios_bloqueados: bool | None = None
     tipo_obra: str | None = Field(default=None, max_length=120)
     notas: str | None = None

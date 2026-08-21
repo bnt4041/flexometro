@@ -231,8 +231,33 @@ class PartidaPropuestaOut(BaseModel):
     medicion: Decimal = Decimal("1")
 
 
+class PartidaConComponentesOut(BaseModel):
+    """Una partida bajo un capítulo nuevo (Fase 42) — nueva, con su
+    descompuesto ya resuelto contra el banco (igual que los `componentes` de
+    `crear_partida`), o ya existente y solo movida aquí (`partida_id`, ver
+    Fase 42b: reorganizar un presupuesto que ya tiene partidas)."""
+
+    # Movida (ya existe, viene de `buscar_partidas`): resumen/unidad/
+    # componentes se ignoran, son solo informativos si vienen.
+    partida_id: uuid.UUID | None = None
+    resumen: str | None = None
+    unidad: str | None = None
+    componentes: list[ComponentePropuestoOut] = Field(default_factory=list)
+
+
+class CapituloPropuestoOut(BaseModel):
+    """Un capítulo propuesto, uno de varios a la vez (Fase 42c): el usuario
+    confirma el plan entero (todas las fases de obra) en un solo paso, en
+    vez de tener que pedir cada capítulo por separado porque el asistente
+    nunca puede encadenar una propuesta con la siguiente sin confirmación de
+    por medio."""
+
+    resumen: str
+    partidas: list[PartidaConComponentesOut] = Field(default_factory=list)
+
+
 class PropuestaAccionOut(BaseModel):
-    tipo: Literal["copiar_partida", "crear_partida", "importar_capitulo"]
+    tipo: Literal["copiar_partida", "crear_partida", "importar_capitulo", "crear_capitulos"]
     descripcion: str
     # copiar_partida:
     partida_id: uuid.UUID | None = None
@@ -246,6 +271,12 @@ class PropuestaAccionOut(BaseModel):
     # que trae el documento, no del banco de precios propio.
     capitulo_resumen: str | None = None
     partidas_propuestas: list[PartidaPropuestaOut] = Field(default_factory=list)
+    # crear_capitulos (Fase 42/42c): uno o varios capítulos nuevos de una
+    # vez —por ejemplo, todas las fases de obra en un solo plan—, cada
+    # partida nueva con su descompuesto contra el banco de precios, o
+    # movida si ya existía (no alzada como `importar_capitulo`, que viene
+    # de un documento externo).
+    capitulos_propuestos: list[CapituloPropuestoOut] = Field(default_factory=list)
 
 
 class RespuestaAyudaLinea(BaseModel):

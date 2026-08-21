@@ -18,6 +18,7 @@ class RegistroAuditoriaOut(BaseModel):
     id: uuid.UUID
     accion: AccionAuditoria
     cambios: list[CambioCampoOut] | None
+    descripcion: str | None
     usuario_subject: str | None
     usuario_nombre: str | None
     created_at: datetime

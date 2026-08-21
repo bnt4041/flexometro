@@ -15,11 +15,13 @@ type Propuesta = PropuestaIA
 /** Conversación con la IA sobre una línea del presupuesto (Fase 1g/1h). Tiene
  *  acceso de solo lectura a toda la cuenta (presupuestos, partidas, banco de
  *  precios) y puede terminar proponiendo una acción — copiar una partida ya
- *  existente, o montar una nueva con componentes del banco — pero nunca la
- *  ejecuta ella sola: la propuesta se enseña como una tarjeta aparte que hay
- *  que confirmar, y esa confirmación reutiliza los mismos endpoints que ya
- *  usan Ctrl+V/arrastrar y el botón "+ Línea" del descompuesto, no un camino
- *  de escritura nuevo. */
+ *  existente, montar una nueva con componentes del banco, o (Fase 42/42c)
+ *  uno o varios capítulos de una vez (por ejemplo, todas las fases de obra
+ *  en un solo plan), moviendo partidas que ya existen o creando otras
+ *  nuevas — pero nunca la ejecuta ella sola: la propuesta se enseña como
+ *  una tarjeta aparte que hay que confirmar, y esa confirmación reutiliza
+ *  los mismos endpoints que ya usan Ctrl+V/arrastrar y el botón "+ Línea"
+ *  del descompuesto, no un camino de escritura nuevo. */
 export function AyudaIAModal({
   contexto,
   destinoCapituloId,
@@ -117,13 +119,33 @@ export function AyudaIAModal({
     return `Hecho: partida «${propuesta.resumen}» creada con ${propuesta.componentes.length} componente${propuesta.componentes.length === 1 ? '' : 's'}.`
   }
 
+  async function confirmarCapitulos() {
+    if (!propuesta || propuesta.capitulos_propuestos.length === 0) return
+    // Un capítulo por llamada, en secuencia (no en paralelo: cada uno hace
+    // su propio commit y dos peticiones a la vez podrían pisarse el orden
+    // dentro del presupuesto) — pero de cara al usuario es un solo "Confirmar".
+    const hechos: string[] = []
+    for (const capitulo of propuesta.capitulos_propuestos) {
+      const resultado = await api.presupuestos.aplicarCapituloIA(contexto.presupuesto_id, {
+        capitulo_resumen: capitulo.resumen,
+        partidas: capitulo.partidas,
+      })
+      hechos.push(`«${resultado.resumen}» (${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'})`)
+    }
+    return `Hecho: capítulo${hechos.length === 1 ? '' : 's'} creado${hechos.length === 1 ? '' : 's'} ${hechos.join(', ')}.`
+  }
+
   async function confirmarPropuesta(alcance: AlcancePegado) {
     if (!propuesta || confirmando) return
     setConfirmando(true)
     setError(null)
     try {
       const texto =
-        propuesta.tipo === 'copiar_partida' ? await confirmarCopiar(alcance) : await confirmarCrear()
+        propuesta.tipo === 'copiar_partida'
+          ? await confirmarCopiar(alcance)
+          : propuesta.tipo === 'crear_capitulos'
+            ? await confirmarCapitulos()
+            : await confirmarCrear()
       setPropuesta(null)
       if (texto) setMensajes((actual) => [...actual, { rol: 'assistant', contenido: texto }])
       onCambio()
@@ -173,7 +195,65 @@ export function AyudaIAModal({
                 ))}
               </ul>
             )}
-            {destinoCapituloId ? (
+            {propuesta.tipo === 'crear_capitulos' && propuesta.capitulos_propuestos.length > 0 && (
+              <div className="chat-ia__capitulos">
+                {propuesta.capitulos_propuestos.map((cap, k) => (
+                  <div key={k} className="chat-ia__capitulo">
+                    <strong>{cap.resumen}</strong>
+                    <ul className="chat-ia__componentes">
+                      {cap.partidas.map((p, i) => (
+                        <li key={p.partida_id ?? i}>
+                          <strong>
+                            {p.resumen} {p.unidad ? `(${p.unidad})` : ''}
+                          </strong>
+                          {p.partida_id ? (
+                            <span className="muted"> · ya existe, se mueve aquí</span>
+                          ) : (
+                            <ul className="chat-ia__componentes">
+                              {p.componentes.map((c, j) => (
+                                <li key={c.concepto_id ?? j}>
+                                  {c.rendimiento} {c.unidad} —{' '}
+                                  {c.personalizado ? (
+                                    <>
+                                      {c.resumen} · <strong>personalizado, {c.precio} €</strong>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {c.codigo} · {c.resumen}
+                                    </>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+            {propuesta.tipo === 'crear_capitulos' ? (
+              // Crea capítulos nuevos: no depende de la fila desde la que se
+              // abrió esta conversación, a diferencia de copiar/crear una
+              // partida suelta (que van al capítulo de destino).
+              <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+                <button
+                  className="btn btn--sm"
+                  disabled={confirmando}
+                  onClick={() => void confirmarPropuesta('copiar')}
+                >
+                  <Check size={14} aria-hidden="true" />
+                  {propuesta.capitulos_propuestos.length === 1
+                    ? 'Confirmar y crear capítulo'
+                    : `Confirmar los ${propuesta.capitulos_propuestos.length} capítulos`}
+                </button>
+                <button className="btn btn--sm" disabled={confirmando} onClick={() => setPropuesta(null)}>
+                  <X size={14} aria-hidden="true" />
+                  Descartar
+                </button>
+              </div>
+            ) : destinoCapituloId ? (
               <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
                 <button
                   className="btn btn--sm"

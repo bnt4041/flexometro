@@ -584,7 +584,12 @@ export function RejillaPresupuesto({
       notificar('No hay nada copiado')
       return
     }
-    const actual = filaDestino ?? filaActiva.current
+    // `null` explícito (soltar en la franja de la raíz, ver RejillaEditable)
+    // tiene que valer como "la raíz", no como "sin especificar" — con `??`
+    // los dos casos se confundían y `null` acababa cayendo en
+    // `filaActiva.current`, el mismo bug que ya arreglaba `pegarEnRaiz` para
+    // el atajo de teclado, pero sin cubrir todavía soltar arrastrando.
+    const actual = filaDestino !== undefined ? filaDestino : filaActiva.current
     const destino = contenedorDe(actual)
     if (contenido.tipo === 'partidas') {
       if (!destino) {
@@ -601,6 +606,75 @@ export function RejillaPresupuesto({
       return
     }
     notificar('Lo copiado no se puede pegar aquí')
+  }
+
+  /** Soltar cerca del borde de una fila (Fase 1i): reordenar como hermano
+   *  suyo, justo antes o después — a diferencia de `pegar` (soltar "dentro"),
+   *  esto siempre es un movimiento sin preguntar copiar/mover, porque
+   *  reordenar solo tiene sentido moviendo lo que ya había. Si lo que se
+   *  arrastra es de otro tipo que la fila de destino (una partida sobre el
+   *  borde de un capítulo, por ejemplo), no hay hermandad posible — cae al
+   *  comportamiento normal de `pegar`. */
+  function soltarEnBorde(filaDestino: FilaPresupuesto, zona: 'antes' | 'despues') {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    const tipoArrastrado = contenido.tipo === 'capitulos' ? 'capitulo' : contenido.tipo === 'partidas' ? 'partida' : null
+    if (tipoArrastrado !== filaDestino.tipo) {
+      pegar(filaDestino)
+      return
+    }
+    void reordenarComoHermano(contenido.ids, filaDestino, zona)
+  }
+
+  async function reordenarComoHermano(
+    idsArrastrados: string[],
+    filaDestino: FilaPresupuesto,
+    zona: 'antes' | 'despues',
+  ) {
+    const tipo = filaDestino.tipo
+    const contenedor = filaDestino.padreId
+    const idsArrastradosSet = new Set(idsArrastrados)
+
+    const hermanos = filas
+      .filter((f) => f.id !== ID_RAIZ && f.tipo === tipo && f.padreId === contenedor && !idsArrastradosSet.has(f.id))
+      .sort((a, b) => a.orden - b.orden)
+
+    const indiceDestino = hermanos.findIndex((f) => f.id === filaDestino.id)
+    if (indiceDestino === -1) return
+    const posicion = zona === 'antes' ? indiceDestino : indiceDestino + 1
+
+    const listaFinal = [
+      ...hermanos.slice(0, posicion).map((f) => f.id),
+      ...idsArrastrados,
+      ...hermanos.slice(posicion).map((f) => f.id),
+    ]
+
+    try {
+      await Promise.all(
+        listaFinal.map((id, indice) => {
+          const origen = porId.get(id)
+          const cambiaDeContenedor = Boolean(origen) && origen!.padreId !== contenedor
+          if (tipo === 'capitulo') {
+            return api.capitulos.update(id, {
+              orden: indice,
+              ...(cambiaDeContenedor ? { parent_id: contenedor } : {}),
+            })
+          }
+          // Una partida siempre tiene contenedor (su capítulo): `tipo === 'partida'`
+          // nunca llega aquí con `contenedor` a `null` (ver `aplanar`).
+          return api.partidas.update(id, {
+            orden: indice,
+            ...(cambiaDeContenedor && contenedor ? { capitulo_id: contenedor } : {}),
+          })
+        }),
+      )
+      onCambio()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
   }
 
   /** Pegar a nivel raíz sin depender de qué fila esté activa: con contenido
@@ -1004,7 +1078,7 @@ export function RejillaPresupuesto({
         seleccionadaId={seleccionadaId}
         onCopiar={copiar}
         onPegar={pegar}
-        onSoltarEn={(f) => pegar(f)}
+        onSoltarEn={(f, zona) => (f && zona !== 'dentro' ? soltarEnBorde(f, zona) : pegar(f))}
         puedeArrastrar={(f) => f.id !== ID_RAIZ}
         onSoltarFichero={manejarFicheros}
         menuContextual={menuContextualDe}

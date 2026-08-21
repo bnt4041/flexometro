@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +14,16 @@ from app.core.schemas import Page
 from app.modules.presupuestos import formulas, informes
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import presupuesto_service as service
+from app.modules.presupuestos import service as banco_service
 from app.modules.presupuestos import versionado
 from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, Presupuesto
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.core.tenant_utils import cuenta_id_del_principal
+from app.modules.presupuestos.schemas import ConceptoCreate
 from app.modules.presupuestos.presupuesto_schemas import (
+    AplicarCapituloConComponentesIA,
+    AplicarPropuestaIA,
     CambioOut,
     CapituloCreate,
     CapituloUpdate,
@@ -175,6 +180,168 @@ async def historial(
         session, tabla=tabla_de(Presupuesto), registro_id=presupuesto_id
     )
     return [RegistroAuditoriaOut.model_validate(r) for r in registros]
+
+
+@presupuestos_router.post(
+    "/{presupuesto_id}/aplicar-propuesta-ia", response_model=dict, status_code=status.HTTP_201_CREATED
+)
+async def aplicar_propuesta_ia(
+    presupuesto_id: uuid.UUID,
+    datos: AplicarPropuestaIA,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict:
+    """Crea el capítulo + partidas que la IA propuso al leer un documento
+    (Fase 39/41) en un solo paso, y deja constancia en el historial —
+    `Capitulo`/`Partida` no llevan `AutoriaMixin`, así que sin esto su
+    creación no dejaría ningún rastro de que fue la IA quien las propuso."""
+    presupuesto = await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    capitulo = await service.crear_capitulo(
+        session, presupuesto_id, CapituloCreate(resumen=datos.capitulo_resumen)
+    )
+    assert capitulo is not None
+    for p in datos.partidas:
+        await service.crear_partida(
+            session,
+            capitulo.id,
+            PartidaCreate(
+                resumen=p.resumen,
+                unidad=p.unidad,
+                precio=p.precio,
+                lineas=[LineaMedicionCreate(uds=p.medicion)],
+            ),
+        )
+    await auditoria_service.registrar_evento(
+        session,
+        tabla=tabla_de(Presupuesto),
+        registro_id=presupuesto_id,
+        organization_id=presupuesto.organization_id,
+        descripcion=(
+            f"La IA añadió el capítulo «{capitulo.resumen}» con "
+            f"{len(datos.partidas)} partida{'s' if len(datos.partidas) != 1 else ''}, "
+            "leído de un documento."
+        ),
+        usuario_subject=principal.subject,
+        usuario_nombre=principal.username,
+    )
+    await session.commit()
+    return {
+        "id": str(capitulo.id),
+        "resumen": capitulo.resumen,
+        "partidas": len(datos.partidas),
+    }
+
+
+@presupuestos_router.post(
+    "/{presupuesto_id}/aplicar-capitulo-ia",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def aplicar_capitulo_ia(
+    presupuesto_id: uuid.UUID,
+    datos: AplicarCapituloConComponentesIA,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict:
+    """Como `aplicar_propuesta_ia`, pero para partidas con descompuesto real
+    (Fase 42: "Ayuda con IA" proponiendo una fase de obra entera) en vez de
+    alzadas — un componente personalizado se da de alta como concepto nuevo
+    antes de añadirlo, igual que hacía el cliente a mano en `AyudaIAModal`."""
+    presupuesto = await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+    capitulo = await service.crear_capitulo(
+        session, presupuesto_id, CapituloCreate(resumen=datos.capitulo_resumen)
+    )
+    assert capitulo is not None
+
+    for orden, partida_datos in enumerate(datos.partidas):
+        if partida_datos.partida_id is not None:
+            existente = await service.obtener_partida(session, partida_datos.partida_id)
+            # No solo que exista y sea de esta cuenta (ya lo comprobó el
+            # asistente al proponerlo): tiene que ser DE ESTE presupuesto —
+            # `Partida.presupuesto_id` no se puede cambiar aquí, así que
+            # moverla de capítulo sin esta comprobación dejaría una partida
+            # con el capítulo de un presupuesto y el presupuesto_id de otro.
+            if existente is None or existente.presupuesto_id != presupuesto_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"La partida {partida_datos.partida_id} no es de este presupuesto",
+                )
+            movida = await service.actualizar_partida(
+                session, partida_datos.partida_id, PartidaUpdate(capitulo_id=capitulo.id, orden=orden)
+            )
+            assert movida is not None
+            continue
+
+        partida = await service.crear_partida(
+            session,
+            capitulo.id,
+            PartidaCreate(resumen=partida_datos.resumen, unidad=partida_datos.unidad, orden=orden),
+        )
+        assert partida is not None
+        for comp in partida_datos.componentes:
+            if comp.personalizado:
+                if not comp.resumen or not comp.unidad or comp.precio is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Un componente personalizado necesita resumen, unidad y precio",
+                    )
+                concepto = await banco_service.crear_concepto(
+                    session,
+                    ConceptoCreate(
+                        tipo="basico",
+                        naturaleza=comp.naturaleza,
+                        unidad=comp.unidad,
+                        resumen=comp.resumen,
+                        precio=comp.precio,
+                        origen_precio="manual",
+                        origen_dato="ia",
+                    ),
+                )
+                hijo_id = concepto.id
+            elif comp.concepto_id is not None:
+                hijo_id = comp.concepto_id
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Cada componente necesita concepto_id o personalizado",
+                )
+            try:
+                await service.anadir_componente(
+                    session, partida.id, hijo_id, comp.rendimiento, Decimal("1")
+                )
+            except service.ConceptoInvalido as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+                ) from exc
+
+    total_partidas = len(datos.partidas)
+    movidas = sum(1 for p in datos.partidas if p.partida_id is not None)
+    creadas = total_partidas - movidas
+    partes_descripcion = []
+    if movidas:
+        partes_descripcion.append(f"{movidas} partida{'s' if movidas != 1 else ''} movida{'s' if movidas != 1 else ''} aquí")
+    if creadas:
+        partes_descripcion.append(f"{creadas} partida{'s' if creadas != 1 else ''} nueva{'s' if creadas != 1 else ''}")
+    await auditoria_service.registrar_evento(
+        session,
+        tabla=tabla_de(Presupuesto),
+        registro_id=presupuesto_id,
+        organization_id=presupuesto.organization_id,
+        descripcion=(
+            f"La IA creó el capítulo «{capitulo.resumen}» con "
+            f"{' y '.join(partes_descripcion)}."
+        ),
+        usuario_subject=principal.subject,
+        usuario_nombre=principal.username,
+    )
+    await session.commit()
+    return {
+        "id": str(capitulo.id),
+        "resumen": capitulo.resumen,
+        "partidas": total_partidas,
+    }
 
 
 @presupuestos_router.patch("/{presupuesto_id}/lineas", response_model=PresupuestoDetalle)

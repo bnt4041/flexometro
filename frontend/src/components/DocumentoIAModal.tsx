@@ -181,23 +181,36 @@ export function DocumentoIAModal({
     setConfirmando(true)
     setError(null)
     try {
-      const capitulo = await api.presupuestos.addCapitulo(presupuestoId, {
-        resumen: propuesta.capitulo_resumen || 'Importado de documento',
+      // Un único endpoint atómico (capítulo + partidas + rastro en el
+      // historial) en vez de crear el capítulo y luego cada partida por
+      // separado: si algo falla a media lista no queda un capítulo huérfano,
+      // y el historial del presupuesto deja constancia de que fue la IA.
+      const resultado = await api.presupuestos.aplicarPropuestaIA(presupuestoId, {
+        capitulo_resumen: propuesta.capitulo_resumen || 'Importado de documento',
+        partidas: propuesta.partidas_propuestas,
       })
-      for (const p of propuesta.partidas_propuestas) {
-        await api.capitulos.addPartida(capitulo.id, {
-          resumen: p.resumen,
-          unidad: p.unidad,
-          precio: p.precio,
-          lineas: [{ uds: p.medicion }],
-        })
+      // El documento que dio origen a la propuesta se guarda solo al
+      // confirmarla: en ese momento el usuario ya ha dado por buena la
+      // lectura, así que el documento merece quedar archivado sin un clic
+      // aparte en "Guardar en Documentos".
+      if (!guardado) {
+        try {
+          for (const fichero of ficheros) {
+            await api.documentos.upload(entidad, entidadId, fichero)
+          }
+          setGuardado(true)
+          onGuardado?.()
+        } catch {
+          /* si el documento no se puede guardar, no se pierde el capítulo ya
+             creado — el usuario siempre puede reintentar con el botón */
+        }
       }
       setPropuesta(null)
       setMensajes((actual) => [
         ...actual,
         {
           rol: 'assistant',
-          contenido: `Hecho: capítulo «${capitulo.resumen}» creado con ${propuesta.partidas_propuestas.length} partida${propuesta.partidas_propuestas.length === 1 ? '' : 's'}.`,
+          contenido: `Hecho: capítulo «${resultado.resumen}» creado con ${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'}.`,
         },
       ])
       onCambio?.()

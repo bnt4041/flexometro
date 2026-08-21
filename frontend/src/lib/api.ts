@@ -488,7 +488,10 @@ export interface ContactoAsociado {
 // no uno genérico: así el permiso que se comprueba es siempre el mismo que
 // ya protege la ficha (incluido "solo lo mío"), sin duplicar esa lógica aquí.
 
-export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado'
+// 'evento': una acción del servidor que no es un diff de columnas de la
+// propia entidad (la IA añadiendo un capítulo con partidas a un
+// presupuesto, por ejemplo) — lleva `descripcion` en vez de `cambios`.
+export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado' | 'evento'
 
 export interface CambioCampo {
   campo: string
@@ -500,6 +503,7 @@ export interface RegistroAuditoria {
   id: string
   accion: AccionAuditoria
   cambios: CambioCampo[] | null
+  descripcion: string | null
   usuario_subject: string | null
   usuario_nombre: string | null
   created_at: string
@@ -1339,29 +1343,49 @@ async function subir<T>(path: string, formulario: FormData): Promise<T> {
 /** Lo que puede proponer la IA en "Ayuda con IA" o en la conversación sobre
  *  un documento arrastrado — nunca lo ejecuta ella, solo deja la propuesta
  *  lista para que el usuario la confirme (ver `AyudaIAModal`/`DocumentoIAModal`). */
+export interface ComponentePropuesto {
+  concepto_id: string | null
+  codigo: string | null
+  resumen: string
+  unidad: string
+  rendimiento: string
+  // Personalizado: no existe en el banco de precios, se da de alta al
+  // confirmar con este precio/naturaleza (ver AyudaIAModal.confirmarCrear).
+  personalizado: boolean
+  precio: string | null
+  naturaleza: string | null
+}
+
+export interface PartidaConComponentes {
+  partida_id: string | null
+  resumen: string | null
+  unidad: string | null
+  componentes: ComponentePropuesto[]
+}
+
+export interface CapituloPropuesto {
+  resumen: string
+  partidas: PartidaConComponentes[]
+}
+
 export interface PropuestaIA {
-  tipo: 'copiar_partida' | 'crear_partida' | 'importar_capitulo'
+  tipo: 'copiar_partida' | 'crear_partida' | 'importar_capitulo' | 'crear_capitulos'
   descripcion: string
   // copiar_partida:
   partida_id: string | null
   // crear_partida:
   resumen: string | null
   unidad: string | null
-  componentes: {
-    concepto_id: string | null
-    codigo: string | null
-    resumen: string
-    unidad: string
-    rendimiento: string
-    // Personalizado: no existe en el banco de precios, se da de alta al
-    // confirmar con este precio/naturaleza (ver AyudaIAModal.confirmarCrear).
-    personalizado: boolean
-    precio: string | null
-    naturaleza: string | null
-  }[]
-  // importar_capitulo:
+  componentes: ComponentePropuesto[]
+  // importar_capitulo (chat de documentos): partidas alzadas, con el precio
+  // que trae el documento, no del banco de precios propio.
   capitulo_resumen: string | null
   partidas_propuestas: { resumen: string; unidad: string; precio: string; medicion: string }[]
+  // crear_capitulos (Fase 42/42c, "Ayuda con IA"): uno o varios capítulos
+  // de una vez (por ejemplo, todas las fases de obra) — cada partida de
+  // cada capítulo es una ya existente que se mueve aquí (`partida_id`) o
+  // una nueva con su descompuesto real contra el banco de precios.
+  capitulos_propuestos: CapituloPropuesto[]
 }
 
 export interface AnalisisBC3 {
@@ -1987,6 +2011,46 @@ export const api = {
       patch<Presupuesto>(`/api/presupuestos/${id}`, datos),
     remove: (id: string) => del(`/api/presupuestos/${id}`),
     historial: (id: string) => request<RegistroAuditoria[]>(`/api/presupuestos/${id}/historial`),
+    /** Crea de una vez el capítulo + partidas que la IA propuso al leer un
+     *  documento, en una sola transacción y con rastro en el historial —
+     *  sustituye a llamar `addCapitulo` + `addPartida` en bucle desde el
+     *  cliente (ver DocumentoIAModal.confirmarPropuesta). */
+    aplicarPropuestaIA: (
+      id: string,
+      datos: {
+        capitulo_resumen: string
+        partidas: { resumen: string; unidad: string; precio: string; medicion: string }[]
+      },
+    ) => post<{ id: string; resumen: string; partidas: number }>(
+      `/api/presupuestos/${id}/aplicar-propuesta-ia`,
+      datos,
+    ),
+    /** Como `aplicarPropuestaIA`, pero para partidas con descompuesto real
+     *  contra el banco de precios (Fase 42, "Ayuda con IA" proponiendo una
+     *  fase de obra entera) en vez de alzadas. */
+    aplicarCapituloIA: (
+      id: string,
+      datos: {
+        capitulo_resumen: string
+        partidas: {
+          partida_id?: string | null
+          resumen?: string | null
+          unidad?: string | null
+          componentes?: {
+            concepto_id?: string | null
+            rendimiento: string
+            personalizado: boolean
+            resumen?: string | null
+            unidad?: string | null
+            precio?: string | null
+            naturaleza?: string | null
+          }[]
+        }[]
+      },
+    ) => post<{ id: string; resumen: string; partidas: number }>(
+      `/api/presupuestos/${id}/aplicar-capitulo-ia`,
+      datos,
+    ),
     addCapitulo: (
       id: string,
       datos: { resumen: string; parent_id?: string | null; orden?: number },

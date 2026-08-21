@@ -32,12 +32,14 @@ const ETIQUETA_ACCION: Record<AccionAuditoria, string> = {
   creado: 'Creado',
   modificado: 'Modificado',
   eliminado: 'Eliminado',
+  evento: 'IA',
 }
 
 const CLASE_ACCION: Record<AccionAuditoria, string> = {
   creado: 'badge--success',
   modificado: 'badge--info',
   eliminado: 'badge--danger',
+  evento: 'badge--core',
 }
 
 /** Pestaña "Historial" (Fase 38) de cualquier ficha grande del negocio: quién
@@ -89,6 +91,7 @@ export function Historial({ cargar }: { cargar: () => Promise<RegistroAuditoria[
                 <span> {r.usuario_nombre ?? 'Alguien'}</span>
                 <span className="muted"> · {formatoFecha(r.created_at)}</span>
               </div>
+              {r.descripcion && <div className="timeline__cuerpo">{r.descripcion}</div>}
               {r.cambios && r.cambios.length > 0 && (
                 <table className="table historial__cambios">
                   <tbody>
