@@ -6,9 +6,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# curl para el healthcheck; el resto son las librerías nativas que WeasyPrint
-# necesita para componer y rasterizar el PDF (Pango para el texto, Cairo para
-# el dibujo) más una familia tipográfica con acentos y el símbolo del euro.
+# curl para el healthcheck; las librerías Pango/Cairo/gdk-pixbuf son las que
+# WeasyPrint necesita para componer y rasterizar el PDF genérico de listados
+# (Fase 20 y 21). libreoffice-writer + fonts-liberation son para convertir a
+# PDF las plantillas Word rellenadas (Fase 39): fonts-liberation tiene las
+# métricas compatibles con Arial/Times/Calibri, así que el PDF no reajusta
+# saltos de línea del Word original.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
@@ -17,6 +20,8 @@ RUN apt-get update \
         libcairo2 \
         libgdk-pixbuf-2.0-0 \
         fonts-dejavu-core \
+        libreoffice-writer \
+        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Las dependencias primero: cambiar código no invalida esta capa.

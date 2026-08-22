@@ -149,6 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           )}
         </nav>
+        <div className="sidebar__version">v{import.meta.env.VITE_APP_VERSION ?? '0.0'}</div>
       </aside>
 
       <div className="main">

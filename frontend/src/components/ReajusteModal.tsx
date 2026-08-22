@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Lock, RefreshCw, Save, X } from 'lucide-react'
 
 import { ErrorNotice, Field, Modal, formatoImporte } from './ui'
-import { api } from '../lib/api'
+import { api, ETIQUETA_METODO } from '../lib/api'
 import type { MetodoCalculo, Reajuste, TipoReajuste } from '../lib/api'
 import { useToast } from '../toast'
 
@@ -23,17 +23,20 @@ const ETIQUETA_PORCENTAJE: Record<MetodoCalculo, string> = {
 export function ReajusteModal({
   presupuestoId,
   totalActual,
+  metodoActual,
   onClose,
   onAplicado,
 }: {
   presupuestoId: string
   totalActual: string
+  metodoActual: MetodoCalculo
   onClose: () => void
   onAplicado: () => void
 }) {
   const { notificar } = useToast()
   const [tipo, setTipo] = useState<TipoReajuste>('importe')
   const [valor, setValor] = useState(totalActual)
+  const [metodo, setMetodo] = useState<MetodoCalculo>(metodoActual)
   const [vista, setVista] = useState<Reajuste | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState(false)
@@ -46,6 +49,7 @@ export function ReajusteModal({
         tipo,
         valor: valor.replace(',', '.'),
         aplicar,
+        metodo: metodo === metodoActual ? undefined : metodo,
       })
       if (aplicar) {
         notificar(
@@ -75,6 +79,25 @@ export function ReajusteModal({
           venta bloqueada (candado) no se tocan.
         </p>
         <div className="form-grid">
+          <Field
+            label="Método de cálculo"
+            hint={metodo !== metodoActual ? 'Distinto del actual: se dejará fijado al aplicar' : undefined}
+          >
+            <select
+              className="select"
+              value={metodo}
+              onChange={(e) => {
+                setMetodo(e.target.value as MetodoCalculo)
+                setVista(null)
+              }}
+            >
+              {Object.entries(ETIQUETA_METODO).map(([clave, etiqueta]) => (
+                <option key={clave} value={clave}>
+                  {etiqueta}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Objetivo">
             <select
               className="select"

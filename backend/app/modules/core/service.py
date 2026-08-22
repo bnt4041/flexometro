@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import fijar_organizacion_activa
 from app.core.modules import registry
 from app.modules.core.admin_schemas import OrganizacionCreate, OrganizacionUpdate
+from app.modules.core.cuenta_schemas import EmpresaUpdate
 from app.modules.core.models import Organization, OrganizationModule
 
 
@@ -105,14 +106,26 @@ async def _persist(
 # una organización concreta.
 
 
-class SlugDuplicado(Exception):
-    pass
-
-
 async def obtener_organizacion(
     session: AsyncSession, organization_id: uuid.UUID
 ) -> Organization | None:
     return await session.get(Organization, organization_id)
+
+
+async def slug_organizacion_unico(session: AsyncSession, nombre: str) -> str:
+    """Genera el slug del nombre (Fase 41: ya no se teclea a mano en ningún
+    sitio) y le añade `-2`, `-3`... si hiciera falta hasta que sea único —
+    `Organization.slug` es único en todo el realm, no solo dentro de la
+    cuenta."""
+    from app.core.texto import slugify
+
+    base = slugify(nombre)
+    candidato = base
+    sufijo = 2
+    while await session.scalar(select(Organization.id).where(Organization.slug == candidato)):
+        candidato = f"{base}-{sufijo}"[:64]
+        sufijo += 1
+    return candidato
 
 
 async def crear_organizacion(
@@ -121,20 +134,20 @@ async def crear_organizacion(
     """Una organización siempre nace dentro de una cuenta (Fase 14) — no hay
     alta de organización "suelta"; `cuenta_id` lo exige `cuenta_router.py`
     antes de llamar aquí."""
-    existe = await session.scalar(
-        select(Organization.id).where(Organization.slug == datos.slug)
-    )
-    if existe:
-        raise SlugDuplicado(f"Ya existe una organización con el slug '{datos.slug}'")
-
-    organizacion = Organization(cuenta_id=cuenta_id, **datos.model_dump())
+    slug = await slug_organizacion_unico(session, datos.name)
+    organizacion = Organization(cuenta_id=cuenta_id, slug=slug, **datos.model_dump())
     session.add(organizacion)
     await session.flush()
+
+    from app.modules.core import diccionario_seeds
+
+    await diccionario_seeds.sembrar_minimos(session, cuenta_id)
+
     return organizacion
 
 
 async def actualizar_organizacion(
-    session: AsyncSession, organization_id: uuid.UUID, datos: OrganizacionUpdate
+    session: AsyncSession, organization_id: uuid.UUID, datos: "OrganizacionUpdate | EmpresaUpdate"
 ) -> Organization | None:
     organizacion = await obtener_organizacion(session, organization_id)
     if organizacion is None:
@@ -143,6 +156,49 @@ async def actualizar_organizacion(
         setattr(organizacion, campo, valor)
     await session.flush()
     return organizacion
+
+
+async def subir_logo_organizacion(
+    session: AsyncSession, organization_id: uuid.UUID, contenido: bytes, content_type: str
+) -> Organization | None:
+    """Un único logo por organización: la clave es fija, así que subir uno
+    nuevo sencillamente sobrescribe el objeto anterior en MinIO."""
+    from app.core import storage
+
+    organizacion = await obtener_organizacion(session, organization_id)
+    if organizacion is None:
+        return None
+    object_key = f"organizacion-logos/{organization_id}"
+    await storage.subir_objeto(object_key, contenido, content_type)
+    organizacion.logo_object_key = object_key
+    organizacion.logo_content_type = content_type
+    await session.flush()
+    return organizacion
+
+
+async def eliminar_logo_organizacion(session: AsyncSession, organization_id: uuid.UUID) -> Organization | None:
+    from app.core import storage
+
+    organizacion = await obtener_organizacion(session, organization_id)
+    if organizacion is None or organizacion.logo_object_key is None:
+        return organizacion
+    await storage.eliminar_objeto(organizacion.logo_object_key)
+    organizacion.logo_object_key = None
+    organizacion.logo_content_type = None
+    await session.flush()
+    return organizacion
+
+
+async def logo_de_organizacion(
+    session: AsyncSession, organization_id: uuid.UUID
+) -> tuple[bytes, str] | None:
+    from app.core import storage
+
+    organizacion = await obtener_organizacion(session, organization_id)
+    if organizacion is None or organizacion.logo_object_key is None:
+        return None
+    contenido = await storage.descargar_objeto(organizacion.logo_object_key)
+    return contenido, organizacion.logo_content_type or "application/octet-stream"
 
 
 async def estado_modulos(

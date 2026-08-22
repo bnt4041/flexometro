@@ -3,8 +3,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_RE_SLUG = r"^[a-z0-9]+(-[a-z0-9]+)*$"
-
 
 class ModuloEstadoOut(BaseModel):
     code: str
@@ -32,9 +30,9 @@ class OrganizacionDetalle(OrganizacionOut):
 
 
 class OrganizacionCreate(BaseModel):
-    # Mismo alfabeto que el atributo `organizacion` de Keycloak: minúsculas,
-    # dígitos y guiones, sin empezar ni acabar en guion.
-    slug: str = Field(min_length=2, max_length=64, pattern=_RE_SLUG)
+    # El slug (mismo alfabeto que el atributo `organizacion` de Keycloak:
+    # minúsculas, dígitos y guiones) ya no se teclea — se genera del nombre,
+    # ver `service.crear_organizacion`.
     name: str = Field(min_length=1, max_length=200)
     cif: str | None = Field(default=None, max_length=20)
 

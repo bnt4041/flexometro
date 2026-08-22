@@ -85,10 +85,7 @@ async def crear_organizacion_de_cuenta(
 ) -> OrganizacionOut:
     if await cuenta_service.obtener_cuenta(session, cuenta_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
-    try:
-        organizacion = await core_service.crear_organizacion(session, cuenta_id, datos)
-    except core_service.SlugDuplicado as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    organizacion = await core_service.crear_organizacion(session, cuenta_id, datos)
     return OrganizacionOut.model_validate(organizacion)
 
 

@@ -83,7 +83,7 @@ export function Historial({ cargar }: { cargar: () => Promise<RegistroAuditoria[
       ) : (
         <div className="timeline">
           {registros.map((r) => (
-            <div key={r.id} className="timeline__item">
+            <div key={r.id} className={`timeline__item timeline__item--${r.accion}`}>
               <div className="timeline__meta">
                 <span className={`badge ${CLASE_ACCION[r.accion]}`}>
                   {ETIQUETA_ACCION[r.accion]}

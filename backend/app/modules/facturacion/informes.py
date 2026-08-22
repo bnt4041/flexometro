@@ -1,7 +1,7 @@
 """Documentos PDF de facturación: factura y certificación.
 
-Mismo mecanismo que en `presupuestos/informes.py` (Jinja2 + WeasyPrint dentro
-del contenedor), con una plantilla propia de este módulo: cada módulo es dueño
+Mismo mecanismo que `core/exportar_pdf.py` (Jinja2 + WeasyPrint dentro del
+contenedor), con una plantilla propia de este módulo: cada módulo es dueño
 de su papelería, no se comparte `base.html` entre dominios distintos.
 """
 

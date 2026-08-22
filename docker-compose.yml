@@ -200,6 +200,7 @@ services:
       VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-obras}
       VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-obras-web}
       VITE_AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
+      VITE_APP_VERSION: ${APP_VERSION:-0.0}
     ports:
       - "127.0.0.1:${WEB_PORT:-5173}:5173"
     volumes:

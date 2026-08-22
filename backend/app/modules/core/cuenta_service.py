@@ -7,11 +7,16 @@ from app.core.numeracion import PATRON_POR_DEFECTO, PatronInvalido, validar_patr
 from app.modules.core.cuenta_schemas import (
     CuentaCreate,
     CuentaUpdate,
+    EmpresaCrear,
     PatronNumeracionOut,
     PatronNumeracionUpdate,
 )
 from app.modules.core.models import Cuenta, Organization
 from app.modules.core.numeracion_models import PatronNumeracion, TipoDocumentoNumeracion
+
+
+class LimiteEmpresasSuperado(Exception):
+    pass
 
 
 async def listar_cuentas(session: AsyncSession) -> list[Cuenta]:
@@ -62,6 +67,46 @@ async def cifs_distintos_de_cuenta(session: AsyncSession, cuenta_id: uuid.UUID) 
         .distinct()
     )
     return len(filas.all()) > 1
+
+
+# --- Empresas de la cuenta (Fase 41) ---
+
+
+async def crear_empresa_autoservicio(
+    session: AsyncSession, cuenta_id: uuid.UUID, datos: EmpresaCrear
+) -> Organization:
+    """Como `core_service.crear_organizacion`, pero comprobando antes el
+    límite de empresas de la cuenta — la única diferencia real entre este
+    camino (autoservicio) y el del superadmin."""
+    from app.modules.core import service as core_service
+    from app.modules.core.admin_schemas import OrganizacionCreate
+
+    cuenta = await obtener_cuenta(session, cuenta_id)
+    if cuenta is None:
+        raise ValueError("Cuenta no encontrada")
+
+    actuales = await organizaciones_de_cuenta(session, cuenta_id)
+    if len(actuales) >= cuenta.max_organizaciones:
+        raise LimiteEmpresasSuperado(
+            f"Esta cuenta ya tiene {len(actuales)} de {cuenta.max_organizaciones} empresas permitidas"
+        )
+
+    return await core_service.crear_organizacion(
+        session, cuenta_id, OrganizacionCreate(name=datos.name, cif=datos.cif)
+    )
+
+
+async def empresa_de_cuenta(
+    session: AsyncSession, cuenta_id: uuid.UUID, organization_id: uuid.UUID
+) -> Organization | None:
+    """Una organización concreta, solo si es de esta cuenta — para que un
+    admin de organización pueda leer/editar cualquier empresa suya (Fase 41,
+    pestañas de Ajustes -> Empresa) sin poder tocar una de otra cuenta."""
+    return await session.scalar(
+        select(Organization).where(
+            Organization.id == organization_id, Organization.cuenta_id == cuenta_id
+        )
+    )
 
 
 # --- Patrones de numeración (Fase 16) ---

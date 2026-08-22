@@ -11,7 +11,7 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.presupuestos import formulas, informes
+from app.modules.presupuestos import exportador_excel, formulas
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos import service as banco_service
@@ -385,7 +385,7 @@ async def reajustar(
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     try:
         resultado = await service.reajustar(
-            session, presupuesto_id, datos.tipo, datos.valor, datos.aplicar
+            session, presupuesto_id, datos.tipo, datos.valor, datos.aplicar, datos.metodo
         )
     except service.ReajusteImposible as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -1162,28 +1162,33 @@ async def instanciar(
     return PresupuestoOut.model_validate(nuevo)
 
 
-@presupuestos_router.get("/{presupuesto_id}/pdf/{documento}")
-async def descargar_pdf(
+@presupuestos_router.get("/{presupuesto_id}/excel")
+async def descargar_excel(
     presupuesto_id: uuid.UUID,
-    documento: str,
+    coste: bool = Query(default=True),
+    venta: bool = Query(default=False),
+    descompuestos: bool = Query(default=False),
+    mediciones: bool = Query(default=False),
+    descripcion: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
     alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
 ) -> Response:
-    """Presupuesto, estado de mediciones o cuadro de precios descompuestos."""
-    if documento not in informes.DOCUMENTOS:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Documento desconocido. Disponibles: {', '.join(informes.DOCUMENTOS)}",
-        )
+    """Presupuesto en Excel, con las hojas y columnas que se pidan."""
     presupuesto = await _presupuesto_propio(session, presupuesto_id, alcance, principal)
-
-    pdf = await informes.generar(session, presupuesto, documento)
-    nombre = f"{presupuesto.codigo}-{documento}.pdf"
+    datos = await exportador_excel.generar_excel(
+        session,
+        presupuesto,
+        incluir_coste=coste,
+        incluir_venta=venta,
+        incluir_descompuestos=descompuestos,
+        incluir_mediciones=mediciones,
+        incluir_descripcion=descripcion,
+    )
     return Response(
-        content=pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{nombre}"'},
+        content=datos,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{presupuesto.codigo}.xlsx"'},
     )
 
 

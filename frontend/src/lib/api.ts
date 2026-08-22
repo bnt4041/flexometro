@@ -1272,6 +1272,73 @@ async function mensajeDeError(response: Response): Promise<string> {
  *  para lo que el navegador sabe mostrar (PDF) y la descarga directa para lo
  *  que no (BC3).
  */
+/** Qué llevar en un BC3/Excel (Fase 39) — coste y venta son excluyentes en
+ *  BC3 (un solo precio por línea) pero libres en Excel; el modal es quien
+ *  decide eso, aquí solo se serializan los que vengan marcados. */
+export interface OpcionesExportacion {
+  coste?: boolean
+  venta?: boolean
+  descompuestos?: boolean
+  mediciones?: boolean
+  descripcion?: boolean
+}
+
+function queryExportacion(opciones: OpcionesExportacion): string {
+  const parametros = new URLSearchParams()
+  for (const [clave, valor] of Object.entries(opciones)) {
+    if (valor !== undefined) parametros.set(clave, String(valor))
+  }
+  return parametros.toString()
+}
+
+export interface PlantillaPresupuesto {
+  id: string
+  es_sistema: boolean
+  nombre: string
+  claves_detectadas: string[]
+  activo: boolean
+  created_at: string
+}
+
+export interface Empresa {
+  id: string
+  name: string
+  cif: string | null
+  direccion: string | null
+  codigo_postal: string | null
+  ciudad: string | null
+  provincia: string | null
+  telefono: string | null
+  email: string | null
+  web: string | null
+  linkedin: string | null
+  instagram: string | null
+  facebook: string | null
+  twitter: string | null
+  politica_privacidad: string | null
+  tiene_logo: boolean
+}
+
+export interface EmpresaResumen {
+  id: string
+  slug: string
+  name: string
+  cif: string | null
+  is_active: boolean
+  es_la_actual: boolean
+}
+
+export interface EmpresasCuenta {
+  empresas: EmpresaResumen[]
+  max_organizaciones: number
+  puede_crear: boolean
+}
+
+/** Cualquier usuario autenticado puede verlo (es de marca, no un dato
+ *  sensible) — no vive bajo /ajustes. Pídelo con `urlBlob()`, como cualquier
+ *  imagen que necesite la cabecera Authorization. */
+export const LOGO_ORGANIZACION_URL = '/api/organizacion/logo'
+
 export async function descargar(
   path: string,
   nombre: string,
@@ -1489,6 +1556,37 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(datos),
       }),
+    /** Fase 40/41: hasta 2 empresas (CIFs) por cuenta, cada una con sus
+     *  datos básicos, logo y política de privacidad — cualquiera de las de
+     *  la propia cuenta es editable aquí, no solo la activa en la sesión. */
+    empresas: {
+      list: () => request<EmpresasCuenta>('/api/ajustes/empresas'),
+      crear: (datos: { name: string; cif?: string | null }) =>
+        post<EmpresaResumen>('/api/ajustes/empresas', datos),
+      get: (id: string) => request<Empresa>(`/api/ajustes/empresas/${id}`),
+      actualizar: (id: string, datos: Partial<Omit<Empresa, 'id' | 'tiene_logo'>>) =>
+        patch<Empresa>(`/api/ajustes/empresas/${id}`, datos),
+      logoUrl: (id: string) => `/api/ajustes/empresas/${id}/logo`,
+      subirLogo: (id: string, archivo: File) => {
+        const f = new FormData()
+        f.append('archivo', archivo)
+        return subir<Empresa>(`/api/ajustes/empresas/${id}/logo`, f)
+      },
+      eliminarLogo: (id: string) => request<Empresa>(`/api/ajustes/empresas/${id}/logo`, { method: 'DELETE' }),
+    },
+    /** Fase 39: plantillas Word para exportar presupuestos — de sistema
+     *  (no editables) más las propias de la cuenta. */
+    plantillasPresupuesto: {
+      list: () => request<PlantillaPresupuesto[]>('/api/ajustes/plantillas-presupuesto'),
+      subir: (nombre: string, archivo: File) => {
+        const f = new FormData()
+        f.append('nombre', nombre)
+        f.append('archivo', archivo)
+        return subir<PlantillaPresupuesto>('/api/ajustes/plantillas-presupuesto', f)
+      },
+      eliminar: (id: string) => del(`/api/ajustes/plantillas-presupuesto/${id}`),
+      descargarPatronUrl: (id: string) => `/api/ajustes/plantillas-presupuesto/${id}/descargar`,
+    },
     /** Fase 18: mismo patrón, autoservicio de cuenta — CRUD completo (a
      *  diferencia de `diccionario.list`, que es de solo lectura para
      *  cualquier usuario). */
@@ -1692,7 +1790,7 @@ export const api = {
       ) => patch<CuentaAdminDetalle>(`/api/admin/cuentas/${id}`, datos),
       organizaciones: {
         list: (id: string) => request<OrganizacionAdmin[]>(`/api/admin/cuentas/${id}/organizaciones`),
-        create: (id: string, datos: { slug: string; name: string; cif?: string | null }) =>
+        create: (id: string, datos: { name: string; cif?: string | null }) =>
           post<OrganizacionAdmin>(`/api/admin/cuentas/${id}/organizaciones`, datos),
       },
       costeEstimado: (id: string) =>
@@ -2003,8 +2101,12 @@ export const api = {
       id: string,
       datos: { nombre: string; cliente_id?: string | null; emplazamiento?: string | null },
     ) => post<Presupuesto>(`/api/presupuestos/${id}/instanciar`, datos),
-    /** El PDF se abre por URL directa: el navegador ya sabe mostrarlo. */
-    pdfUrl: (id: string, documento: string) => `/api/presupuestos/${id}/pdf/${documento}`,
+    excelUrl: (id: string, opciones: OpcionesExportacion) =>
+      `/api/presupuestos/${id}/excel?${queryExportacion(opciones)}`,
+    plantillas: (id: string) =>
+      request<PlantillaPresupuesto[]>(`/api/presupuestos/${id}/plantillas`),
+    plantillaUrl: (id: string, plantillaId: string, formato: 'docx' | 'pdf') =>
+      `/api/presupuestos/${id}/plantilla/${plantillaId}?formato=${formato}`,
     get: (id: string) => request<PresupuestoDetalle>(`/api/presupuestos/${id}`),
     create: (datos: Partial<Presupuesto>) => post<Presupuesto>('/api/presupuestos', datos),
     update: (id: string, datos: Partial<Presupuesto>) =>
@@ -2066,8 +2168,10 @@ export const api = {
       ),
     recursos: (id: string) => request<RecursosPresupuesto>(`/api/presupuestos/${id}/recursos`),
     /** `aplicar: false` solo simula: es lo que alimenta la vista previa (Fase 36). */
-    reajustar: (id: string, datos: { tipo: TipoReajuste; valor: string; aplicar: boolean }) =>
-      post<Reajuste>(`/api/presupuestos/${id}/reajuste`, datos),
+    reajustar: (
+      id: string,
+      datos: { tipo: TipoReajuste; valor: string; aplicar: boolean; metodo?: MetodoCalculo },
+    ) => post<Reajuste>(`/api/presupuestos/${id}/reajuste`, datos),
     /** Varios cambios de celda de la rejilla en una sola petición (Fase 33). */
     actualizarLineas: (id: string, cambios: CambioLinea[]) =>
       patch<PresupuestoDetalle>(`/api/presupuestos/${id}/lineas`, { cambios }),
@@ -2217,7 +2321,8 @@ export const api = {
       f.append('estrategia', estrategia)
       return subir<ImportacionBC3>(`/api/fiebdc/importar-en-presupuesto/${presupuestoId}`, f)
     },
-    exportarUrl: (presupuestoId: string) => `/api/fiebdc/exportar/${presupuestoId}`,
+    exportarUrl: (presupuestoId: string, opciones: OpcionesExportacion) =>
+      `/api/fiebdc/exportar/${presupuestoId}?${queryExportacion(opciones)}`,
   },
 
   personal: {

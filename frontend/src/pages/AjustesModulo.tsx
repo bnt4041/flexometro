@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react'
 
 import { EmptyState, ErrorNotice } from '../components/ui'
 import { NumeracionCard } from '../components/NumeracionCard'
+import { PlantillasPresupuestoCard } from '../components/PlantillasPresupuestoCard'
 import { api } from '../lib/api'
 import { useWorkspace } from '../workspace'
 
@@ -52,18 +53,23 @@ export function AjustesModulo() {
         <EmptyState title={t('ajustes.ajustesDeModulo.moduloNoEncontrado')}>
           {t('ajustes.ajustesDeModulo.moduloNoEncontradoDesc')}
         </EmptyState>
-      ) : modulo.tipo_documento_numeracion === null ? (
+      ) : modulo.tipo_documento_numeracion === null && codigo !== 'presupuestos' ? (
         <EmptyState title={t('ajustes.ajustesDeModulo.sinAjustesPropios')}>
           {t('ajustes.ajustesDeModulo.sinAjustesPropiosDesc')}
         </EmptyState>
       ) : (
-        <NumeracionCard
-          cifsDistintos={cifsDistintos}
-          soloTipos={[modulo.tipo_documento_numeracion]}
-          listar={() => api.ajustes.numeracion().then((r) => r.patrones)}
-          actualizar={api.ajustes.actualizarNumeracion}
-          incluirTitulo={false}
-        />
+        <>
+          {modulo.tipo_documento_numeracion !== null && (
+            <NumeracionCard
+              cifsDistintos={cifsDistintos}
+              soloTipos={[modulo.tipo_documento_numeracion]}
+              listar={() => api.ajustes.numeracion().then((r) => r.patrones)}
+              actualizar={api.ajustes.actualizarNumeracion}
+              incluirTitulo={false}
+            />
+          )}
+          {codigo === 'presupuestos' && <PlantillasPresupuestoCard />}
+        </>
       )}
     </>
   )

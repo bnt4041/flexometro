@@ -284,7 +284,6 @@ function NuevaOrganizacionModal({
   onClose: () => void
   onCreada: (organizacion: OrganizacionAdmin) => Promise<void>
 }) {
-  const [slug, setSlug] = useState('')
   const [name, setName] = useState('')
   const [cif, setCif] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -295,7 +294,6 @@ function NuevaOrganizacionModal({
     setError(null)
     try {
       const organizacion = await api.admin.cuentas.organizaciones.create(cuentaId, {
-        slug,
         name,
         cif: cif || undefined,
       })

@@ -25,6 +25,12 @@ async def lifespan(app: FastAPI):
         await asegurar_bucket()
     except Exception:
         logger.warning("No se pudo preparar el bucket de MinIO; el gestor documental fallará", exc_info=True)
+    try:
+        from app.modules.presupuestos.plantilla_docx_service import asegurar_plantillas_sistema
+
+        await asegurar_plantillas_sistema()
+    except Exception:
+        logger.warning("No se pudieron preparar las plantillas de sistema", exc_info=True)
     yield
 
 

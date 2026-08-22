@@ -63,4 +63,7 @@ def import_models() -> None:
     from app.modules.presupuestos import (  # noqa: F401
         models_presupuesto as _presupuesto_models,
     )
+    from app.modules.presupuestos import (  # noqa: F401
+        plantilla_docx_models as _presupuesto_plantilla_docx_models,
+    )
     from app.modules.terceros import models as _terceros_models  # noqa: F401

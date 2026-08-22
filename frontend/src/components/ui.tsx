@@ -170,7 +170,15 @@ export interface AccionMenu {
  *  editar/cambiar estado/eliminar (y lo que se añada después) en un solo
  *  sitio de la cabecera de una ficha, en vez de ir sumando botones sueltos.
  *  Se cierra al elegir una opción, al pulsar fuera o con Escape. */
-export function MenuAcciones({ acciones }: { acciones: AccionMenu[] }) {
+export function MenuAcciones({
+  acciones,
+  etiqueta = 'Acciones',
+  icono = 'mas-vertical',
+}: {
+  acciones: AccionMenu[]
+  etiqueta?: string
+  icono?: NombreIcono
+}) {
   const [abierto, setAbierto] = useState(false)
 
   useEffect(() => {
@@ -193,8 +201,8 @@ export function MenuAcciones({ acciones }: { acciones: AccionMenu[] }) {
   return (
     <div className="menu-acciones">
       <button className="btn" onClick={() => setAbierto((v) => !v)} aria-haspopup="menu" aria-expanded={abierto}>
-        <Icon name="mas-vertical" />
-        Acciones
+        <Icon name={icono} />
+        {etiqueta}
       </button>
       {abierto && (
         <div className="menu-acciones__lista" role="menu">

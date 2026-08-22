@@ -436,3 +436,8 @@ router.include_router(presupuesto_router)
 from app.modules.presupuestos.fiebdc_router import router as fiebdc_router  # noqa: E402
 
 router.include_router(fiebdc_router)
+
+from app.modules.presupuestos import plantilla_docx_router  # noqa: E402
+
+router.include_router(plantilla_docx_router.router)
+router.include_router(plantilla_docx_router.tenant_router)

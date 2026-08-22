@@ -4,8 +4,6 @@ import {
   Check,
   ChevronDown,
   Copy,
-  Download,
-  FileDown,
   Layers,
   Plus,
   RefreshCw,
@@ -18,6 +16,7 @@ import { ContactosAsociados } from '../components/ContactosAsociados'
 import { DescompuestoPartida } from '../components/DescompuestoPartida'
 import { DescripcionEditor } from '../components/DescripcionEditor'
 import { Documentos } from '../components/Documentos'
+import { ExportarModal } from '../components/ExportarModal'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
@@ -47,6 +46,7 @@ import type {
   LineaSugerida,
   NodoCapitulo,
   Partida,
+  PlantillaPresupuesto,
   PresupuestoDetalle as Detalle,
   MetodoCalculo,
   RecursosPresupuesto,
@@ -80,6 +80,8 @@ export function PresupuestoDetalle() {
   const [editando, setEditando] = useState(false)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
   const [reajustando, setReajustando] = useState(false)
+  const [exportando, setExportando] = useState<'bc3' | 'excel' | null>(null)
+  const [plantillas, setPlantillas] = useState<PlantillaPresupuesto[]>([])
   const [seleccion, setSeleccion] = useState<
     { tipo: 'partida'; partida: Partida } | { tipo: 'capitulo'; fila: FilaPresupuesto } | null
   >(null)
@@ -112,6 +114,13 @@ export function PresupuestoDetalle() {
   useEffect(() => {
     void cargar()
   }, [cargar])
+
+  useEffect(() => {
+    api.presupuestos
+      .plantillas(id)
+      .then(setPlantillas)
+      .catch(() => setPlantillas([]))
+  }, [id])
 
   function cerrar() {
     navigate('/presupuestos')
@@ -182,39 +191,37 @@ export function PresupuestoDetalle() {
     <>
       <div className="barra-acciones">
         <span className="barra-acciones__grupo">
-          <span className="barra-acciones__etiqueta">Descargar</span>
-          {[
-            ['presupuesto', 'Presupuesto'],
-            ['mediciones', 'Mediciones'],
-            ['descompuestos', 'Descompuestos'],
-          ].map(([documento, etiqueta]) => (
-            <button
-              key={documento}
-              className="btn btn--sm"
-              onClick={() =>
-                void descargar(
-                  api.presupuestos.pdfUrl(id, documento),
-                  `${presupuesto!.codigo}-${documento}.pdf`,
-                  { abrir: true },
-                ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-              }
-            >
-              <FileDown size={14} aria-hidden="true" />
-              {etiqueta} PDF
-            </button>
-          ))}
-          <button
-            className="btn btn--sm"
-            onClick={() =>
-              void descargar(
-                api.fiebdc.exportarUrl(id),
-                `${presupuesto!.codigo}.bc3`,
-              ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }
-          >
-            <Download size={14} aria-hidden="true" />
-            BC3
-          </button>
+          <MenuAcciones
+            etiqueta="Descargar"
+            icono="descargar"
+            acciones={[
+              { id: 'bc3', etiqueta: 'BC3…', icono: 'descargar', onClick: () => setExportando('bc3') },
+              { id: 'excel', etiqueta: 'Excel…', icono: 'descargar', onClick: () => setExportando('excel') },
+              ...plantillas.flatMap((p) => [
+                {
+                  id: `plantilla-${p.id}-pdf`,
+                  etiqueta: `${p.nombre} (PDF)`,
+                  icono: 'descargar' as const,
+                  onClick: () =>
+                    void descargar(
+                      api.presupuestos.plantillaUrl(id, p.id, 'pdf'),
+                      `${presupuesto!.codigo}-${p.nombre}.pdf`,
+                      { abrir: true },
+                    ).catch((err) => setError(err instanceof Error ? err.message : String(err))),
+                },
+                {
+                  id: `plantilla-${p.id}-docx`,
+                  etiqueta: `${p.nombre} (Word)`,
+                  icono: 'descargar' as const,
+                  onClick: () =>
+                    void descargar(
+                      api.presupuestos.plantillaUrl(id, p.id, 'docx'),
+                      `${presupuesto!.codigo}-${p.nombre}.docx`,
+                    ).catch((err) => setError(err instanceof Error ? err.message : String(err))),
+                },
+              ]),
+            ]}
+          />
         </span>
         <span className="barra-acciones__grupo">
           <Tooltip texto="Duplicar como versión siguiente, con precios libres otra vez">
@@ -800,12 +807,22 @@ export function PresupuestoDetalle() {
       <ReajusteModal
         presupuestoId={id}
         totalActual={presupuesto.totales.pec_sin_iva}
+        metodoActual={presupuesto.metodo_calculo}
         onClose={() => setReajustando(false)}
         onAplicado={() => {
           setReajustando(false)
           void cargar()
           onCambio()
         }}
+      />
+    )}
+
+    {exportando && (
+      <ExportarModal
+        presupuestoId={id}
+        codigo={presupuesto.codigo}
+        formato={exportando}
+        onClose={() => setExportando(null)}
       />
     )}
 

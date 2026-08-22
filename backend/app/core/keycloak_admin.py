@@ -283,6 +283,41 @@ class KeycloakAdminClient:
             )
             return usuario
 
+    async def anadir_organizacion(self, user_id: str, organizacion_slug: str) -> None:
+        """Añade un slug al atributo `organizacion` de un usuario que ya
+        existe, sin tocar los que ya tuviera (Fase 41: el admin que crea una
+        segunda empresa de su cuenta gana acceso a las dos).
+
+        Se reenvía la representación COMPLETA del usuario (no solo
+        `attributes`): con el User Profile declarativo de Keycloak 26, un PUT
+        que solo manda `attributes` vacía `email` y el resto de campos no
+        incluidos en vez de dejarlos como estaban — se comprobó en vivo
+        (Fase 41, un usuario real se quedó sin `email` y no podía iniciar
+        sesión). Mandar el objeto entero que se acaba de leer evita ese
+        vaciado, sea cual sea el motivo exacto."""
+        base = self._base()
+        async with httpx.AsyncClient(timeout=15.0) as cliente:
+            token = await self._token_admin(cliente)
+            cabeceras = {"Authorization": f"Bearer {token}"}
+
+            respuesta = await cliente.get(f"{base}/users/{user_id}", headers=cabeceras)
+            if respuesta.status_code != 200:
+                raise KeycloakAdminError(f"No se pudo leer el usuario: {respuesta.text}")
+            usuario = respuesta.json()
+
+            atributos = usuario.get("attributes") or {}
+            slugs = list(atributos.get("organizacion") or [])
+            if organizacion_slug not in slugs:
+                slugs.append(organizacion_slug)
+            atributos["organizacion"] = slugs
+            usuario["attributes"] = atributos
+
+            respuesta = await cliente.put(f"{base}/users/{user_id}", headers=cabeceras, json=usuario)
+            if respuesta.status_code not in (200, 204):
+                raise KeycloakAdminError(
+                    f"No se pudo conceder acceso a la nueva empresa: {respuesta.text}"
+                )
+
     async def eliminar_usuario(self, user_id: str) -> None:
         base = self._base()
         async with httpx.AsyncClient(timeout=15.0) as cliente:

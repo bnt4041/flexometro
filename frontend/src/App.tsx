@@ -17,6 +17,7 @@ import { AjustesCamposLibres } from './pages/AjustesCamposLibres'
 import { AjustesDiccionario } from './pages/AjustesDiccionario'
 import { AjustesModulo } from './pages/AjustesModulo'
 import { AjustesModulos } from './pages/AjustesModulos'
+import { AjustesEmpresa } from './pages/AjustesEmpresa'
 import { AjustesMonedas } from './pages/AjustesMonedas'
 import { AjustesTraduccion } from './pages/AjustesTraduccion'
 import { BancoPrecioDetalle } from './pages/BancoPrecioDetalle'
@@ -205,6 +206,7 @@ function Workspace() {
             <Route path="/ajustes/traduccion" element={<AjustesTraduccion />} />
             <Route path="/ajustes/campos-libres" element={<AjustesCamposLibres />} />
             <Route path="/ajustes/monedas" element={<AjustesMonedas />} />
+            <Route path="/ajustes/empresa" element={<AjustesEmpresa />} />
           </>
         )}
 

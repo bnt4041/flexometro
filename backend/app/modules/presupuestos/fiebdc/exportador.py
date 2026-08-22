@@ -64,7 +64,18 @@ async def exportar_presupuesto(
     presupuesto: Presupuesto,
     *,
     codificacion: str = "cp1252",
+    incluir_venta: bool = False,
+    incluir_descompuestos: bool = True,
+    incluir_mediciones: bool = True,
+    incluir_descripcion: bool = True,
 ) -> bytes:
+    """Genera el BC3. `incluir_venta` cambia el precio de cada partida de
+    coste a venta — como el cuadro de precios no tiene un precio de venta
+    propio (solo lo tiene la partida), pedir venta implica no resolver ni
+    exportar el cuadro de precios: se fuerza `incluir_descompuestos=False`.
+    """
+    if incluir_venta:
+        incluir_descompuestos = False
     org_id = require_organization_id()
 
     capitulos = list(
@@ -98,7 +109,14 @@ async def exportar_presupuesto(
 
     # Los precios del presupuesto se exportan con su descomposición, para que
     # el fichero sea autosuficiente y el destino pueda reconstruir el cuadro.
-    conceptos = await _conceptos_implicados(session, partidas, org_id)
+    # Con venta o sin descompuestos no hace falta resolver el cuadro de
+    # precios: basta el precio ya calculado de cada partida.
+    if incluir_venta:
+        conceptos: dict[uuid.UUID, Concepto] = {}
+    elif incluir_descompuestos:
+        conceptos = await _conceptos_implicados(session, partidas, org_id)
+    else:
+        conceptos = await _conceptos_directos(session, partidas, org_id)
 
     lineas: list[str] = []
     codigo_raiz = f"{presupuesto.codigo}##"
@@ -118,7 +136,7 @@ async def exportar_presupuesto(
 
     for capitulo in capitulos:
         lineas.append(f"~C|{capitulo.codigo}#||{_limpiar(capitulo.resumen)}|0||0|")
-        if capitulo.texto:
+        if incluir_descripcion and capitulo.texto:
             lineas.append(f"~T|{capitulo.codigo}#|{_limpiar(capitulo.texto)}|")
 
     for concepto in conceptos.values():
@@ -127,16 +145,19 @@ async def exportar_presupuesto(
             f"~C|{concepto.codigo}|{_limpiar(concepto.unidad)}|{_limpiar(concepto.resumen)}"
             f"|{_numero(concepto.precio)}|{_fecha(concepto.fecha_precio)}|{tipo}|"
         )
-        if concepto.texto:
+        if incluir_descripcion and concepto.texto:
             lineas.append(f"~T|{concepto.codigo}|{_limpiar(concepto.texto)}|")
 
     # Las partidas alzadas no están en el cuadro de precios, así que se emiten
     # como conceptos propios o el fichero quedaría con referencias colgando.
+    # Con venta, ninguna partida referencia el cuadro (está vacío), así que
+    # todas pasan por aquí con su precio de venta.
+    precio_partida = "precio_venta" if incluir_venta else "precio"
     for partida in partidas:
         if partida.concepto_id is None or partida.concepto_id not in conceptos:
             lineas.append(
                 f"~C|{partida.codigo}|{_limpiar(partida.unidad)}|{_limpiar(partida.resumen)}"
-                f"|{_numero(partida.precio)}||0|"
+                f"|{_numero(getattr(partida, precio_partida))}||0|"
             )
 
     # --- Estructura ---
@@ -163,44 +184,65 @@ async def exportar_presupuesto(
             lineas.append(f"~D|{capitulo.codigo}#|{'\\'.join(elementos)}|")
 
     # Descomposición de los precios del cuadro.
-    for concepto in conceptos.values():
-        if not concepto.lineas:
-            continue
-        elementos = [
-            f"{linea.hijo.codigo}\\{_numero(linea.factor, 6)}\\{_numero(linea.rendimiento, 6)}"
-            for linea in concepto.lineas
-        ]
-        lineas.append(f"~D|{concepto.codigo}|{'\\'.join(elementos)}|")
+    if incluir_descompuestos:
+        for concepto in conceptos.values():
+            if not concepto.lineas:
+                continue
+            elementos = [
+                f"{linea.hijo.codigo}\\{_numero(linea.factor, 6)}\\{_numero(linea.rendimiento, 6)}"
+                for linea in concepto.lineas
+            ]
+            lineas.append(f"~D|{concepto.codigo}|{'\\'.join(elementos)}|")
 
     # --- Mediciones ---
 
-    codigo_capitulo = {c.id: c.codigo for c in capitulos}
-    for partida in partidas:
-        filas = lineas_medicion.get(partida.id, [])
-        if not filas:
-            continue
-        grupos = "".join(
-            "\\".join(
-                [
-                    "",
-                    _limpiar(fila.comentario),
-                    _numero(fila.uds, 3),
-                    _numero(fila.longitud, 3),
-                    _numero(fila.anchura, 3),
-                    _numero(fila.altura, 3),
-                ]
+    if incluir_mediciones:
+        codigo_capitulo = {c.id: c.codigo for c in capitulos}
+        for partida in partidas:
+            filas = lineas_medicion.get(partida.id, [])
+            if not filas:
+                continue
+            grupos = "".join(
+                "\\".join(
+                    [
+                        "",
+                        _limpiar(fila.comentario),
+                        _numero(fila.uds, 3),
+                        _numero(fila.longitud, 3),
+                        _numero(fila.anchura, 3),
+                        _numero(fila.altura, 3),
+                    ]
+                )
+                + "\\"
+                for fila in filas
             )
-            + "\\"
-            for fila in filas
-        )
-        padre = codigo_capitulo.get(partida.capitulo_id, "")
-        lineas.append(
-            f"~M|{padre}#\\{partida.codigo}|1|{_numero(partida.medicion, 3)}|{grupos}|"
-        )
+            padre = codigo_capitulo.get(partida.capitulo_id, "")
+            lineas.append(
+                f"~M|{padre}#\\{partida.codigo}|1|{_numero(partida.medicion, 3)}|{grupos}|"
+            )
 
     texto = "\r\n".join(lineas) + "\r\n"
     # errors="replace": un carácter fuera de cp1252 no puede impedir exportar.
     return texto.encode(codificacion, errors="replace")
+
+
+async def _conceptos_directos(
+    session: AsyncSession, partidas: list[Partida], org_id: uuid.UUID
+) -> dict[uuid.UUID, Concepto]:
+    """Solo los conceptos referenciados directamente por las partidas, sin
+    bajar a sus componentes — para cuando no se pide el cuadro de precios
+    (`incluir_descompuestos=False`), basta con el precio ya resuelto de cada
+    concepto, no con desmontarlo.
+    """
+    ids = {p.concepto_id for p in partidas if p.concepto_id is not None}
+    if not ids:
+        return {}
+    filas = (
+        await session.execute(
+            select(Concepto).where(Concepto.id.in_(ids), Concepto.organization_id == org_id)
+        )
+    ).scalars()
+    return {concepto.id: concepto for concepto in filas}
 
 
 async def _conceptos_implicados(

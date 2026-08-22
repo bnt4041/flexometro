@@ -1,8 +1,8 @@
 """PDF genérico de un listado — cualquier pantalla con tabla puede pedirlo
 (ver `DataTable.tsx` en el frontend), no solo facturación/presupuestos.
 
-Mismo mecanismo que `facturacion/informes.py`/`presupuestos/informes.py`
-(Jinja2 + WeasyPrint dentro del contenedor), pero con datos ya formateados
+Mismo mecanismo que `facturacion/informes.py` (Jinja2 + WeasyPrint dentro
+del contenedor), pero con datos ya formateados
 que manda el propio frontend (columnas visibles, filtradas y ordenadas tal
 cual las tiene el usuario en pantalla) en vez de volver a consultar la base
 de datos — así el PDF exporta EXACTAMENTE lo que se ve, sin duplicar el

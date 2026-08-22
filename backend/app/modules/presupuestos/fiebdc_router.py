@@ -4,8 +4,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import Principal, get_principal
 from app.core.database import get_session
+from app.core.enums import Alcance
 from app.core.modules import require_module
+from app.core.permisos import require_permiso, verificar_propiedad
 from app.modules.presupuestos import fiebdc
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos.fiebdc.importador import EstrategiaCodigos
@@ -218,7 +221,13 @@ def _salida(resultado) -> ImportacionOut:
 async def exportar(
     presupuesto_id: uuid.UUID,
     codificacion: str = Query(default="cp1252", pattern="^(cp1252|utf-8)$"),
+    venta: bool = Query(default=False),
+    descompuestos: bool = Query(default=True),
+    mediciones: bool = Query(default=True),
+    descripcion: bool = Query(default=True),
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
 ) -> Response:
     """Presupuesto completo en BC3, con su cuadro de precios y sus mediciones."""
     presupuesto = await service.obtener(session, presupuesto_id)
@@ -226,9 +235,16 @@ async def exportar(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Presupuesto no encontrado"
         )
+    verificar_propiedad(alcance, principal, presupuesto.creado_por_subject)
 
     datos = await fiebdc.exportar_presupuesto(
-        session, presupuesto, codificacion=codificacion
+        session,
+        presupuesto,
+        codificacion=codificacion,
+        incluir_venta=venta,
+        incluir_descompuestos=descompuestos,
+        incluir_mediciones=mediciones,
+        incluir_descripcion=descripcion,
     )
     return Response(
         content=datos,

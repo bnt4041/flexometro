@@ -282,6 +282,11 @@ class ReajusteIn(BaseModel):
     valor: Decimal = Field(gt=0)
     # En falso solo se simula: es lo que alimenta la vista previa.
     aplicar: bool = False
+    # Si se omite, usa el método ya guardado en el presupuesto. Si se manda
+    # uno distinto, el reajuste calcula (y, al aplicar, deja fijado) ESE
+    # método en vez del actual — permite reajustar probando otro método sin
+    # tener que cambiarlo antes a mano en la cabecera.
+    metodo: MetodoCalculo | None = None
 
 
 class LineaReajusteOut(BaseModel):

@@ -1573,6 +1573,7 @@ async def reajustar(
     tipo: str,
     valor: Decimal,
     aplicar: bool,
+    metodo_elegido: MetodoCalculo | None = None,
 ) -> dict | None:
     """Lleva el presupuesto a un importe o a un margen objetivo (Fase 36).
 
@@ -1593,6 +1594,11 @@ async def reajustar(
     Solo se mueven las partidas con la venta SIN bloquear: las bloqueadas son
     precios pactados y el reajuste tiene que respetarlos, así que el resto
     absorbe toda la diferencia.
+
+    `metodo_elegido` deja probar el reajuste con un método distinto al que
+    ya tiene el presupuesto (los cuatro campos de método siempre están
+    guardados, se use o no el método activo). Al aplicar, si difiere del
+    guardado, se deja fijado como el nuevo método del presupuesto.
 
     Con `aplicar=False` no toca nada: devuelve exactamente el mismo cálculo
     para poder enseñarlo antes de decidir.
@@ -1649,7 +1655,10 @@ async def reajustar(
             "Las partidas a reajustar no tienen coste: no hay ningún porcentaje que aplicar"
         )
 
-    metodo, porcentaje_actual = calc.metodo_de(presupuesto)
+    if metodo_elegido is not None:
+        metodo, porcentaje_actual = metodo_elegido, presupuesto.porcentaje_metodo or Decimal("0")
+    else:
+        metodo, porcentaje_actual = calc.metodo_de(presupuesto)
     if metodo == MetodoCalculo.CLASICO:
         porcentaje_anterior = presupuesto.gastos_generales + presupuesto.beneficio_industrial
     else:
@@ -1705,6 +1714,8 @@ async def reajustar(
     )
 
     if aplicar:
+        if metodo != presupuesto.metodo_calculo:
+            presupuesto.metodo_calculo = metodo
         if metodo == MetodoCalculo.CLASICO:
             presupuesto.gastos_generales = gg_nuevo
             presupuesto.beneficio_industrial = bi_nuevo

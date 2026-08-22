@@ -78,6 +78,22 @@ async def read_me(principal: Principal = Depends(get_principal)) -> PrincipalOut
     )
 
 
+@router.get("/organizacion/logo")
+async def logo_organizacion(
+    principal: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)
+) -> Response:
+    """El logo de la propia organización — cualquier usuario autenticado
+    puede verlo (es de marca, no un dato sensible), no solo el admin que lo
+    sube desde Ajustes."""
+    if principal.organization_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    logo = await service.logo_de_organizacion(session, principal.organization_id)
+    if logo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    contenido, content_type = logo
+    return Response(content=contenido, media_type=content_type)
+
+
 class ExportarPdfIn(BaseModel):
     titulo: str = Field(min_length=1, max_length=200)
     columnas: list[str] = Field(min_length=1)

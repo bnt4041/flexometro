@@ -41,6 +41,18 @@ export function Ajustes() {
           <>
             <div className="module-row">
               <div>
+                <div className="module-row__title">Empresa</div>
+                <div className="module-row__desc">
+                  Datos básicos y logo de la organización, para documentos y plantillas.
+                </div>
+              </div>
+              <Link className="btn" to="/ajustes/empresa">
+                {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="module-row">
+              <div>
                 <div className="module-row__title">{t('ajustes.diccionario.titulo')}</div>
                 <div className="module-row__desc">{t('ajustes.diccionario.descripcionHub')}</div>
               </div>

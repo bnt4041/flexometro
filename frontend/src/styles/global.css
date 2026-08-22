@@ -76,7 +76,7 @@ button {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  height: var(--topbar-h);
+  height: 88px;
   padding: 0 var(--sp-4);
   border-bottom: 1px solid rgb(255 255 255 / 0.1);
   flex-shrink: 0;
@@ -84,7 +84,7 @@ button {
 
 .brand__mark {
   display: block;
-  height: 22px;
+  height: 64px;
   width: auto;
 }
 
@@ -95,6 +95,15 @@ button {
 
 .sidebar .brand__name {
   color: #ffffff;
+}
+
+.sidebar__version {
+  margin-top: auto;
+  flex-shrink: 0;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-xs);
+  color: rgb(255 255 255 / 0.4);
+  border-top: 1px solid rgb(255 255 255 / 0.1);
 }
 
 .nav {
@@ -2181,9 +2190,21 @@ kbd {
 /* --- Timeline de notas CRM (Fase 29) --- */
 
 .timeline {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
+  padding-left: var(--sp-5);
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--c-border);
 }
 
 .timeline__item {
@@ -2193,6 +2214,23 @@ kbd {
   border-radius: var(--radius);
   background: var(--c-surface);
 }
+
+.timeline__item::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--sp-5) - 1px);
+  top: var(--sp-4);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-text-muted);
+  box-shadow: 0 0 0 3px var(--c-surface);
+}
+
+.timeline__item--creado::before { background: var(--c-success); }
+.timeline__item--modificado::before { background: var(--c-primary); }
+.timeline__item--eliminado::before { background: var(--c-danger); }
+.timeline__item--evento::before { background: var(--c-accent); }
 
 .timeline__meta {
   font-size: var(--fs-xs);

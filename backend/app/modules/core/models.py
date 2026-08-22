@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,6 +42,10 @@ class Cuenta(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # debe vivir enterrado en JSON, donde un valor ausente/mal tipado se
     # confundiría en silencio con "desactivado".
     compartir_maestros: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Cuántas empresas (organizaciones) puede tener la cuenta (Fase 41).
+    # Autoservicio libre, no atado a la tarifa: el propio admin de
+    # organización lo sube o lo baja desde Ajustes -> Empresas.
+    max_organizaciones: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     # Reservado para preferencias a nivel cuenta que NO gobiernan seguridad:
     # patrones de numeración por tipo de documento (Fase 16)... cada fase
     # rellena su propia clave, sin migrar columnas nuevas por cada
@@ -63,6 +67,27 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     cif: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Datos básicos de la empresa (Fase 40): de referencia visual — cabeceras
+    # de documentos, plantillas Word — no fiscales (eso sigue siendo `cif`
+    # más lo que ya tenga cada módulo, p. ej. `Tercero` para terceros).
+    direccion: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    codigo_postal: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    ciudad: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provincia: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    web: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    linkedin: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    instagram: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    facebook: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    twitter: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Logo: objeto en MinIO (ver `app/core/storage.py`), no en esta tabla —
+    # `logo_content_type` va aparte porque servirlo de vuelta necesita el
+    # Content-Type original y MinIO no lo expone sin una segunda llamada.
+    logo_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    logo_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # HTML (Fase 41): texto enriquecido propio de esta empresa, no de la cuenta.
+    politica_privacidad: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Preferencias del tenant (política de redondeo, divisa, IVA por defecto...).
     settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # RESTRICT, no CASCADE: no hay (ni se ha pedido) un flujo de "borrar
