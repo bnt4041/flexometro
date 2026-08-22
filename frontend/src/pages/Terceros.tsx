@@ -198,7 +198,7 @@ export function TerceroCrear() {
       <div className="card">
         <div className="form-section">
           <div className="form-grid">
-            <Field label={t('terceros.razonSocial')}>
+            <Field ancho="doble" label={t('terceros.razonSocial')}>
               <input
                 className="input"
                 value={razonSocial}

@@ -81,7 +81,7 @@ function AjustesIA() {
       <div className="form-section__title">Ajustes IA</div>
       <ErrorNotice error={error} />
       <div className="form-grid" style={{ marginTop: 'var(--sp-3)' }}>
-        <Field
+        <Field ancho="doble"
           label="DeepSeek — clave de API"
           hint={config.deepseek_configurada ? 'Configurada (deja en blanco para no cambiarla)' : 'Sin configurar'}
         >
@@ -96,10 +96,10 @@ function AjustesIA() {
         <Field label="DeepSeek — modelo">
           <input className="input" value={deepseekModel} onChange={(e) => setDeepseekModel(e.target.value)} />
         </Field>
-        <Field label="DeepSeek — base URL">
+        <Field ancho="doble" label="DeepSeek — base URL">
           <input className="input" value={deepseekUrl} onChange={(e) => setDeepseekUrl(e.target.value)} />
         </Field>
-        <Field
+        <Field ancho="doble"
           label="Gemini — clave de API"
           hint={config.gemini_configurada ? 'Configurada (deja en blanco para no cambiarla)' : 'Sin configurar'}
         >
@@ -114,7 +114,7 @@ function AjustesIA() {
         <Field label="Gemini — modelo">
           <input className="input" value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} />
         </Field>
-        <Field label="Gemini — base URL">
+        <Field ancho="doble" label="Gemini — base URL">
           <input className="input" value={geminiUrl} onChange={(e) => setGeminiUrl(e.target.value)} />
         </Field>
       </div>
@@ -212,7 +212,7 @@ function AjustesSmtp() {
             placeholder={config.tiene_password ? '••••••••' : ''}
           />
         </Field>
-        <Field label="Remitente">
+        <Field ancho="doble" label="Remitente">
           <input className="input" value={remitente} onChange={(e) => setRemitente(e.target.value)} />
         </Field>
         <Field label="Usa TLS">
@@ -290,7 +290,7 @@ function AjustesPasarela() {
         <Field label="Vendor ID">
           <input className="input" value={vendorId} onChange={(e) => setVendorId(e.target.value)} />
         </Field>
-        <Field
+        <Field ancho="doble"
           label="API key"
           hint={config.tiene_api_key ? 'Configurada (deja en blanco para no cambiarla)' : 'Sin configurar'}
         >

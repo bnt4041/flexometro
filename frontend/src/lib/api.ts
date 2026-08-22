@@ -513,12 +513,22 @@ export interface RegistroAuditoria {
 // mismo alcance de entidades que `EntidadContacto`, más 'tercero'.
 
 export type EntidadNota = 'tercero' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+export type TipoNota = 'texto' | 'email'
+
+export interface AdjuntoNota {
+  documento_id: string | null
+  nombre_archivo: string
+}
 
 export interface Nota {
   id: string
   entidad: EntidadNota
   entidad_id: string
   contenido: string
+  tipo: TipoNota
+  asunto: string | null
+  destinatario: string | null
+  adjuntos: AdjuntoNota[]
   created_at: string
   creado_por_nombre: string | null
 }
@@ -539,6 +549,10 @@ export interface Documento {
   tamano_bytes: number
   created_at: string
   creado_por_nombre: string | null
+}
+
+export interface DocumentoBusqueda extends Documento {
+  entidad_codigo: string | null
 }
 
 export interface Familia {
@@ -2013,11 +2027,33 @@ export const api = {
     create: (entidad: EntidadNota, entidadId: string, contenido: string) =>
       post<Nota>(`/api/notas${query({ entidad, entidad_id: entidadId })}`, { contenido }),
     remove: (id: string) => del(`/api/notas/${id}`),
+    enviarEmail: (
+      entidad: EntidadNota,
+      entidadId: string,
+      datos: {
+        destinatario: string
+        asunto: string
+        cuerpo_html: string
+        documento_ids: string[]
+        guardar_adjuntos: boolean
+        archivos: File[]
+      },
+    ) => {
+      const f = new FormData()
+      f.append('destinatario', datos.destinatario)
+      f.append('asunto', datos.asunto)
+      f.append('cuerpo_html', datos.cuerpo_html)
+      f.append('guardar_adjuntos', String(datos.guardar_adjuntos))
+      for (const id of datos.documento_ids) f.append('documento_ids', id)
+      for (const archivo of datos.archivos) f.append('archivos', archivo)
+      return subir<Nota>(`/api/notas/enviar-email${query({ entidad, entidad_id: entidadId })}`, f)
+    },
   },
 
   documentos: {
     list: (entidad: EntidadDocumento, entidadId: string) =>
       request<Documento[]>(`/api/documentos${query({ entidad, entidad_id: entidadId })}`),
+    buscar: (q: string) => request<DocumentoBusqueda[]>(`/api/documentos/buscar${query({ q })}`),
     upload: (entidad: EntidadDocumento, entidadId: string, fichero: File) => {
       const formulario = new FormData()
       formulario.append('entidad', entidad)

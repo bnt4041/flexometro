@@ -251,7 +251,7 @@ function InstanciarModal({
           después, obra a obra.
         </p>
         <div className="form-grid">
-          <Field label="Obra">
+          <Field ancho="doble" label="Obra">
             <input
               className="input"
               value={nombre}
@@ -259,7 +259,7 @@ function InstanciarModal({
               autoFocus
             />
           </Field>
-          <Field label="Emplazamiento">
+          <Field ancho="doble" label="Emplazamiento">
             <input
               className="input"
               value={emplazamiento}
@@ -354,7 +354,7 @@ export function PresupuestoCrear() {
       <div className="card">
         <div className="form-section">
           <div className="form-grid">
-            <Field label="Obra">
+            <Field ancho="doble" label="Obra">
               <input
                 className="input"
                 value={nombre}
@@ -362,7 +362,7 @@ export function PresupuestoCrear() {
                 autoFocus
               />
             </Field>
-            <Field label="Emplazamiento">
+            <Field ancho="doble" label="Emplazamiento">
               <input
                 className="input"
                 value={emplazamiento}

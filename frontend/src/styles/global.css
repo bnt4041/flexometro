@@ -508,6 +508,25 @@ textarea.input {
   gap: var(--sp-4);
 }
 
+/* Para un campo que necesita más sitio que sus vecinos (un email, una URL)
+   sin romper el resto de columnas iguales del grid. `--completo` es para un
+   textarea, que quiere la fila entera. En pantalla estrecha el grid ya cae a
+   una sola columna: ahí `span 2` desbordaría, así que se anulan. */
+.field--doble {
+  grid-column: span 2;
+}
+
+.field--completo {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .field--doble,
+  .field--completo {
+    grid-column: auto;
+  }
+}
+
 .form-section {
   padding: var(--sp-5);
   border-bottom: 1px solid var(--c-border);

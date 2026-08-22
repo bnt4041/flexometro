@@ -287,7 +287,7 @@ function NuevaLineaModal({
           </>
         ) : (
           <div className="form-grid" style={{ marginTop: 'var(--sp-4)' }}>
-            <Field label="Descripción">
+            <Field ancho="doble" label="Descripción">
               <input
                 className="input"
                 value={descripcion}

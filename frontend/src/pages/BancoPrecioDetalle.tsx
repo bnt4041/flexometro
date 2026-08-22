@@ -145,7 +145,7 @@ export function BancoPrecioDetalle() {
         <div className="form-section">
           <div className="form-section__title">Ficha</div>
           <div className="form-grid">
-            <Field label="Descripción corta">
+            <Field ancho="doble" label="Descripción corta">
               <input
                 className="input"
                 value={valor('resumen')}
@@ -253,7 +253,7 @@ export function BancoPrecioDetalle() {
             )}
           </div>
           <div style={{ marginTop: 'var(--sp-4)' }}>
-            <Field label="Descripción larga">
+            <Field ancho="completo" label="Descripción larga">
               <textarea
                 className="input"
                 value={valor('texto') ?? ''}
@@ -942,7 +942,7 @@ function NuevaTarifaModal({
                   onChange={(e) => setVigenteDesde(e.target.value)}
                 />
               </Field>
-              <Field label="Referencia del proveedor">
+              <Field ancho="doble" label="Referencia del proveedor">
                 <input
                   className="input"
                   value={referencia}

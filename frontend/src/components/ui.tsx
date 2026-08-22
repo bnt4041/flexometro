@@ -42,14 +42,22 @@ export function useEscapeCierra(onClose: () => void): void {
 export function Field({
   label,
   hint,
+  ancho,
   children,
 }: {
   label: string
   hint?: string
+  /** Cuánto ocupa dentro de un `.form-grid` (cuyas columnas son todas
+   *  iguales): `doble` para lo que se teclea largo —un email, una dirección,
+   *  un IBAN, una URL—, `completo` para un textarea que necesita la fila
+   *  entera. Sin esto, un campo de una palabra y uno de sesenta caracteres
+   *  salen del mismo ancho. */
+  ancho?: 'doble' | 'completo'
   children: ReactNode
 }) {
+  const clase = ancho ? `field field--${ancho}` : 'field'
   return (
-    <label className="field">
+    <label className={clase}>
       <span className="field__label">{label}</span>
       {children}
       {hint && <span className="field__hint">{hint}</span>}

@@ -53,7 +53,7 @@ export function CrearTerceroModal({
       <div className="form-section">
         <ErrorNotice error={error} />
         <div className="form-grid">
-          <Field label="Razón social">
+          <Field ancho="doble" label="Razón social">
             <input
               className="input"
               value={razonSocial}

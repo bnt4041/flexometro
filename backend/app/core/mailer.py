@@ -38,8 +38,17 @@ class MailerError(Exception):
 
 
 async def enviar_correo(
-    config: "ConfiguracionSmtpPlataforma", *, destinatario: str, asunto: str, cuerpo_html: str
+    config: "ConfiguracionSmtpPlataforma",
+    *,
+    destinatario: str,
+    asunto: str,
+    cuerpo_html: str,
+    adjuntos: list[tuple[str, str, bytes]] | None = None,
 ) -> None:
+    """`adjuntos`: lista de `(nombre_archivo, content_type, contenido)` — el
+    `content_type` puede venir de cualquier fuente (lo guardado al subir el
+    documento), así que se parte en maintype/subtype con cuidado de que
+    siempre haya un subtype válido."""
     if not config.host or not config.remitente:
         raise MailerError(
             "El SMTP de la plataforma no está configurado (Administración → Ajustes SMTP)"
@@ -51,6 +60,12 @@ async def enviar_correo(
     mensaje["Subject"] = asunto
     mensaje.set_content("Este correo requiere un cliente compatible con HTML.")
     mensaje.add_alternative(cuerpo_html, subtype="html")
+
+    for nombre_archivo, content_type, contenido in adjuntos or []:
+        maintype, _, subtype = (content_type or "application/octet-stream").partition("/")
+        mensaje.add_attachment(
+            contenido, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=nombre_archivo
+        )
 
     # El puerto 465 es TLS implícito desde el primer byte (SMTPS); el 587 (y
     # el resto) es texto plano que se negocia a TLS con STARTTLS a mitad de

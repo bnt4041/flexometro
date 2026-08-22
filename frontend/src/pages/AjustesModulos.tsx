@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Power } from 'lucide-react'
+import { ArrowLeft, Power, Settings } from 'lucide-react'
 
+import { Tooltip } from '../components/ui'
 import { api } from '../lib/api'
 import { useWorkspace } from '../workspace'
 
 export function AjustesModulos() {
   const { t } = useTranslation()
-  const { modules, reload } = useWorkspace()
+  const { principal, modules, reload } = useWorkspace()
+  const esAdminOrganizacion =
+    (principal?.roles.includes('admin') ?? false) && principal?.organization_id != null
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -57,22 +60,35 @@ export function AjustesModulos() {
                 </div>
               )}
             </div>
-            <button
-              className={module.is_active ? 'btn' : 'btn btn--primary'}
-              disabled={module.always_active || busy !== null}
-              onClick={() => void toggle(module.code, !module.is_active)}
-            >
-              {busy !== module.code && !module.always_active && (
-                <Power size={14} aria-hidden="true" />
+            <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+              {esAdminOrganizacion && module.is_active && module.tipo_documento_numeracion !== null && (
+                <Tooltip texto={t('nav.ajustesDe', { modulo: module.name })}>
+                  <Link
+                    className="btn"
+                    to={`/ajustes/modulo/${module.code}`}
+                    aria-label={t('nav.ajustesDe', { modulo: module.name })}
+                  >
+                    <Settings size={14} aria-hidden="true" />
+                  </Link>
+                </Tooltip>
               )}
-              {busy === module.code
-                ? '...'
-                : module.always_active
-                  ? t('ajustes.modulos.siempreActivo')
-                  : module.is_active
-                    ? t('ajustes.modulos.desactivar')
-                    : t('ajustes.modulos.activar')}
-            </button>
+              <button
+                className={module.is_active ? 'btn' : 'btn btn--primary'}
+                disabled={module.always_active || busy !== null}
+                onClick={() => void toggle(module.code, !module.is_active)}
+              >
+                {busy !== module.code && !module.always_active && (
+                  <Power size={14} aria-hidden="true" />
+                )}
+                {busy === module.code
+                  ? '...'
+                  : module.always_active
+                    ? t('ajustes.modulos.siempreActivo')
+                    : module.is_active
+                      ? t('ajustes.modulos.desactivar')
+                      : t('ajustes.modulos.activar')}
+              </button>
+            </div>
           </div>
         ))}
       </div>

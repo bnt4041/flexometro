@@ -165,7 +165,7 @@ function DatosOrganizacion({
     <div className="card" style={{ padding: 'var(--sp-5)' }}>
       <ErrorNotice error={error} />
       <div className="form-grid">
-        <Field label="Nombre">
+        <Field ancho="doble" label="Nombre">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="CIF">
@@ -277,7 +277,7 @@ function SmtpOrganizacionCard({ organizationId }: { organizationId: string }) {
               placeholder={tienePassword ? '••••••••' : ''}
             />
           </Field>
-          <Field label="Remitente">
+          <Field ancho="doble" label="Remitente">
             <input className="input" value={remitente} onChange={(e) => setRemitente(e.target.value)} />
           </Field>
         </div>

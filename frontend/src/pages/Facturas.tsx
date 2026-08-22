@@ -206,7 +206,7 @@ export function FacturaSueltaCrear() {
                   ))}
                 </select>
               </Field>
-              <Field label="Concepto">
+              <Field ancho="doble" label="Concepto">
                 <input
                   className="input"
                   value={concepto}

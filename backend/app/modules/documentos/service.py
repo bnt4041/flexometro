@@ -1,11 +1,22 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.modules.documentos.models import Documento, EntidadDocumento
+
+# Tabla donde vive el `codigo` legible de cada tipo de ficha — sin FK real
+# (mismo criterio que el resto de `entidad`/`entidad_id` de este módulo), así
+# que resolver la etiqueta es una consulta aparte por tipo, no un join.
+_TABLA_POR_ENTIDAD: dict[EntidadDocumento, str] = {
+    EntidadDocumento.TERCERO: "terceros.tercero",
+    EntidadDocumento.PRESUPUESTO: "presupuestos.presupuesto",
+    EntidadDocumento.OBRA: "obras.obra",
+    EntidadDocumento.CERTIFICACION: "facturacion.certificacion",
+    EntidadDocumento.FACTURA: "facturacion.factura",
+}
 
 
 async def listar_documentos(
@@ -66,3 +77,40 @@ async def eliminar_documento(session: AsyncSession, documento_id: uuid.UUID) -> 
     await session.delete(documento)
     await session.flush()
     return True
+
+
+async def buscar_documentos(
+    session: AsyncSession, q: str, *, limite: int = 30
+) -> list[tuple[Documento, str | None]]:
+    """Por nombre de archivo, en toda la cuenta — para el selector de
+    adjuntos del correo (Fase 42): "primero los de la ficha, si no, un
+    buscador" (ver `enviar_email`). Devuelve cada documento con el código de
+    su ficha de origen ya resuelto, agrupable por `entidad` en el frontend."""
+    org_id = require_organization_id()
+    filas = (
+        await session.execute(
+            select(Documento)
+            .where(Documento.organization_id == org_id, Documento.nombre_archivo.ilike(f"%{q}%"))
+            .order_by(Documento.created_at.desc())
+            .limit(limite)
+        )
+    ).scalars()
+    documentos = list(filas)
+
+    ids_por_entidad: dict[EntidadDocumento, set[uuid.UUID]] = {}
+    for documento in documentos:
+        ids_por_entidad.setdefault(documento.entidad, set()).add(documento.entidad_id)
+
+    codigos: dict[tuple[EntidadDocumento, uuid.UUID], str] = {}
+    for entidad, ids in ids_por_entidad.items():
+        # `tabla` sale del diccionario fijo de arriba, nunca de `q` ni de
+        # ningún dato de entrada: no hay inyección posible al interpolarla.
+        tabla = _TABLA_POR_ENTIDAD[entidad]
+        filas_codigo = await session.execute(
+            text(f"SELECT id, codigo FROM {tabla} WHERE id = ANY(:ids) AND organization_id = :org_id"),
+            {"ids": list(ids), "org_id": org_id},
+        )
+        for entidad_id, codigo in filas_codigo:
+            codigos[(entidad, entidad_id)] = codigo
+
+    return [(d, codigos.get((d.entidad, d.entidad_id))) for d in documentos]

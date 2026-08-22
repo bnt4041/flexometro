@@ -200,7 +200,7 @@ export function PersonalPlataformaCrear() {
             <Field label="Usuario">
               <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
             </Field>
-            <Field label="Correo">
+            <Field ancho="doble" label="Correo">
               <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
             <Field label="Nombre">

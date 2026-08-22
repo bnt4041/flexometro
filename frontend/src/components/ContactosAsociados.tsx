@@ -233,7 +233,7 @@ function AsociarContactoModal({
                   onChange={(e) => setCargoNuevo(e.target.value)}
                 />
               </Field>
-              <Field label="Email">
+              <Field ancho="doble" label="Email">
                 <input
                   className="input"
                   value={emailNuevo}
@@ -247,7 +247,7 @@ function AsociarContactoModal({
                   onChange={(e) => setTelefonoNuevo(e.target.value)}
                 />
               </Field>
-              <Field label="Rol en este registro">
+              <Field ancho="doble" label="Rol en este registro">
                 <input
                   className="input"
                   value={rol}
@@ -307,7 +307,7 @@ function AsociarContactoModal({
             )}
             {seleccionado && (
               <div className="form-grid" style={{ marginTop: 'var(--sp-3)' }}>
-                <Field label="Contacto seleccionado">
+                <Field ancho="doble" label="Contacto seleccionado">
                   <div className="chip chip--cliente">
                     {seleccionado.nombre} {seleccionado.apellidos ?? ''}
                   </div>

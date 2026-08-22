@@ -70,7 +70,7 @@ export function AdminPersonalPlataformaDetalle() {
       <ErrorNotice error={error} />
       <div className="card">
         <div className="form-grid">
-          <Field label="Correo">
+          <Field ancho="doble" label="Correo">
             <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
           </Field>
           <Field label="Nombre">

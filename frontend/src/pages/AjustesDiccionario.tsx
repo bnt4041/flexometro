@@ -181,7 +181,7 @@ function NuevaEntrada({
         <Field label={t('ajustes.diccionario.clave')} hint={t('ajustes.diccionario.claveHint')}>
           <input className="input" value={clave} onChange={(e) => setClave(e.target.value)} autoFocus />
         </Field>
-        <Field label={t('ajustes.diccionario.etiqueta')}>
+        <Field ancho="doble" label={t('ajustes.diccionario.etiqueta')}>
           <input className="input" value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} />
         </Field>
         {conValor && (

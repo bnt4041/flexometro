@@ -100,6 +100,9 @@ UNIDADES_MEDIDA: list[tuple[str, str]] = [
     ('ud', 'Unidad'), ('m', 'Metro'), ('m2', 'Metro cuadrado'), ('m3', 'Metro cúbico'),
     ('kg', 'Kilogramo'), ('h', 'Hora'), ('l', 'Litro'), ('ml', 'Metro lineal'),
     ('t', 'Tonelada'), ('pa', 'Partida alzada'),
+    ('km', 'Kilómetro'), ('cm', 'Centímetro'), ('mm', 'Milímetro'), ('g', 'Gramo'),
+    ('ha', 'Hectárea'), ('dia', 'Día'), ('mes', 'Mes'), ('jornada', 'Jornada'),
+    ('viaje', 'Viaje'), ('pct', 'Porcentaje'),
 ]
 
 FORMAS_JURIDICAS: list[tuple[str, str]] = [
@@ -107,11 +110,14 @@ FORMAS_JURIDICAS: list[tuple[str, str]] = [
     ('SA', 'Sociedad Anónima'), ('CB', 'Comunidad de Bienes'), ('SC', 'Sociedad Civil'),
     ('SCOOP', 'Sociedad Cooperativa'), ('SAT', 'Sociedad Agraria de Transformación'),
     ('ONG', 'Asociación / ONG'),
+    ('SLNE', 'Sociedad Limitada Nueva Empresa'), ('UTE', 'Unión Temporal de Empresas'),
+    ('FUNDACION', 'Fundación'), ('AIE', 'Agrupación de Interés Económico'),
 ]
 
 TRATAMIENTOS: list[tuple[str, str]] = [
     ('sr', 'Sr.'), ('sra', 'Sra.'), ('srta', 'Srta.'), ('don', 'Don'),
     ('dona', 'Doña'), ('dr', 'Dr.'), ('dra', 'Dra.'),
+    ('ing', 'Ing.'), ('arq', 'Arq.'), ('prof', 'Prof.'),
 ]
 
 CARGOS: list[tuple[str, str]] = [
@@ -120,6 +126,12 @@ CARGOS: list[tuple[str, str]] = [
     ('comercial', 'Comercial'), ('administracion', 'Administración'),
     ('gerente', 'Gerente'), ('encargado', 'Encargado'),
     ('propiedad', 'Propiedad'), ('contable', 'Contable'),
+    ('delineante', 'Delineante'), ('topografo', 'Topógrafo'),
+    ('prevencionista', 'Técnico de prevención'), ('subcontratista', 'Subcontratista'),
+    ('oficial_1', 'Oficial de 1ª'), ('oficial_2', 'Oficial de 2ª'),
+    ('peon', 'Peón'), ('capataz', 'Capataz'),
+    ('project_manager', 'Project manager'), ('calidad', 'Técnico de calidad'),
+    ('medioambiente', 'Técnico de medio ambiente'), ('almacen', 'Responsable de almacén'),
 ]
 
 IVA: list[tuple[str, str, str]] = [

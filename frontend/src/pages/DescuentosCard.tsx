@@ -103,7 +103,7 @@ export function DescuentosCard({ tarifaId }: { tarifaId: string }) {
     <div className="card" style={{ padding: 'var(--sp-5)' }}>
       <ErrorNotice error={error} />
       <div className="form-grid">
-        <Field label="Nombre">
+        <Field ancho="doble" label="Nombre">
           <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
         </Field>
         <Field label="Motivo">

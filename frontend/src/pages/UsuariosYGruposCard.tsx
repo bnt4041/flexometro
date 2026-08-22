@@ -296,7 +296,7 @@ function UsuarioCrearModal({
           <Field label="Usuario">
             <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
           </Field>
-          <Field label="Correo">
+          <Field ancho="doble" label="Correo">
             <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <Field label="Nombre">
@@ -366,7 +366,7 @@ function UsuarioEditarModal({
       <ErrorNotice error={error} />
       <div className="card" style={{ padding: 'var(--sp-5)' }}>
         <div className="form-grid">
-          <Field label="Correo">
+          <Field ancho="doble" label="Correo">
             <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
           </Field>
           <Field label="Nombre">
@@ -533,7 +533,7 @@ function GrupoCrearModal({
           <Field label="Nombre del grupo">
             <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
           </Field>
-          <Field label="Descripción">
+          <Field ancho="doble" label="Descripción">
             <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
           </Field>
         </div>

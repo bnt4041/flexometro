@@ -13,9 +13,23 @@ from app.core.auth import get_principal
 from app.core.database import get_session
 from app.modules.documentos import service
 from app.modules.documentos.models import EntidadDocumento
-from app.modules.documentos.schemas import DocumentoOut
+from app.modules.documentos.schemas import DocumentoBusquedaOut, DocumentoOut
 
 router = APIRouter(prefix="/api/documentos", tags=["documentos"], dependencies=[Depends(get_principal)])
+
+
+@router.get("/buscar", response_model=list[DocumentoBusquedaOut])
+async def buscar(
+    q: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[DocumentoBusquedaOut]:
+    if len(q.strip()) < 2:
+        return []
+    resultados = await service.buscar_documentos(session, q.strip())
+    return [
+        DocumentoBusquedaOut(**DocumentoOut.model_validate(documento).model_dump(), entidad_codigo=codigo)
+        for documento, codigo in resultados
+    ]
 
 
 @router.get("", response_model=list[DocumentoOut])

@@ -121,7 +121,7 @@ export function IaPatrones() {
 
       <div className="card" style={{ padding: 'var(--sp-5)' }}>
         <div className="form-grid">
-          <Field label="Tipo de obra" hint="Ej.: rehabilitación de fachada, reforma de baño…">
+          <Field ancho="doble" label="Tipo de obra" hint="Ej.: rehabilitación de fachada, reforma de baño…">
             <input
               className="input"
               value={tipoObra}
@@ -129,7 +129,7 @@ export function IaPatrones() {
               autoFocus
             />
           </Field>
-          <Field label="Descripción" hint="Opcional: detalles que ayuden a afinar la propuesta">
+          <Field ancho="doble" label="Descripción" hint="Opcional: detalles que ayuden a afinar la propuesta">
             <input
               className="input"
               value={descripcion}
@@ -258,7 +258,7 @@ export function IaPatrones() {
               usarlas en una obra real.
             </div>
             <div className="form-grid" style={{ marginTop: 'var(--sp-3)' }}>
-              <Field label="Nombre de la plantilla">
+              <Field ancho="doble" label="Nombre de la plantilla">
                 <input
                   className="input"
                   value={nombrePlantilla}

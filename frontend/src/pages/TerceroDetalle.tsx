@@ -96,14 +96,14 @@ export function TerceroDetalle() {
         <div className="form-section">
           <div className="form-section__title">Identificación</div>
           <div className="form-grid">
-            <Field label="Razón social">
+            <Field ancho="doble" label="Razón social">
               <input
                 className="input"
                 value={valor('razon_social')}
                 onChange={(e) => cambiar('razon_social', e.target.value)}
               />
             </Field>
-            <Field label="Nombre comercial">
+            <Field ancho="doble" label="Nombre comercial">
               <input
                 className="input"
                 value={valor('nombre_comercial') ?? ''}
@@ -169,7 +169,7 @@ export function TerceroDetalle() {
         <div className="form-section">
           <div className="form-section__title">Contacto y domicilio</div>
           <div className="form-grid">
-            <Field label="Email">
+            <Field ancho="doble" label="Email">
               <input
                 className="input"
                 value={valor('email') ?? ''}
@@ -183,7 +183,7 @@ export function TerceroDetalle() {
                 onChange={(e) => cambiar('telefono', e.target.value || null)}
               />
             </Field>
-            <Field label="Dirección">
+            <Field ancho="doble" label="Dirección">
               <input
                 className="input"
                 value={valor('direccion') ?? ''}
@@ -263,7 +263,7 @@ export function TerceroDetalle() {
                 }
               />
             </Field>
-            <Field label="IBAN">
+            <Field ancho="doble" label="IBAN">
               <input
                 className="input"
                 value={valor('iban') ?? ''}
@@ -544,7 +544,7 @@ function NuevoContactoModal({
               ))}
             </select>
           </Field>
-          <Field label="Email">
+          <Field ancho="doble" label="Email">
             <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <Field label="Teléfono">

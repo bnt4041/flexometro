@@ -158,7 +158,7 @@ export function ObraCrear() {
             que ya tenga una obra asociada.
           </p>
           <div className="form-grid">
-            <Field label="Nombre de la obra">
+            <Field ancho="doble" label="Nombre de la obra">
               <input
                 className="input"
                 value={nombre}
@@ -166,7 +166,7 @@ export function ObraCrear() {
                 autoFocus
               />
             </Field>
-            <Field label="Presupuesto a ejecutar">
+            <Field ancho="doble" label="Presupuesto a ejecutar">
               <select
                 className="select"
                 value={presupuestoId}

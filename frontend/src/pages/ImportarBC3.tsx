@@ -163,7 +163,7 @@ export function ImportarBC3() {
                   </select>
                 </Field>
                 {analisis.es_presupuesto && crearPresupuesto && (
-                  <Field label="Nombre del presupuesto" hint="Vacío: el del propio fichero">
+                  <Field ancho="doble" label="Nombre del presupuesto" hint="Vacío: el del propio fichero">
                     <input
                       className="input"
                       value={nombre}

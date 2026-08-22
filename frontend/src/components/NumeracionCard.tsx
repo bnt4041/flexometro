@@ -157,7 +157,7 @@ function FilaPatron({
     <div className="card" style={{ padding: 'var(--sp-4)' }}>
       <ErrorNotice error={error} />
       <div className="form-grid">
-        <Field label={etiquetas[patron.tipo_documento]}>
+        <Field ancho="doble" label={etiquetas[patron.tipo_documento]}>
           <input className="input" value={valor} onChange={(e) => setValor(e.target.value)} />
         </Field>
       </div>

@@ -170,7 +170,7 @@ function NuevoCampo({
         <Field label="Clave" hint="Identificador interno, no se puede cambiar luego">
           <input className="input" value={clave} onChange={(e) => setClave(e.target.value)} autoFocus />
         </Field>
-        <Field label="Etiqueta">
+        <Field ancho="doble" label="Etiqueta">
           <input className="input" value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} />
         </Field>
         <Field label="Tipo">
@@ -183,7 +183,7 @@ function NuevoCampo({
           </select>
         </Field>
         {tipo === 'select' && (
-          <Field label="Opciones" hint="Separadas por comas">
+          <Field ancho="doble" label="Opciones" hint="Separadas por comas">
             <input
               className="input"
               value={opcionesTexto}

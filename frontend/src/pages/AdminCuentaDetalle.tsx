@@ -129,7 +129,7 @@ function DatosCuenta({ cuenta, onCambio }: { cuenta: Detalle; onCambio: () => Pr
     <div className="card" style={{ padding: 'var(--sp-5)' }}>
       <ErrorNotice error={error} />
       <div className="form-grid">
-        <Field label="Nombre">
+        <Field ancho="doble" label="Nombre">
           <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
         </Field>
         <Field label="Tarifa" hint="Cubre todas las organizaciones de esta cuenta">
@@ -313,11 +313,8 @@ function NuevaOrganizacionModal({
           desde su ficha.
         </p>
         <div className="form-grid">
-          <Field label="Slug" hint="minúsculas, dígitos y guiones — es el que usa Keycloak">
-            <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} autoFocus />
-          </Field>
-          <Field label="Nombre">
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <Field ancho="doble" label="Nombre">
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </Field>
           <Field label="CIF" hint="Opcional">
             <input className="input" value={cif} onChange={(e) => setCif(e.target.value)} />
@@ -331,7 +328,7 @@ function NuevaOrganizacionModal({
         </button>
         <button
           className="btn btn--primary"
-          disabled={guardando || slug.trim() === '' || name.trim() === ''}
+          disabled={guardando || name.trim() === ''}
           onClick={() => void guardar()}
         >
           {!guardando && <Plus size={16} aria-hidden="true" />}
@@ -433,7 +430,7 @@ function CobrosCard({ cuentaId }: { cuentaId: string }) {
       <div className="card" style={{ padding: 'var(--sp-5)' }}>
         <ErrorNotice error={error} />
         <div className="form-grid">
-          <Field label="Concepto">
+          <Field ancho="doble" label="Concepto">
             <input className="input" value={concepto} onChange={(e) => setConcepto(e.target.value)} />
           </Field>
           <Field label="Importe">

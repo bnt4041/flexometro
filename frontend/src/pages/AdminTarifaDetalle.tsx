@@ -92,10 +92,10 @@ export function AdminTarifaDetalle() {
       <div className="card">
         <div className="form-section">
           <div className="form-grid">
-            <Field label="Nombre">
+            <Field ancho="doble" label="Nombre">
               <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
             </Field>
-            <Field label="Descripción" hint="Opcional">
+            <Field ancho="doble" label="Descripción" hint="Opcional">
               <input
                 className="input"
                 value={descripcion}

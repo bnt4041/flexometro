@@ -123,7 +123,7 @@ export function FormulasModal({
           <Field label="Nombre">
             <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
           </Field>
-          <Field label="Expresión">
+          <Field ancho="doble" label="Expresión">
             <input
               className="input"
               value={expresion}

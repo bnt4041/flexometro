@@ -927,7 +927,7 @@ function EditarPresupuestoModal({
       <div className="form-section">
         <ErrorNotice error={error} />
         <div className="form-grid">
-          <Field label="Nombre">
+          <Field ancho="doble" label="Nombre">
             <input
               className="input"
               value={nombre}
@@ -945,7 +945,7 @@ function EditarPresupuestoModal({
               ))}
             </select>
           </Field>
-          <Field label="Emplazamiento">
+          <Field ancho="doble" label="Emplazamiento">
             <input
               className="input"
               value={emplazamiento}
@@ -1082,7 +1082,7 @@ function EditarPresupuestoModal({
         </div>
 
         <div style={{ marginTop: 'var(--sp-4)' }}>
-          <Field label="Descripción">
+          <Field ancho="completo" label="Descripción">
             <textarea
               className="input"
               value={descripcion}
@@ -1092,7 +1092,7 @@ function EditarPresupuestoModal({
         </div>
 
         <div style={{ marginTop: 'var(--sp-4)' }}>
-          <Field label="Notas">
+          <Field ancho="completo" label="Notas">
             <textarea className="input" value={notas} onChange={(e) => setNotas(e.target.value)} />
           </Field>
         </div>
@@ -1217,7 +1217,7 @@ function GuardarPlantillaModal({
           presupuesto es qué partidas lleva, no cuántos metros medía aquella obra.
         </p>
         <div className="form-grid">
-          <Field label="Nombre de la plantilla">
+          <Field ancho="doble" label="Nombre de la plantilla">
             <input
               className="input"
               value={nombre}

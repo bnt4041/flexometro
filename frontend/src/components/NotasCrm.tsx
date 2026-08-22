@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Mail, Paperclip, Plus, Trash2 } from 'lucide-react'
 
+import { EnviarEmailModal } from './EnviarEmailModal'
 import { EmptyState, ErrorNotice, Tooltip } from './ui'
-import { api } from '../lib/api'
+import { api, descargar } from '../lib/api'
 import type { EntidadNota, Nota } from '../lib/api'
 
 function formatoFecha(iso: string): string {
@@ -24,6 +25,7 @@ export function NotasCrm({ entidad, entidadId }: { entidad: EntidadNota; entidad
   const [borrador, setBorrador] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
+  const [enviandoEmail, setEnviandoEmail] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -78,6 +80,12 @@ export function NotasCrm({ entidad, entidadId }: { entidad: EntidadNota; entidad
             onChange={(e) => setBorrador(e.target.value)}
           />
           <div className="form-actions">
+            <Tooltip texto="Redactar y enviar un correo, vinculado a esta ficha">
+              <button className="btn" onClick={() => setEnviandoEmail(true)}>
+                <Mail size={16} aria-hidden="true" />
+                Enviar email
+              </button>
+            </Tooltip>
             <Tooltip texto="Añadir esta nota al historial">
               <button
                 className="btn btn--primary"
@@ -92,6 +100,18 @@ export function NotasCrm({ entidad, entidadId }: { entidad: EntidadNota; entidad
         </div>
       </div>
 
+      {enviandoEmail && (
+        <EnviarEmailModal
+          entidad={entidad}
+          entidadId={entidadId}
+          onClose={() => setEnviandoEmail(false)}
+          onEnviado={() => {
+            setEnviandoEmail(false)
+            void cargar()
+          }}
+        />
+      )}
+
       {notas.length === 0 ? (
         <EmptyState title="Sin notas todavía">
           Apunta aquí llamadas, acuerdos o cualquier cosa que el equipo deba recordar.
@@ -101,10 +121,60 @@ export function NotasCrm({ entidad, entidadId }: { entidad: EntidadNota; entidad
           {notas.map((n) => (
             <div key={n.id} className="timeline__item">
               <div className="timeline__meta">
+                {n.tipo === 'email' && (
+                  <span className="badge badge--info" style={{ marginRight: 'var(--sp-2)' }}>
+                    <Mail size={11} aria-hidden="true" /> Email
+                  </span>
+                )}
                 <span>{n.creado_por_nombre ?? 'Alguien'}</span>
                 <span className="muted"> · {formatoFecha(n.created_at)}</span>
               </div>
-              <div className="timeline__cuerpo">{n.contenido}</div>
+              {n.tipo === 'email' ? (
+                <>
+                  <div style={{ fontSize: 'var(--fs-sm)', marginBottom: 'var(--sp-1)' }}>
+                    <strong>Para:</strong> {n.destinatario} — <strong>{n.asunto}</strong>
+                  </div>
+                  <div className="timeline__cuerpo" dangerouslySetInnerHTML={{ __html: n.contenido }} />
+                  {n.adjuntos.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
+                      {n.adjuntos.map((a, i) =>
+                        a.documento_id ? (
+                          <button
+                            key={a.documento_id}
+                            type="button"
+                            className="badge"
+                            onClick={() =>
+                              void descargar(api.documentos.descargarUrl(a.documento_id as string), a.nombre_archivo)
+                            }
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 'var(--sp-1)',
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Paperclip size={11} aria-hidden="true" />
+                            {a.nombre_archivo}
+                          </button>
+                        ) : (
+                          <Tooltip key={`${a.nombre_archivo}-${i}`} texto="No se guardó en la ficha, solo se envió">
+                            <span
+                              className="badge"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', opacity: 0.7 }}
+                            >
+                              <Paperclip size={11} aria-hidden="true" />
+                              {a.nombre_archivo}
+                            </span>
+                          </Tooltip>
+                        ),
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="timeline__cuerpo">{n.contenido}</div>
+              )}
               <Tooltip texto="Eliminar esta nota">
                 <button
                   className="btn btn--sm btn--danger btn--solo-icono timeline__eliminar"

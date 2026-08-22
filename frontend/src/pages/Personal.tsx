@@ -196,7 +196,7 @@ function FormularioPersonal({
               onChange={(e) => setApellidos(e.target.value)}
             />
           </Field>
-          <Field label="Categoría" hint="Oficial 1ª, peón, encargado…">
+          <Field ancho="doble" label="Categoría" hint="Oficial 1ª, peón, encargado…">
             <input
               className="input"
               value={categoria}

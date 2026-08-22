@@ -248,7 +248,7 @@ function FamiliasModal({ onClose }: { onClose: () => void }) {
           <Field label="Código">
             <input className="input" value={codigo} onChange={(e) => setCodigo(e.target.value)} />
           </Field>
-          <Field label="Nombre">
+          <Field ancho="doble" label="Nombre">
             <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
           </Field>
           <Field label="Familia superior" hint="Vacío: raíz">
@@ -390,7 +390,7 @@ export function ConceptoCrear() {
               ))}
             </select>
           </Field>
-          <Field label="Descripción corta">
+          <Field ancho="doble" label="Descripción corta">
             <input
               className="input"
               value={resumen}

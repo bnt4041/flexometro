@@ -269,7 +269,7 @@ export function AjustesEmpresa() {
           <div className="card" style={{ padding: 'var(--sp-5)', marginTop: 'var(--sp-4)' }}>
             <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 650, margin: '0 0 var(--sp-4)' }}>Identidad</h2>
             <div className="form-grid" style={{ marginBottom: 'var(--sp-6)' }}>
-              <Field label="Nombre">
+              <Field ancho="doble" label="Nombre">
                 <input className="input" value={empresa.name} onChange={(e) => campo('name', e.target.value)} />
               </Field>
               <Field label="CIF">
@@ -279,7 +279,7 @@ export function AjustesEmpresa() {
 
             <h3 style={ESTILO_SUBTITULO}>Dirección</h3>
             <div className="form-grid" style={{ marginBottom: 'var(--sp-6)' }}>
-              <Field label="Dirección">
+              <Field ancho="doble" label="Dirección">
                 <input
                   className="input"
                   value={empresa.direccion ?? ''}
@@ -314,10 +314,10 @@ export function AjustesEmpresa() {
                   onChange={(e) => campo('telefono', e.target.value)}
                 />
               </Field>
-              <Field label="Email">
+              <Field ancho="doble" label="Email">
                 <input className="input" value={empresa.email ?? ''} onChange={(e) => campo('email', e.target.value)} />
               </Field>
-              <Field label="Web">
+              <Field ancho="doble" label="Web">
                 <input
                   className="input"
                   value={empresa.web ?? ''}
@@ -329,7 +329,7 @@ export function AjustesEmpresa() {
 
             <h3 style={ESTILO_SUBTITULO}>Redes sociales</h3>
             <div className="form-grid">
-              <Field label="LinkedIn">
+              <Field ancho="doble" label="LinkedIn">
                 <input
                   className="input"
                   value={empresa.linkedin ?? ''}
@@ -337,7 +337,7 @@ export function AjustesEmpresa() {
                   placeholder="https://linkedin.com/company/…"
                 />
               </Field>
-              <Field label="Instagram">
+              <Field ancho="doble" label="Instagram">
                 <input
                   className="input"
                   value={empresa.instagram ?? ''}
@@ -345,7 +345,7 @@ export function AjustesEmpresa() {
                   placeholder="https://instagram.com/…"
                 />
               </Field>
-              <Field label="Facebook">
+              <Field ancho="doble" label="Facebook">
                 <input
                   className="input"
                   value={empresa.facebook ?? ''}
@@ -353,7 +353,7 @@ export function AjustesEmpresa() {
                   placeholder="https://facebook.com/…"
                 />
               </Field>
-              <Field label="X / Twitter">
+              <Field ancho="doble" label="X / Twitter">
                 <input
                   className="input"
                   value={empresa.twitter ?? ''}
@@ -390,7 +390,7 @@ export function AjustesEmpresa() {
         <div className="card" style={{ padding: 'var(--sp-5)', marginTop: 'var(--sp-5)' }}>
           <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 650, margin: '0 0 var(--sp-4)' }}>Crear otra empresa</h2>
           <div className="form-grid">
-            <Field label="Nombre">
+            <Field ancho="doble" label="Nombre">
               <input className="input" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} />
             </Field>
             <Field label="CIF">

@@ -139,7 +139,7 @@ export function ObraDetalle() {
         <div className="form-section">
           <div className="form-section__title">Datos de la obra</div>
           <div className="form-grid">
-            <Field label="Nombre">
+            <Field ancho="doble" label="Nombre">
               <input
                 className="input"
                 value={valor('nombre')}
