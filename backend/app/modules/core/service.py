@@ -106,6 +106,23 @@ async def _persist(
 # una organización concreta.
 
 
+async def organizaciones_de_mi_cuenta(
+    session: AsyncSession, organization_id: uuid.UUID
+) -> list[Organization]:
+    """Las empresas hermanas (misma cuenta) de la organización dada, ella
+    incluida. `core.organization` no lleva RLS —es la tabla que define el
+    aislamiento, no una tabla aislada—, así que se filtra a mano por cuenta."""
+    mia = await session.get(Organization, organization_id)
+    if mia is None:
+        return []
+    filas = await session.execute(
+        select(Organization)
+        .where(Organization.cuenta_id == mia.cuenta_id, Organization.is_active.is_(True))
+        .order_by(Organization.name)
+    )
+    return list(filas.scalars())
+
+
 async def obtener_organizacion(
     session: AsyncSession, organization_id: uuid.UUID
 ) -> Organization | None:

@@ -19,6 +19,7 @@ from app.modules.core import (
     personal_plataforma_router,
     service,
     settings_router,
+    tesoreria_router,
     traduccion_router,
     usuarios_router,
 )
@@ -76,6 +77,43 @@ async def read_me(principal: Principal = Depends(get_principal)) -> PrincipalOut
         roles=sorted(principal.roles),
         organizaciones=sorted(principal.organizaciones),
     )
+
+
+class EmpresaAccesibleOut(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    es_la_actual: bool
+
+
+@router.get("/empresas", response_model=list[EmpresaAccesibleOut])
+async def empresas_accesibles(
+    principal: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)
+) -> list[EmpresaAccesibleOut]:
+    """Las empresas de mi cuenta a las que ESTE usuario puede entrar — para
+    elegir destino al copiar (Fase 45). Distinto de
+    `/api/ajustes/empresas`, que exige ser admin de organización: copiar no
+    es administrar, así que cualquiera que ya trabaje en dos empresas puede
+    llevarse un presupuesto de una a otra.
+
+    Se cruza con `principal.organizaciones` (lo que dice su token) a
+    propósito: que una empresa exista en la cuenta no significa que este
+    usuario tenga acceso a ella.
+    """
+    if principal.organization_id is None:
+        return []
+    organizaciones = await service.organizaciones_de_mi_cuenta(session, principal.organization_id)
+    accesibles = set(principal.organizaciones)
+    return [
+        EmpresaAccesibleOut(
+            id=o.id,
+            slug=o.slug,
+            name=o.name,
+            es_la_actual=(o.id == principal.organization_id),
+        )
+        for o in organizaciones
+        if o.slug in accesibles
+    ]
 
 
 @router.get("/organizacion/logo")
@@ -270,6 +308,8 @@ router.include_router(permisos_router.tenant_router)
 router.include_router(ajustes_router.tenant_router)
 router.include_router(diccionario_router.router)
 router.include_router(diccionario_router.tenant_router)
+router.include_router(tesoreria_router.router)
+router.include_router(tesoreria_router.tenant_router)
 router.include_router(traduccion_router.router)
 router.include_router(traduccion_router.tenant_router)
 router.include_router(moneda_router.router)

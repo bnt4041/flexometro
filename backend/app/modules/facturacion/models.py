@@ -32,6 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import TipoIVA, enum_column
 from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.modules.core.tesoreria_models import CuentaFinanciera
 from app.modules.terceros.models import FormaPago
 
 SCHEMA = "facturacion"
@@ -240,6 +241,23 @@ class Cobro(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
     forma_pago: Mapped[FormaPago | None] = mapped_column(
         enum_column(FormaPago, "forma_pago"), nullable=True
     )
+    # Dónde entró el dinero (Fase 44). Distinto de `forma_pago`, que dice
+    # cómo. RESTRICT: borrar la cuenta no debe borrar el rastro del cobro —
+    # el servicio de tesorería lo impide antes de llegar aquí y ofrece
+    # desactivarla en su lugar.
+    cuenta_financiera_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("core.cuenta_financiera.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     factura: Mapped[Factura] = relationship(back_populates="cobros")
+    # `selectin`: son una o dos filas por factura y hace falta el nombre
+    # siempre que se serializa un cobro — con carga perezosa reventaría en
+    # async (`MissingGreenlet`) justo al construir el `CobroOut`.
+    cuenta_financiera: Mapped["CuentaFinanciera | None"] = relationship(lazy="selectin")
+
+    @property
+    def cuenta_financiera_nombre(self) -> str | None:
+        return self.cuenta_financiera.nombre if self.cuenta_financiera else None

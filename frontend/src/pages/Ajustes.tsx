@@ -51,6 +51,18 @@ export function Ajustes() {
             </div>
             <div className="module-row">
               <div>
+                <div className="module-row__title">Bancos y cajas</div>
+                <div className="module-row__desc">
+                  Cuentas bancarias y cajas de efectivo, para cobrar y para imprimir en los documentos.
+                </div>
+              </div>
+              <Link className="btn" to="/ajustes/cuentas-financieras">
+                {t('comun.abrir')}
+                <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="module-row">
+              <div>
                 <div className="module-row__title">{t('ajustes.diccionario.titulo')}</div>
                 <div className="module-row__desc">{t('ajustes.diccionario.descripcionHub')}</div>
               </div>

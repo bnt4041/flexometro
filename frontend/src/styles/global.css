@@ -573,6 +573,19 @@ textarea.input {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
+/* Una sola barra de acciones por ficha: lo destructivo a la izquierda,
+   apartado del resto para no pulsarlo por inercia; guardar/descartar y
+   demás, agrupados a la derecha. */
+.form-actions--separadas {
+  justify-content: space-between;
+}
+
+.form-actions__grupo {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 /* --- Tablas de datos --- */
 
 .table-wrap {
@@ -1650,12 +1663,6 @@ kbd {
 
 .ficha-cabecera__info {
   min-width: 0;
-}
-
-.ficha-cabecera__acciones {
-  display: flex;
-  gap: var(--sp-2);
-  flex-shrink: 0;
 }
 
 .ficha-pestanas {

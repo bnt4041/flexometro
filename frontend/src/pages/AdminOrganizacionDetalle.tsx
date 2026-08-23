@@ -172,7 +172,7 @@ function DatosOrganizacion({
           <input className="input" value={cif} onChange={(e) => setCif(e.target.value)} />
         </Field>
       </div>
-      <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+      <div className="form-actions form-actions--separadas">
         <button
           className={organizacion.is_active ? 'btn btn--danger' : 'btn'}
           disabled={guardando}

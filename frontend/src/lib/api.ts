@@ -493,6 +493,17 @@ export interface ContactoAsociado {
 // presupuesto, por ejemplo) — lleva `descripcion` en vez de `cambios`.
 export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado' | 'evento'
 
+export type TipoAparicion = 'presupuesto' | 'obra' | 'albaran' | 'factura' | 'concepto'
+
+export interface Aparicion {
+  tipo: TipoAparicion
+  id: string
+  codigo: string
+  titulo: string
+  subtitulo: string | null
+  estado: string | null
+}
+
 export interface CambioCampo {
   campo: string
   antes: unknown
@@ -1112,6 +1123,8 @@ export interface Cobro {
   fecha: string
   importe: string
   forma_pago: FormaPago | null
+  cuenta_financiera_id: string | null
+  cuenta_financiera_nombre: string | null
   notas: string | null
 }
 
@@ -1314,6 +1327,36 @@ export interface PlantillaPresupuesto {
   created_at: string
 }
 
+// --- Bancos y cajas (Fase 44) ---
+//
+// Dónde está el dinero de cada empresa. Distinto de `forma_pago`, que dice
+// cómo se cobró; esto dice dónde entró.
+
+export type TipoCuentaFinanciera = 'banco' | 'caja'
+
+export interface CuentaFinanciera {
+  id: string
+  nombre: string
+  tipo: TipoCuentaFinanciera
+  banco: string | null
+  iban: string | null
+  bic: string | null
+  es_predeterminada: boolean
+  activa: boolean
+  notas: string | null
+}
+
+export interface CuentaFinancieraCreate {
+  nombre: string
+  tipo: TipoCuentaFinanciera
+  banco?: string | null
+  iban?: string | null
+  bic?: string | null
+  es_predeterminada?: boolean
+  activa?: boolean
+  notas?: string | null
+}
+
 export interface Empresa {
   id: string
   name: string
@@ -1331,6 +1374,13 @@ export interface Empresa {
   twitter: string | null
   politica_privacidad: string | null
   tiene_logo: boolean
+}
+
+export interface EmpresaAccesible {
+  id: string
+  slug: string
+  name: string
+  es_la_actual: boolean
 }
 
 export interface EmpresaResumen {
@@ -1587,6 +1637,17 @@ export const api = {
         return subir<Empresa>(`/api/ajustes/empresas/${id}/logo`, f)
       },
       eliminarLogo: (id: string) => request<Empresa>(`/api/ajustes/empresas/${id}/logo`, { method: 'DELETE' }),
+    },
+    /** Fase 44: bancos y cajas de la empresa activa. Aquí van TODAS
+     *  (incluidas las desactivadas); el desplegable de cobro usa
+     *  `api.cuentasFinancieras.list()`, que solo trae las activas. */
+    cuentasFinancieras: {
+      list: () => request<CuentaFinanciera[]>('/api/ajustes/cuentas-financieras'),
+      create: (datos: CuentaFinancieraCreate) =>
+        post<CuentaFinanciera>('/api/ajustes/cuentas-financieras', datos),
+      update: (id: string, datos: Partial<CuentaFinancieraCreate>) =>
+        patch<CuentaFinanciera>(`/api/ajustes/cuentas-financieras/${id}`, datos),
+      remove: (id: string) => del(`/api/ajustes/cuentas-financieras/${id}`),
     },
     /** Fase 39: plantillas Word para exportar presupuestos — de sistema
      *  (no editables) más las propias de la cuenta. */
@@ -2002,6 +2063,10 @@ export const api = {
       patch<Tercero>(`/api/terceros/${id}`, datos),
     remove: (id: string) => del(`/api/terceros/${id}`),
     historial: (id: string) => request<RegistroAuditoria[]>(`/api/terceros/${id}/historial`),
+    /** Fase 46: en qué fichas de otros módulos aparece este tercero — como
+     *  cliente de un presupuesto/obra/factura, como proveedor de un albarán
+     *  o de una tarifa del banco de precios. */
+    apariciones: (id: string) => request<Aparicion[]>(`/api/terceros/${id}/apariciones`),
   },
 
   contactos: {
@@ -2019,6 +2084,16 @@ export const api = {
     create: (entidad: EntidadContacto, entidadId: string, datos: { contacto_id: string; rol?: string | null }) =>
       post<ContactoAsociado>(`/api/contactos-asociados${query({ entidad, entidad_id: entidadId })}`, datos),
     remove: (id: string) => del(`/api/contactos-asociados/${id}`),
+  },
+
+  /** Las empresas de mi cuenta a las que puedo entrar — para elegir destino
+   *  al copiar. No exige ser admin, a diferencia de `ajustes.empresas`. */
+  empresasAccesibles: () => request<EmpresaAccesible[]>('/api/empresas'),
+
+  /** Solo las cuentas activas, para los desplegables de negocio (cobrar una
+   *  factura). El CRUD completo está en `ajustes.cuentasFinancieras`. */
+  cuentasFinancieras: {
+    list: () => request<CuentaFinanciera[]>('/api/cuentas-financieras'),
   },
 
   notas: {
@@ -2137,6 +2212,17 @@ export const api = {
       id: string,
       datos: { nombre: string; cliente_id?: string | null; emplazamiento?: string | null },
     ) => post<Presupuesto>(`/api/presupuestos/${id}/instanciar`, datos),
+    /** Fase 45: duplica el presupuesto, aquí mismo o en otra empresa de la
+     *  cuenta. Copiar, no mover: el original se queda donde estaba. */
+    copiar: (
+      id: string,
+      datos: {
+        nombre: string
+        organization_id?: string | null
+        cliente_id?: string | null
+        con_mediciones: boolean
+      },
+    ) => post<Presupuesto>(`/api/presupuestos/${id}/copiar`, datos),
     excelUrl: (id: string, opciones: OpcionesExportacion) =>
       `/api/presupuestos/${id}/excel?${queryExportacion(opciones)}`,
     plantillas: (id: string) =>
@@ -2481,7 +2567,16 @@ export const api = {
     anular: (id: string, motivo: string) => post<Factura>(`/api/facturas/${id}/anular`, { motivo }),
     notificar: (id: string) => post<Factura>(`/api/facturas/${id}/notificar`, {}),
     pdfUrl: (id: string) => `/api/facturas/${id}/pdf`,
-    addCobro: (id: string, datos: { fecha: string; importe: string; forma_pago?: string | null; notas?: string | null }) =>
+    addCobro: (
+      id: string,
+      datos: {
+        fecha: string
+        importe: string
+        forma_pago?: string | null
+        cuenta_financiera_id?: string | null
+        notas?: string | null
+      },
+    ) =>
       post<Cobro>(`/api/facturas/${id}/cobros`, datos),
   },
 

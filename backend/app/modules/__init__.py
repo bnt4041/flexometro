@@ -56,6 +56,7 @@ def import_models() -> None:
     from app.modules.core import traduccion_models as _core_traduccion_models  # noqa: F401
     from app.modules.core import permisos_models as _core_permisos_models  # noqa: F401
     from app.modules.core import settings_models as _core_settings_models  # noqa: F401
+    from app.modules.core import tesoreria_models as _core_tesoreria_models  # noqa: F401
     from app.modules.facturacion import models as _facturacion_models  # noqa: F401
     from app.modules.ia import models as _ia_models  # noqa: F401
     from app.modules.obras import models as _obras_models  # noqa: F401

@@ -243,10 +243,9 @@ export function Modal({
   onClose: () => void
   children: ReactNode
 }) {
-  // Escape cierra el diálogo: en una pantalla de alta densidad, obligar a
-  // apuntar a la equis para descartar un formulario molesta. Va por la pila de
-  // capas para no cerrar además la ficha que hay debajo.
-  useEscapeCierra(onClose)
+  // Ni Escape ni el clic fuera cierran esto: son formularios (alta/edición),
+  // y perder lo escrito por un clic o una tecla sin querer es peor que la
+  // incomodidad de tener que ir a la X o a "Cancelar" a propósito.
 
   // Portal a `document.body`: un widget con zoom (Fase 32) pone `transform:
   // scale()` en su contenido, y eso convierte a ese `div` en el "containing
@@ -254,8 +253,8 @@ export function Modal({
   // cubrir la pantalla y el modal se recorta contra el borde del widget. El
   // portal saca el modal de esa jerarquía por completo.
   return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <div className="modal-backdrop">
+      <div className="modal" role="dialog" aria-modal="true">
         <div className="modal__head">
           <span className="modal__title">{title}</span>
           <Tooltip texto="Cerrar">

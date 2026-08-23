@@ -377,11 +377,15 @@ export function AjustesEmpresa() {
             </div>
           </div>
 
-          <div className="form-actions" style={{ justifyContent: 'flex-start', marginTop: 'var(--sp-4)' }}>
-            <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
-              <Save size={16} aria-hidden="true" />
-              {guardando ? 'Guardando…' : 'Guardar'}
-            </button>
+          {/* Una sola barra para las tres tarjetas de arriba (logo, datos y
+              política): todas se guardan con el mismo botón. */}
+          <div className="card" style={{ marginTop: 'var(--sp-4)' }}>
+            <div className="form-actions">
+              <button className="btn btn--primary" disabled={guardando} onClick={() => void guardar()}>
+                <Save size={16} aria-hidden="true" />
+                {guardando ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -397,7 +401,10 @@ export function AjustesEmpresa() {
               <input className="input" value={nuevoCif} onChange={(e) => setNuevoCif(e.target.value)} />
             </Field>
           </div>
-          <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+          {/* Fila simple, no `.form-actions`: esta tarjeta ya lleva su propio
+              padding, y esa clase trae el suyo más un borde superior — se
+              vería una caja dentro de otra. */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--sp-4)' }}>
             <button className="btn btn--primary" disabled={creandoEmpresa} onClick={() => void crearEmpresa()}>
               <Plus size={16} aria-hidden="true" />
               {creandoEmpresa ? 'Creando…' : 'Crear empresa'}

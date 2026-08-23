@@ -14,6 +14,7 @@ import {
   FileText,
   HardHat,
   History,
+  Link2,
   MessageSquareText,
   Layers,
   ListPlus,
@@ -96,6 +97,7 @@ const ICONOS: Record<string, LucideIcon> = {
   crm: MessageSquareText,
   documentos: FilePlus,
   historial: History,
+  apariciones: Link2,
 }
 
 export type NombreIcono = keyof typeof ICONOS | (string & {})

@@ -557,6 +557,22 @@ async def registrar_cobro(
     if factura.estado != EstadoFactura.EMITIDA:
         raise FacturaNoEditable("Solo se registran cobros de facturas emitidas")
 
+    # La comprobación de una FK la hace PostgreSQL saltándose RLS, así que
+    # sin esto un id de la cuenta bancaria de la otra empresa colaría: el
+    # cobro quedaría apuntando a una cuenta que su propia organización no
+    # puede ni ver.
+    if datos.cuenta_financiera_id is not None:
+        from app.modules.core.tesoreria_models import CuentaFinanciera
+
+        propia = await session.scalar(
+            select(CuentaFinanciera.id).where(
+                CuentaFinanciera.id == datos.cuenta_financiera_id,
+                CuentaFinanciera.organization_id == org_id,
+            )
+        )
+        if propia is None:
+            raise FacturaNoEditable("La cuenta de banco o caja indicada no es de esta empresa")
+
     cobro = Cobro(organization_id=org_id, factura_id=factura_id, **datos.model_dump())
     session.add(cobro)
     await session.flush()

@@ -82,6 +82,10 @@ async def contexto_plantilla(session: AsyncSession, presupuesto: Presupuesto) ->
     conceptos = await datos.conceptos_del_presupuesto(session, presupuesto.id)
     organizacion = await core_service.obtener_organizacion(session, presupuesto.organization_id)
 
+    from app.modules.core import tesoreria_service
+
+    cuenta_banco = await tesoreria_service.predeterminada(session)
+
     return {
         "presupuesto": {
             "codigo": presupuesto.codigo,
@@ -181,6 +185,19 @@ async def contexto_plantilla(session: AsyncSession, presupuesto: Presupuesto) ->
                 "twitter": organizacion.twitter or "",
             }
             if organizacion
+            else {}
+        ),
+        # La cuenta marcada como predeterminada en Ajustes -> Bancos y cajas
+        # (Fase 44), para imprimir el "ingrese en…" al pie del presupuesto.
+        # Vacío si la empresa no tiene ninguna marcada.
+        "banco": (
+            {
+                "nombre": cuenta_banco.nombre,
+                "entidad": cuenta_banco.banco or "",
+                "iban": cuenta_banco.iban or "",
+                "bic": cuenta_banco.bic or "",
+            }
+            if cuenta_banco
             else {}
         ),
     }

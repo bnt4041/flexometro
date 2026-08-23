@@ -64,6 +64,7 @@ CLAVES_REFERENCIA = [
     ("organizacion.nombre / .cif / .direccion / .codigo_postal / .ciudad / .provincia", "Se editan en Ajustes -> Empresa"),
     ("organizacion.telefono / .email / .web", ""),
     ("organizacion.linkedin / .instagram / .facebook / .twitter", ""),
+    ("banco.nombre / .entidad / .iban / .bic", "La cuenta marcada como predeterminada en Ajustes -> Bancos y cajas"),
     ("Logo: inserta cualquier imagen y ponle de texto alternativo la palabra logo", "Clic derecho sobre la imagen -> Editar texto alternativo -> logo"),
     ("Filtros de formato: valor|eur -> 1.234,56    valor|num(3) -> 1.234,560", "Se escriben con una barra vertical, sin llaves, dentro de una clave real"),
 ]
@@ -160,6 +161,17 @@ def plantilla_presupuesto() -> Document:
     p = doc.add_paragraph()
     p.add_run(f"TOTAL: {{{{ totales.total|eur }}}} €").bold = True
     p.runs[0].font.size = Pt(14)
+
+    # Solo se imprime si la empresa tiene una cuenta marcada como
+    # predeterminada; si no, `banco` llega vacío y el bloque entero
+    # desaparece. `{%p ... %}` (no `{% ... %}`) para que docxtpl borre
+    # también los párrafos de control, igual que `{%tr %}` en las tablas.
+    doc.add_paragraph()
+    doc.add_paragraph("{%p if banco %}")
+    doc.add_paragraph("Forma de pago: ingreso en {{ banco.entidad }}")
+    doc.add_paragraph("IBAN: {{ banco.iban }}")
+    doc.add_paragraph("{%p endif %}")
+
     _tabla_claves(doc)
     return doc
 

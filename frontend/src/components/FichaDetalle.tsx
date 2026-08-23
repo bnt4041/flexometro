@@ -16,7 +16,13 @@ export interface PestanaFicha {
 
 /** Ficha genérica de un objeto complejo (presupuesto, certificación,
  *  factura, obra, tercero, banco de precios...) — Fase 27: cabecera con los
- *  datos principales y acciones, más pestañas para el resto.
+ *  datos principales, más pestañas para el resto.
+ *
+ *  La cabecera NO lleva botones (Fase 43): cada ficha tenía la mitad de sus
+ *  acciones aquí y la otra mitad en la barra del formulario, dos filas de
+ *  botones para lo mismo. Ahora cada pestaña pone las suyas en una única
+ *  barra al final de su contenido, que además es donde de verdad aplican
+ *  (guardar afecta al formulario de esa pestaña, no a la ficha entera).
  *
  *  Convención de pestañas (se va rellenando fase a fase, no todas existen
  *  todavía en cada ficha): la primera es siempre el contenido propio de la
@@ -32,13 +38,11 @@ export interface PestanaFicha {
 export function FichaDetalle({
   titulo,
   subtitulo,
-  acciones,
   pestanas,
   onClose,
 }: {
   titulo: ReactNode
   subtitulo?: ReactNode
-  acciones?: ReactNode
   pestanas: PestanaFicha[]
   onClose: () => void
 }) {
@@ -86,10 +90,9 @@ export function FichaDetalle({
           </Tooltip>
         </div>
 
-        {(subtitulo || acciones) && (
+        {subtitulo && (
           <div className="ficha-cabecera">
-            {subtitulo && <div className="ficha-cabecera__info">{subtitulo}</div>}
-            {acciones && <div className="ficha-cabecera__acciones">{acciones}</div>}
+            <div className="ficha-cabecera__info">{subtitulo}</div>
           </div>
         )}
 

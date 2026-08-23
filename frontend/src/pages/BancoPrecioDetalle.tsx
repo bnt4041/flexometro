@@ -270,19 +270,27 @@ export function BancoPrecioDetalle() {
           </div>
         </div>
 
-        <div className="form-actions">
-          <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
-            <X size={16} aria-hidden="true" />
-            Descartar
-          </button>
-          <button
-            className="btn btn--primary"
-            disabled={!hayCambios || guardando}
-            onClick={() => void guardar()}
-          >
-            {!guardando && <Save size={16} aria-hidden="true" />}
-            {guardando ? 'Guardando…' : 'Guardar cambios'}
-          </button>
+        <div className="form-actions form-actions--separadas">
+          <Tooltip texto="Eliminar esta ficha del banco de precios">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
+          <span className="form-actions__grupo">
+            <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
+              <X size={16} aria-hidden="true" />
+              Descartar
+            </button>
+            <button
+              className="btn btn--primary"
+              disabled={!hayCambios || guardando}
+              onClick={() => void guardar()}
+            >
+              {!guardando && <Save size={16} aria-hidden="true" />}
+              {guardando ? 'Guardando…' : 'Guardar cambios'}
+            </button>
+          </span>
         </div>
       </div>
 
@@ -613,14 +621,6 @@ export function BancoPrecioDetalle() {
             <div className="precio-cabecera__unidad">por {concepto.unidad}</div>
           </div>
         </div>
-      }
-      acciones={
-        <Tooltip texto="Eliminar esta ficha del banco de precios">
-          <button className="btn btn--danger" onClick={() => void eliminar()}>
-            <Trash2 size={16} aria-hidden="true" />
-            Eliminar
-          </button>
-        </Tooltip>
       }
       pestanas={pestanas}
       onClose={cerrar}

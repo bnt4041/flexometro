@@ -164,6 +164,53 @@ export function CertificacionDetalle() {
         ]}
       />
 
+      <div className="card" style={{ marginTop: 'var(--sp-4)' }}>
+        <div className="form-actions form-actions--separadas">
+          {esBorrador ? (
+            <Tooltip texto="Eliminar esta certificación">
+              <button className="btn btn--danger" onClick={() => void eliminar()}>
+                <Trash2 size={16} aria-hidden="true" />
+                Eliminar
+              </button>
+            </Tooltip>
+          ) : (
+            <span />
+          )}
+          <span className="form-actions__grupo">
+            <Tooltip texto="Descargar el PDF de esta certificación">
+              <button
+                className="btn"
+                onClick={() =>
+                  void descargar(api.certificaciones.pdfUrl(id), `${certificacion!.codigo}.pdf`, {
+                    abrir: true,
+                  }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                }
+              >
+                <FileDown size={16} aria-hidden="true" />
+                PDF
+              </button>
+            </Tooltip>
+            {esBorrador ? (
+              <Tooltip texto="Emitir: a partir de aquí queda bloqueada">
+                <button className="btn btn--primary" onClick={() => void emitir()}>
+                  <Send size={16} aria-hidden="true" />
+                  Emitir
+                </button>
+              </Tooltip>
+            ) : (
+              !certificacion!.facturada && (
+                <Tooltip texto="Generar la factura a partir de esta certificación">
+                  <button className="btn btn--primary" onClick={() => setGenerando(true)}>
+                    <Plus size={16} aria-hidden="true" />
+                    Generar factura
+                  </button>
+                </Tooltip>
+              )
+            )}
+          </span>
+        </div>
+      </div>
+
       {generando && (
         <GenerarFacturaModal
           certificacionId={id}
@@ -222,50 +269,6 @@ export function CertificacionDetalle() {
           </span>
           {certificacion.facturada && <span className="badge"> facturada</span>}
         </p>
-      }
-      acciones={
-        <>
-          <Tooltip texto="Descargar el PDF de esta certificación">
-            <button
-              className="btn"
-              onClick={() =>
-                void descargar(
-                  api.certificaciones.pdfUrl(id),
-                  `${certificacion.codigo}.pdf`,
-                  { abrir: true },
-                ).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-              }
-            >
-              <FileDown size={16} aria-hidden="true" />
-              PDF
-            </button>
-          </Tooltip>
-          {esBorrador ? (
-            <>
-              <Tooltip texto="Eliminar esta certificación">
-                <button className="btn btn--danger" onClick={() => void eliminar()}>
-                  <Trash2 size={16} aria-hidden="true" />
-                  Eliminar
-                </button>
-              </Tooltip>
-              <Tooltip texto="Emitir: a partir de aquí queda bloqueada">
-                <button className="btn btn--primary" onClick={() => void emitir()}>
-                  <Send size={16} aria-hidden="true" />
-                  Emitir
-                </button>
-              </Tooltip>
-            </>
-          ) : (
-            !certificacion.facturada && (
-              <Tooltip texto="Generar la factura a partir de esta certificación">
-                <button className="btn btn--primary" onClick={() => setGenerando(true)}>
-                  <Plus size={16} aria-hidden="true" />
-                  Generar factura
-                </button>
-              </Tooltip>
-            )
-          )}
-        </>
       }
       pestanas={pestanas}
       onClose={cerrar}

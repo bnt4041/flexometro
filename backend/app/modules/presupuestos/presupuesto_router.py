@@ -43,6 +43,7 @@ from app.modules.presupuestos.presupuesto_schemas import (
     ProbarFormulaOut,
     GuardarComoPlantilla,
     LineaDescomposicionOut,
+    CopiarPresupuesto,
     InstanciarPlantilla,
     LineaMedicionCreate,
     LineaMedicionOut,
@@ -1160,6 +1161,39 @@ async def instanciar(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     await session.commit()
     return PresupuestoOut.model_validate(nuevo)
+
+
+@presupuestos_router.post(
+    "/{presupuesto_id}/copiar",
+    response_model=PresupuestoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def copiar(
+    presupuesto_id: uuid.UUID,
+    datos: CopiarPresupuesto,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PresupuestoOut:
+    """Duplica el presupuesto, aquí mismo o en otra empresa de la cuenta."""
+    await _presupuesto_propio(session, presupuesto_id, alcance, principal)
+
+    destino = datos.organization_id or principal.organization_id
+    try:
+        copia = await versionado.copiar(
+            session,
+            presupuesto_id,
+            nombre=datos.nombre,
+            org_destino=destino,
+            cliente_id=datos.cliente_id,
+            con_mediciones=datos.con_mediciones,
+        )
+    except versionado.PresupuestoNoEncontrado as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except versionado.EmpresaDestinoInvalida as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    await session.commit()
+    return PresupuestoOut.model_validate(copia)
 
 
 @presupuestos_router.get("/{presupuesto_id}/excel")

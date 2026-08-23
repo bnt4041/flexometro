@@ -42,16 +42,20 @@ class PresupuestoNoEncontrado(Exception):
     pass
 
 
-async def _copiar_arbol(
-    session: AsyncSession,
-    origen_id: uuid.UUID,
-    destino: Presupuesto,
-    *,
-    con_mediciones: bool,
-) -> None:
-    """Duplica capítulos, partidas y mediciones respetando la jerarquía."""
-    org_id = require_organization_id()
+@dataclass
+class ArbolPresupuesto:
+    """Capítulos, partidas y mediciones ya leídos del origen. Se separa de la
+    escritura porque copiar a otra empresa (Fase 45) obliga a leer con la
+    organización de origen activa y escribir con la de destino: RLS filtra las
+    lecturas por `app.organization_id` y rechaza los INSERT que no casen con
+    ella, así que no caben en el mismo tramo."""
 
+    capitulos: list
+    partidas: list
+    lineas: list
+
+
+async def _leer_arbol(session: AsyncSession, origen_id: uuid.UUID) -> ArbolPresupuesto:
     capitulos = list(
         (
             await session.execute(
@@ -80,6 +84,18 @@ async def _copiar_arbol(
             )
         ).scalars()
     )
+    return ArbolPresupuesto(capitulos=capitulos, partidas=partidas, lineas=lineas)
+
+
+async def _escribir_arbol(
+    session: AsyncSession,
+    arbol: ArbolPresupuesto,
+    destino: Presupuesto,
+    *,
+    org_id: uuid.UUID,
+    con_mediciones: bool,
+) -> None:
+    capitulos, partidas, lineas = arbol.capitulos, arbol.partidas, arbol.lineas
 
     # Los capítulos se crean de arriba abajo para que el padre exista cuando se
     # crea el hijo; el mapa traduce identificadores viejos a nuevos.
@@ -165,6 +181,22 @@ async def _copiar_arbol(
                 )
             )
     await session.flush()
+
+
+async def _copiar_arbol(
+    session: AsyncSession,
+    origen_id: uuid.UUID,
+    destino: Presupuesto,
+    *,
+    con_mediciones: bool,
+) -> None:
+    """Leer + escribir dentro de la misma organización — el camino de siempre
+    (versión nueva, plantilla). Copiar a otra empresa parte los dos pasos, ver
+    `copiar_a_empresa`."""
+    arbol = await _leer_arbol(session, origen_id)
+    await _escribir_arbol(
+        session, arbol, destino, org_id=require_organization_id(), con_mediciones=con_mediciones
+    )
 
 
 async def _cargar(session: AsyncSession, presupuesto_id: uuid.UUID) -> Presupuesto:
@@ -308,6 +340,102 @@ async def instanciar_plantilla(
 
     await _copiar_arbol(session, plantilla.id, destino, con_mediciones=True)
     return destino
+
+
+# --- Copia (Fase 45) ---
+
+
+class EmpresaDestinoInvalida(Exception):
+    pass
+
+
+async def copiar(
+    session: AsyncSession,
+    presupuesto_id: uuid.UUID,
+    *,
+    nombre: str,
+    org_destino: uuid.UUID,
+    cliente_id: uuid.UUID | None,
+    con_mediciones: bool,
+) -> Presupuesto:
+    """Duplica el presupuesto, opcionalmente en OTRA empresa de la misma
+    cuenta. Nace siempre en borrador, con precios sueltos y numeración propia
+    de la empresa de destino — es una copia nueva, no una versión ni un
+    traslado: el original se queda donde estaba, intacto.
+
+    Copiar en vez de mover es lo que hace esto viable: no hay que reescribir
+    `organization_id` de nada (RLS lo prohíbe), ni arrastrar obras,
+    certificaciones o facturas colgando, ni arriesgarse a chocar con un
+    código ya usado en destino.
+
+    Las referencias a conceptos del banco de precios y al cliente sobreviven
+    al salto de empresa porque ambas tablas son "maestros" compartidos entre
+    las organizaciones de una misma cuenta (`Cuenta.compartir_maestros`, Fase
+    15). Si esa opción estuviera desactivada, la copia seguiría siendo válida
+    pero esas referencias quedarían invisibles desde destino — por eso el
+    servicio lo comprueba antes.
+    """
+    from app.core.database import fijar_organizacion_activa
+    from app.modules.core.models import Cuenta, Organization
+
+    org_origen = require_organization_id()
+    origen = await _cargar(session, presupuesto_id)
+
+    # Todo lo que hay que leer del origen, ANTES de mover el contexto: en
+    # cuanto `app.organization_id` apunte a destino, RLS deja de enseñar
+    # estas filas.
+    arbol = await _leer_arbol(session, presupuesto_id)
+    campos = {campo: getattr(origen, campo) for campo in CAMPOS_COPIABLES}
+    campos["cliente_id"] = cliente_id
+
+    if org_destino != org_origen:
+        destino_valido = await session.scalar(
+            select(Organization.id)
+            .join(Cuenta, Cuenta.id == Organization.cuenta_id)
+            .where(
+                Organization.id == org_destino,
+                Organization.is_active.is_(True),
+                Cuenta.id.in_(
+                    select(Organization.cuenta_id).where(Organization.id == org_origen)
+                ),
+            )
+        )
+        if destino_valido is None:
+            raise EmpresaDestinoInvalida(
+                "La empresa de destino no existe o no es de esta misma cuenta"
+            )
+        await fijar_organizacion_activa(session, org_destino)
+
+    # `presupuesto_service.siguiente_codigo` saca la organización del
+    # contexto de la request, que sigue siendo la de origen —
+    # `fijar_organizacion_activa` solo mueve la variable de PostgreSQL. Hay
+    # que pedir la referencia con la organización de destino explícita, o la
+    # copia consumiría un número de la serie de la empresa equivocada.
+    from app.core.numeracion import siguiente_referencia
+
+    codigo = await siguiente_referencia(
+        session, organization_id=org_destino, tipo_documento="presupuesto"
+    )
+
+    copia = Presupuesto(
+        organization_id=org_destino,
+        codigo=codigo,
+        nombre=nombre,
+        es_plantilla=False,
+        estado=EstadoPresupuesto.BORRADOR,
+        precios_bloqueados=False,
+        version=1,
+        fecha=origen.fecha,
+        **campos,
+        **datos_autoria(),
+    )
+    session.add(copia)
+    await session.flush()
+
+    await _escribir_arbol(
+        session, arbol, copia, org_id=org_destino, con_mediciones=con_mediciones
+    )
+    return copia
 
 
 # --- Comparación ---

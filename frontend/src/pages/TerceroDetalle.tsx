@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Plus, Save, Trash2, X } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import { Apariciones } from '../components/Apariciones'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
@@ -323,19 +324,27 @@ export function TerceroDetalle() {
           </div>
         </div>
 
-        <div className="form-actions">
-          <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
-            <X size={16} aria-hidden="true" />
-            Descartar
-          </button>
-          <button
-            className="btn btn--primary"
-            disabled={!hayCambios || guardando}
-            onClick={() => void guardar()}
-          >
-            {!guardando && <Save size={16} aria-hidden="true" />}
-            {guardando ? 'Guardando…' : 'Guardar cambios'}
-          </button>
+        <div className="form-actions form-actions--separadas">
+          <Tooltip texto="Eliminar este tercero">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
+          <span className="form-actions__grupo">
+            <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
+              <X size={16} aria-hidden="true" />
+              Descartar
+            </button>
+            <button
+              className="btn btn--primary"
+              disabled={!hayCambios || guardando}
+              onClick={() => void guardar()}
+            >
+              {!guardando && <Save size={16} aria-hidden="true" />}
+              {guardando ? 'Guardando…' : 'Guardar cambios'}
+            </button>
+          </span>
         </div>
       </div>
 
@@ -406,6 +415,12 @@ export function TerceroDetalle() {
       contenido: <Documentos entidad="tercero" entidadId={id} />,
     },
     {
+      id: 'apariciones',
+      etiqueta: 'Apariciones',
+      icono: 'apariciones',
+      contenido: <Apariciones terceroId={id} />,
+    },
+    {
       id: 'historial',
       etiqueta: 'Historial',
       icono: 'historial',
@@ -424,14 +439,6 @@ export function TerceroDetalle() {
         <p className="page-lead" style={{ marginBottom: 0 }}>
           Origen del dato: {tercero.origen_dato}
         </p>
-      }
-      acciones={
-        <Tooltip texto="Eliminar este tercero">
-          <button className="btn btn--danger" onClick={() => void eliminar()}>
-            <Trash2 size={16} aria-hidden="true" />
-            Eliminar
-          </button>
-        </Tooltip>
       }
       pestanas={pestanas}
       onClose={cerrar}

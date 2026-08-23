@@ -11,7 +11,7 @@ import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_FACTURA, ETIQUETA_SITUACION_COBRO, api, descargar } from '../lib/api'
-import type { FacturaDetalle as Detalle } from '../lib/api'
+import type { CuentaFinanciera, FacturaDetalle as Detalle } from '../lib/api'
 import { useContextoFacturas } from './Facturas'
 
 export function FacturaDetalle() {
@@ -149,6 +149,7 @@ export function FacturaDetalle() {
                               <tr>
                                 <th>Fecha</th>
                                 <th>Forma de pago</th>
+                                <th>Entra en</th>
                                 <th className="table__num">Importe</th>
                                 <th className="table__actions" />
                               </tr>
@@ -158,6 +159,7 @@ export function FacturaDetalle() {
                                 <tr key={c.id}>
                                   <td>{c.fecha}</td>
                                   <td>{c.forma_pago ?? <span className="muted">—</span>}</td>
+                                  <td className="muted">{c.cuenta_financiera_nombre ?? '—'}</td>
                                   <td className="table__num">{formatoImporte(c.importe)}</td>
                                   <td className="table__actions">
                                     <Tooltip texto="Eliminar este cobro">
@@ -174,7 +176,7 @@ export function FacturaDetalle() {
                             </tbody>
                             <tfoot>
                               <tr className="fila-total">
-                                <td colSpan={2} className="table__num total-label">
+                                <td colSpan={3} className="table__num total-label">
                                   Pendiente
                                 </td>
                                 <td className="table__num">
@@ -219,6 +221,44 @@ export function FacturaDetalle() {
           },
         ]}
       />
+
+      <div className="card" style={{ marginTop: 'var(--sp-4)' }}>
+        <div className="form-actions form-actions--separadas">
+          {factura!.estado === 'emitida' ? (
+            <Tooltip texto="Anular esta factura (conserva su número)">
+              <button className="btn btn--danger" onClick={() => setAnulando(true)}>
+                <Ban size={16} aria-hidden="true" />
+                Anular
+              </button>
+            </Tooltip>
+          ) : (
+            <span />
+          )}
+          <span className="form-actions__grupo">
+            <Tooltip texto="Descargar el PDF de esta factura">
+              <button
+                className="btn"
+                onClick={() =>
+                  void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
+                    abrir: true,
+                  }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                }
+              >
+                <FileDown size={16} aria-hidden="true" />
+                PDF
+              </button>
+            </Tooltip>
+            {factura!.estado === 'borrador' && (
+              <Tooltip texto="Emitir: asigna número fiscal definitivo">
+                <button className="btn btn--primary" onClick={() => void emitir()}>
+                  <Send size={16} aria-hidden="true" />
+                  Emitir
+                </button>
+              </Tooltip>
+            )}
+          </span>
+        </div>
+      </div>
 
       {anulando && (
         <AnularModal
@@ -286,39 +326,6 @@ export function FacturaDetalle() {
           {factura.concepto}
           {factura.fecha_emision && <> · emitida {factura.fecha_emision}</>}
         </p>
-      }
-      acciones={
-        <>
-          <Tooltip texto="Descargar el PDF de esta factura">
-            <button
-              className="btn"
-              onClick={() =>
-                void descargar(api.facturas.pdfUrl(id), `${numeroFiscal.replace('/', '-')}.pdf`, {
-                  abrir: true,
-                }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-              }
-            >
-              <FileDown size={16} aria-hidden="true" />
-              PDF
-            </button>
-          </Tooltip>
-          {factura.estado === 'borrador' && (
-            <Tooltip texto="Emitir: asigna número fiscal definitivo">
-              <button className="btn btn--primary" onClick={() => void emitir()}>
-                <Send size={16} aria-hidden="true" />
-                Emitir
-              </button>
-            </Tooltip>
-          )}
-          {factura.estado === 'emitida' && (
-            <Tooltip texto="Anular esta factura (conserva su número)">
-              <button className="btn btn--danger" onClick={() => setAnulando(true)}>
-                <Ban size={16} aria-hidden="true" />
-                Anular
-              </button>
-            </Tooltip>
-          )}
-        </>
       }
       pestanas={pestanas}
       onClose={cerrar}
@@ -395,12 +402,31 @@ function CobroModal({
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   const [importe, setImporte] = useState('')
   const [formaPago, setFormaPago] = useState('transferencia')
+  const [cuentas, setCuentas] = useState<CuentaFinanciera[]>([])
+  const [cuentaId, setCuentaId] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  // La predeterminada viene la primera (lo ordena el backend), así que sale
+  // ya elegida sin tener que buscarla aquí.
+  useEffect(() => {
+    void api.cuentasFinancieras
+      .list()
+      .then((lista) => {
+        setCuentas(lista)
+        setCuentaId(lista.find((c) => c.es_predeterminada)?.id ?? '')
+      })
+      .catch(() => setCuentas([]))
+  }, [])
 
   async function guardar() {
     setError(null)
     try {
-      await api.facturas.addCobro(facturaId, { fecha, importe, forma_pago: formaPago })
+      await api.facturas.addCobro(facturaId, {
+        fecha,
+        importe,
+        forma_pago: formaPago,
+        cuenta_financiera_id: cuentaId || null,
+      })
       onRegistrado()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -440,6 +466,18 @@ function CobroModal({
               <option value="tarjeta">Tarjeta</option>
             </select>
           </Field>
+          {cuentas.length > 0 && (
+            <Field ancho="doble" label="Entra en" hint="Banco o caja donde se ingresa">
+              <select className="select" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+                <option value="">Sin especificar</option>
+                {cuentas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
       </div>
       <div className="form-actions">

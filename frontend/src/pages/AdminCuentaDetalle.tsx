@@ -155,7 +155,7 @@ function DatosCuenta({ cuenta, onCambio }: { cuenta: Detalle; onCambio: () => Pr
           por ley a un CIF concreto.
         </p>
       </div>
-      <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+      <div className="form-actions form-actions--separadas">
         <button
           className={cuenta.is_active ? 'btn btn--danger' : 'btn'}
           disabled={guardando}

@@ -13,6 +13,7 @@ import {
 
 import { CamposLibres } from '../components/CamposLibres'
 import { ContactosAsociados } from '../components/ContactosAsociados'
+import { CopiarPresupuestoModal } from '../components/CopiarPresupuestoModal'
 import { DescompuestoPartida } from '../components/DescompuestoPartida'
 import { DescripcionEditor } from '../components/DescripcionEditor'
 import { Documentos } from '../components/Documentos'
@@ -81,6 +82,7 @@ export function PresupuestoDetalle() {
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
   const [reajustando, setReajustando] = useState(false)
   const [exportando, setExportando] = useState<'bc3' | 'excel' | null>(null)
+  const [copiando, setCopiando] = useState(false)
   const [plantillas, setPlantillas] = useState<PlantillaPresupuesto[]>([])
   const [seleccion, setSeleccion] = useState<
     { tipo: 'partida'; partida: Partida } | { tipo: 'capitulo'; fila: FilaPresupuesto } | null
@@ -191,6 +193,36 @@ export function PresupuestoDetalle() {
     <>
       <div className="barra-acciones">
         <span className="barra-acciones__grupo">
+          <span className={`chip chip--estado-${presupuesto!.estado}`}>
+            {ETIQUETA_ESTADO[presupuesto!.estado]}
+          </span>
+          <MenuAcciones
+            acciones={[
+              { id: 'editar', etiqueta: 'Editar', icono: 'editar', onClick: () => setEditando(true) },
+              {
+                id: 'estado',
+                etiqueta: 'Cambiar estado',
+                icono: 'estado',
+                onClick: () => setCambiandoEstado(true),
+              },
+              {
+                id: 'reajuste',
+                etiqueta: 'Reajustar',
+                icono: 'recalcular',
+                onClick: () => setReajustando(true),
+              },
+              { id: 'copiar', etiqueta: 'Copiar…', icono: 'duplicar', onClick: () => setCopiando(true) },
+              {
+                id: 'eliminar',
+                etiqueta: 'Eliminar',
+                icono: 'eliminar',
+                peligroso: true,
+                onClick: () => void eliminar(),
+              },
+            ]}
+          />
+        </span>
+        <span className="barra-acciones__grupo">
           <MenuAcciones
             etiqueta="Descargar"
             icono="descargar"
@@ -222,8 +254,6 @@ export function PresupuestoDetalle() {
               ]),
             ]}
           />
-        </span>
-        <span className="barra-acciones__grupo">
           <Tooltip texto="Duplicar como versión siguiente, con precios libres otra vez">
             <button className="btn btn--sm" onClick={() => void crearVersion()}>
               <Copy size={14} aria-hidden="true" />
@@ -756,37 +786,6 @@ export function PresupuestoDetalle() {
           )}
         </div>
       }
-      acciones={
-        <>
-          <span className={`chip chip--estado-${presupuesto.estado}`}>
-            {ETIQUETA_ESTADO[presupuesto.estado]}
-          </span>
-          <MenuAcciones
-            acciones={[
-              { id: 'editar', etiqueta: 'Editar', icono: 'editar', onClick: () => setEditando(true) },
-              {
-                id: 'estado',
-                etiqueta: 'Cambiar estado',
-                icono: 'estado',
-                onClick: () => setCambiandoEstado(true),
-              },
-              {
-                id: 'reajuste',
-                etiqueta: 'Reajustar',
-                icono: 'recalcular',
-                onClick: () => setReajustando(true),
-              },
-              {
-                id: 'eliminar',
-                etiqueta: 'Eliminar',
-                icono: 'eliminar',
-                peligroso: true,
-                onClick: () => void eliminar(),
-              },
-            ]}
-          />
-        </>
-      }
       pestanas={pestanas}
       onClose={cerrar}
     />
@@ -813,6 +812,22 @@ export function PresupuestoDetalle() {
           setReajustando(false)
           void cargar()
           onCambio()
+        }}
+      />
+    )}
+
+    {copiando && (
+      <CopiarPresupuestoModal
+        presupuestoId={id}
+        nombreActual={presupuesto.nombre}
+        clienteIdActual={presupuesto.cliente_id}
+        onClose={() => setCopiando(false)}
+        onCopiado={(nuevoId, enOtraEmpresa) => {
+          setCopiando(false)
+          onCambio()
+          // Si la copia fue a otra empresa no se puede abrir desde aquí: la
+          // sesión sigue en la de origen y RLS no la deja ver.
+          if (!enOtraEmpresa) navigate(`/presupuestos/${nuevoId}`)
         }}
       />
     )}

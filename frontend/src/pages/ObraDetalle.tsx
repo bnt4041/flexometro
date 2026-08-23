@@ -186,19 +186,33 @@ export function ObraDetalle() {
           </div>
         </div>
 
-        <div className="form-actions">
-          <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
-            <X size={16} aria-hidden="true" />
-            Descartar
-          </button>
-          <button
-            className="btn btn--primary"
-            disabled={!hayCambios || guardando}
-            onClick={() => void guardar()}
-          >
-            {!guardando && <Save size={16} aria-hidden="true" />}
-            {guardando ? 'Guardando…' : 'Guardar cambios'}
-          </button>
+        <div className="form-actions form-actions--separadas">
+          <Tooltip texto="Eliminar esta obra">
+            <button className="btn btn--danger" onClick={() => void eliminar()}>
+              <Trash2 size={16} aria-hidden="true" />
+              Eliminar
+            </button>
+          </Tooltip>
+          <span className="form-actions__grupo">
+            <Tooltip texto="Comparar coste real frente a lo presupuestado">
+              <button className="btn" onClick={() => navigate(`/obras/${id}/costes`)}>
+                <BarChart3 size={16} aria-hidden="true" />
+                Coste real vs. presupuestado
+              </button>
+            </Tooltip>
+            <button className="btn" disabled={!hayCambios} onClick={() => setBorrador({})}>
+              <X size={16} aria-hidden="true" />
+              Descartar
+            </button>
+            <button
+              className="btn btn--primary"
+              disabled={!hayCambios || guardando}
+              onClick={() => void guardar()}
+            >
+              {!guardando && <Save size={16} aria-hidden="true" />}
+              {guardando ? 'Guardando…' : 'Guardar cambios'}
+            </button>
+          </span>
         </div>
       </div>
 
@@ -377,22 +391,6 @@ export function ObraDetalle() {
           Presupuesto{' '}
           <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
         </p>
-      }
-      acciones={
-        <>
-          <Tooltip texto="Comparar coste real frente a lo presupuestado">
-            <button className="btn btn--primary" onClick={() => navigate(`/obras/${id}/costes`)}>
-              <BarChart3 size={16} aria-hidden="true" />
-              Coste real vs. presupuestado
-            </button>
-          </Tooltip>
-          <Tooltip texto="Eliminar esta obra">
-            <button className="btn btn--danger" onClick={() => void eliminar()}>
-              <Trash2 size={16} aria-hidden="true" />
-              Eliminar
-            </button>
-          </Tooltip>
-        </>
       }
       pestanas={pestanas}
       onClose={cerrar}

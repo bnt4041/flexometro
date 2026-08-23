@@ -144,6 +144,9 @@ class CobroCreate(BaseModel):
     fecha: date
     importe: Decimal = Field(gt=0)
     forma_pago: FormaPago | None = None
+    # En qué banco o caja entró (Fase 44). Opcional: `forma_pago` sigue
+    # diciendo cómo, esto dice dónde.
+    cuenta_financiera_id: uuid.UUID | None = None
     notas: str | None = None
 
 
@@ -155,6 +158,8 @@ class CobroOut(BaseModel):
     fecha: date
     importe: Decimal
     forma_pago: FormaPago | None
+    cuenta_financiera_id: uuid.UUID | None
+    cuenta_financiera_nombre: str | None = None
     notas: str | None
 
 

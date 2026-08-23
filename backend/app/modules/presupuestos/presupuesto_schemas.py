@@ -665,6 +665,18 @@ class InstanciarPlantilla(BaseModel):
     emplazamiento: str | None = Field(default=None, max_length=250)
 
 
+class CopiarPresupuesto(BaseModel):
+    """Fase 45. `organization_id` ausente = copiar dentro de la misma
+    empresa; con valor, a otra empresa de la misma cuenta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(min_length=1, max_length=250)
+    organization_id: uuid.UUID | None = None
+    cliente_id: uuid.UUID | None = None
+    con_mediciones: bool = True
+
+
 class CambioOut(BaseModel):
     codigo: str
     resumen: str

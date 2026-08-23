@@ -13,8 +13,9 @@ from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.terceros import service
+from app.modules.terceros import apariciones_service, service
 from app.modules.terceros.models import EntidadContacto, Tercero
+from app.modules.terceros.apariciones_schemas import AparicionOut
 from app.modules.terceros.schemas import (
     ContactoAsociadoCreate,
     ContactoAsociadoOut,
@@ -92,6 +93,20 @@ async def detalle(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tercero no encontrado")
     verificar_propiedad(alcance, principal, tercero.creado_por_subject)
     return TerceroDetalle.model_validate(tercero)
+
+
+@terceros_router.get("/{tercero_id}/apariciones", response_model=list[AparicionOut])
+async def apariciones(
+    tercero_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[AparicionOut]:
+    tercero = await service.obtener_tercero_visible(session, tercero_id)
+    if tercero is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tercero no encontrado")
+    verificar_propiedad(alcance, principal, tercero.creado_por_subject)
+    return await apariciones_service.apariciones_de(session, tercero_id)
 
 
 @terceros_router.get("/{tercero_id}/historial", response_model=list[RegistroAuditoriaOut])
