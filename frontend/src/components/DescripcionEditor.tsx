@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 
 import { api, urlBlob } from '../lib/api'
+import type { EntidadDocumento } from '../lib/api'
 
 const RETARDO_GUARDADO = 1200
 
@@ -51,19 +52,25 @@ const ImagenConDocumento = Image.extend({
   },
 })
 
-/** Descripción con formato de un capítulo o una partida (Fase 38): editor
- *  WYSIWYG con imágenes incrustadas, que se cuelgan del propio presupuesto en
- *  el gestor documental (misma entidad que la pestaña "Documentos") para no
- *  duplicar el guardado en MinIO. */
+/** Descripción con formato de un capítulo, una partida o una ficha del banco
+ *  (Fases 38 y 50): editor WYSIWYG con imágenes incrustadas, que se cuelgan
+ *  en el gestor documental (misma entidad que la pestaña "Documentos") para
+ *  no duplicar el guardado en MinIO.
+ *
+ *  `entidad`/`entidadId` dicen de qué ficha cuelgan esas imágenes: el
+ *  presupuesto cuando se edita un capítulo o una partida suya, y el propio
+ *  concepto cuando es una ficha del banco. */
 export function DescripcionEditor({
   id,
   html,
-  presupuestoId,
+  entidad,
+  entidadId,
   onGuardar,
 }: {
   id: string
   html: string | null
-  presupuestoId: string
+  entidad: EntidadDocumento
+  entidadId: string
   onGuardar: (html: string) => Promise<void>
 }) {
   const [guardando, setGuardando] = useState(false)
@@ -169,7 +176,7 @@ export function DescripcionEditor({
     setSubiendoImagen(true)
     setError(null)
     try {
-      const documento = await api.documentos.upload('presupuesto', presupuestoId, archivo)
+      const documento = await api.documentos.upload(entidad, entidadId, archivo)
       const url = URL.createObjectURL(archivo)
       urlsBlob.current.add(url)
       editor

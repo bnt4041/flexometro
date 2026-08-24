@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { Plus, Save, Trash2, X } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
 import { Apariciones } from '../components/Apariciones'
+import { CuentasBancariasTercero } from '../components/CuentasBancariasTercero'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
@@ -415,10 +416,16 @@ export function TerceroDetalle() {
       contenido: <Documentos entidad="tercero" entidadId={id} />,
     },
     {
+      id: 'cuentas-bancarias',
+      etiqueta: 'Cuentas bancarias',
+      icono: 'cuentas-bancarias',
+      contenido: <CuentasBancariasTercero terceroId={id} />,
+    },
+    {
       id: 'apariciones',
       etiqueta: 'Apariciones',
       icono: 'apariciones',
-      contenido: <Apariciones terceroId={id} />,
+      contenido: <Apariciones cargar={() => api.terceros.apariciones(id)} />,
     },
     {
       id: 'historial',
@@ -455,14 +462,20 @@ function FilaContacto({ contacto, onCambio }: { contacto: Contacto; onCambio: ()
   return (
     <tr>
       <td>
-        {contacto.tratamiento && `${contacto.tratamiento} `}
-        {contacto.nombre} {contacto.apellidos ?? ''}
+        <Link className="table__link" to={`/contactos/${contacto.id}`}>
+          {contacto.tratamiento && `${contacto.tratamiento} `}
+          {contacto.nombre} {contacto.apellidos ?? ''}
+        </Link>
         {contacto.es_principal && <span className="chip chip--cliente"> principal</span>}
       </td>
       <td>{contacto.cargo ?? <span className="muted">—</span>}</td>
       <td>{contacto.email ?? <span className="muted">—</span>}</td>
       <td>{contacto.telefono ?? contacto.movil ?? <span className="muted">—</span>}</td>
       <td className="table__actions">
+        <Link className="btn btn--sm" to={`/contactos/${contacto.id}`}>
+          <Pencil size={14} aria-hidden="true" />
+          Editar
+        </Link>
         <button className="btn btn--sm btn--danger" onClick={() => void eliminar()}>
           <Trash2 size={14} aria-hidden="true" />
           Eliminar

@@ -1,4 +1,4 @@
-import { organizacionActiva, tokenValido } from './auth'
+import { organizacionActiva, requiereLogin, sesionPerdida, tokenValido } from './auth'
 
 export interface NavItem {
   label: string
@@ -115,6 +115,7 @@ export interface Moneda {
 
 export type EntidadCampoLibre =
   | 'tercero'
+  | 'contacto'
   | 'concepto'
   | 'obra'
   | 'presupuesto'
@@ -411,6 +412,7 @@ export type FormaPago =
 export interface Contacto {
   id: string
   tercero_id: string | null
+  tercero_razon_social: string | null
   tratamiento: string | null
   nombre: string
   apellidos: string | null
@@ -421,6 +423,27 @@ export interface Contacto {
   es_principal: boolean
   notas: string | null
   activo: boolean
+}
+
+export interface CuentaBancariaTercero {
+  id: string
+  tercero_id: string
+  titular: string | null
+  iban: string
+  bic: string | null
+  es_principal: boolean
+  notas: string | null
+  activo: boolean
+}
+
+export interface CuentaBancariaTerceroCreate {
+  tercero_id: string
+  titular?: string | null
+  iban: string
+  bic?: string | null
+  es_principal?: boolean
+  notas?: string | null
+  activo?: boolean
 }
 
 export interface Tercero {
@@ -493,7 +516,7 @@ export interface ContactoAsociado {
 // presupuesto, por ejemplo) — lleva `descripcion` en vez de `cambios`.
 export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado' | 'evento'
 
-export type TipoAparicion = 'presupuesto' | 'obra' | 'albaran' | 'factura' | 'concepto'
+export type TipoAparicion = 'presupuesto' | 'obra' | 'albaran' | 'factura' | 'concepto' | 'certificacion'
 
 export interface Aparicion {
   tipo: TipoAparicion
@@ -523,7 +546,7 @@ export interface RegistroAuditoria {
 // Cuaderno de bitácora del equipo sobre un objeto grande del negocio —
 // mismo alcance de entidades que `EntidadContacto`, más 'tercero'.
 
-export type EntidadNota = 'tercero' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+export type EntidadNota = 'tercero' | 'contacto' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
 export type TipoNota = 'texto' | 'email'
 
 export interface AdjuntoNota {
@@ -549,7 +572,14 @@ export interface Nota {
 // Ficheros subidos sobre un objeto grande del negocio, guardados en MinIO —
 // mismo alcance de entidades que `EntidadNota`.
 
-export type EntidadDocumento = 'tercero' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+export type EntidadDocumento =
+  | 'tercero'
+  | 'contacto'
+  | 'concepto'
+  | 'presupuesto'
+  | 'obra'
+  | 'certificacion'
+  | 'factura'
 
 export interface Documento {
   id: string
@@ -572,6 +602,52 @@ export interface Familia {
   nombre: string
   parent_id: string | null
   orden: number
+}
+
+// --- El banco de precios como arbol (Fase 50) ---
+
+export interface CapituloBanco {
+  id: string
+  codigo: string
+  resumen: string
+  texto: string | null
+  parent_id: string | null
+  orden: number
+}
+
+/** Una ficha tal y como la pinta la rejilla del banco: lo que se ve en una
+ *  fila, no el detalle completo (`ConceptoDetalle`). */
+export interface ConceptoEnBanco {
+  id: string
+  codigo: string
+  tipo: TipoConcepto
+  naturaleza: NaturalezaConcepto
+  unidad: string
+  resumen: string
+  texto: string | null
+  precio: string
+  precio_venta: string | null
+  origen_precio: OrigenPrecio
+  familia_id: string | null
+  capitulo_id: string | null
+  orden: number
+  activo: boolean
+  tiene_descompuesto: boolean
+}
+
+/** Solo el esqueleto: capítulos y cuántas fichas tiene cada uno. Las fichas
+ *  se piden con `api.banco.fichas()`, que pagina — un banco importado de
+ *  verdad pasa de las 12.000 y traerlas todas colgaba el navegador. */
+export interface ArbolBanco {
+  capitulos: CapituloBanco[]
+  /** id de capítulo -> nº de fichas. La raíz va bajo la clave "". */
+  fichas_por_capitulo: Record<string, number>
+  total_fichas: number
+}
+
+export interface PaginaFichas {
+  items: ConceptoEnBanco[]
+  total: number
 }
 
 export interface PrecioSuministro {
@@ -620,6 +696,8 @@ export interface Concepto {
   fecha_precio: string | null
   ean: string | null
   familia_id: string | null
+  capitulo_id: string | null
+  orden: number
   precio_venta: string | null
   tipo_iva: TipoIVA
   activo: boolean
@@ -1220,6 +1298,25 @@ export interface LineaSugerida {
   parcial: string
 }
 
+/** «Cambiar por banco de precios» (Fase 52): un candidato para sustituir
+ *  una partida o un componente — del banco de precios propio, de otro
+ *  presupuesto de la cuenta, o de una línea ya certificada. `sugerido`
+ *  marca los que la IA destacó al abrir el buscador; el usuario puede
+ *  elegir cualquier otro igualmente. */
+export interface SustitutoCandidato {
+  origen: 'banco' | 'presupuesto' | 'certificacion'
+  concepto_id: string | null
+  partida_id: string | null
+  codigo: string | null
+  resumen: string
+  unidad: string
+  precio: string
+  tiene_descompuesto: boolean
+  origen_detalle: string
+  sugerido: boolean
+  razon_sugerencia: string | null
+}
+
 export interface LecturaPlano {
   id: string
   partida_id: string | null
@@ -1264,11 +1361,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const h = await cabeceras(init?.headers)
   h.set('Content-Type', 'application/json')
   const response = await fetch(path, { ...init, headers: h })
-  if (!response.ok) {
-    throw new Error(await mensajeDeError(response))
-  }
+  await comprobarRespuesta(response)
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+/** Un 401 del backend significa siempre "no autenticado" (token ausente,
+ *  caducado o inválido — nunca falta de permisos, eso es 403), así que en
+ *  vez de dejar que el texto crudo del backend
+ *  ("Falta la cabecera Authorization…") acabe en algún `ErrorNotice` (Fase
+ *  48), se manda al usuario directo al login y se corta aquí: una promesa
+ *  que nunca se resuelve, para que quien llamó no reciba ni un `catch`
+ *  mientras la navegación al login está en marcha. En modo `stub` (sin
+ *  Keycloak, solo desarrollo) no hay login al que mandarlo, así que se deja
+ *  caer al mensaje normal. */
+async function comprobarRespuesta(response: Response): Promise<void> {
+  if (response.ok) return
+  if (response.status === 401 && requiereLogin()) {
+    sesionPerdida()
+    await new Promise<never>(() => {})
+    return
+  }
+  throw new Error(await mensajeDeError(response))
 }
 
 /** FastAPI devuelve `detail` como string en los HTTPException y como lista de
@@ -1409,7 +1523,7 @@ export async function descargar(
   opciones: { abrir?: boolean } = {},
 ): Promise<void> {
   const response = await fetch(path, { headers: await cabeceras() })
-  if (!response.ok) throw new Error(await mensajeDeError(response))
+  await comprobarRespuesta(response)
 
   const url = URL.createObjectURL(await response.blob())
   if (opciones.abrir) {
@@ -1434,7 +1548,7 @@ export async function descargar(
  */
 export async function urlBlob(path: string): Promise<string> {
   const response = await fetch(path, { headers: await cabeceras() })
-  if (!response.ok) throw new Error(await mensajeDeError(response))
+  await comprobarRespuesta(response)
   return URL.createObjectURL(await response.blob())
 }
 
@@ -1455,7 +1569,7 @@ async function pedirBlob(path: string, body: unknown): Promise<Blob> {
   const h = await cabeceras()
   h.set('Content-Type', 'application/json')
   const response = await fetch(path, { method: 'POST', body: JSON.stringify(body), headers: h })
-  if (!response.ok) throw new Error(await mensajeDeError(response))
+  await comprobarRespuesta(response)
   return response.blob()
 }
 
@@ -1467,7 +1581,7 @@ async function subir<T>(path: string, formulario: FormData): Promise<T> {
     body: formulario,
     headers: await cabeceras(),
   })
-  if (!response.ok) throw new Error(await mensajeDeError(response))
+  await comprobarRespuesta(response)
   return response.json() as Promise<T>
 }
 
@@ -1492,6 +1606,10 @@ export interface PartidaConComponentes {
   resumen: string | null
   unidad: string | null
   componentes: ComponentePropuesto[]
+  texto: string | null
+  // Fase 51d: mediciones calculadas por la IA (de un plano, p. ej.) para
+  // una partida nueva — vacío si aún no se ha medido nada.
+  mediciones: LineaSugerida[]
 }
 
 export interface CapituloPropuesto {
@@ -1499,10 +1617,41 @@ export interface CapituloPropuesto {
   partidas: PartidaConComponentes[]
 }
 
+/** Una ficha YA EXISTENTE en el banco, movida a un capítulo propuesto — no
+ *  se "crea de nuevo" como sí puede pasar con una partida de presupuesto. */
+export interface FichaEnCapituloBanco {
+  concepto_id: string
+  codigo: string
+  resumen: string
+}
+
+export interface CapituloBancoPropuesto {
+  resumen: string
+  // Muestra, no la lista completa cuando viene de `naturaleza` — mover TODO
+  // usa `total_fichas` y el campo `naturaleza`, no este array.
+  fichas: FichaEnCapituloBanco[]
+  naturaleza: string | null
+  total_fichas: number
+}
+
 export interface PropuestaIA {
-  tipo: 'copiar_partida' | 'crear_partida' | 'importar_capitulo' | 'crear_capitulos'
+  tipo:
+    | 'copiar_partida'
+    | 'crear_partida'
+    | 'importar_capitulo'
+    | 'crear_capitulos'
+    // Fase 50: añadir componentes al descompuesto de una ficha del banco de
+    // precios — usa la misma lista `componentes` que 'crear_partida'.
+    | 'anadir_componentes_ficha'
+    // Fase 50: organizar el banco en capítulos, moviendo fichas ya
+    // existentes a cada uno.
+    | 'organizar_capitulos_banco'
+    // Fase 51c: mediciones para una partida ya existente (chat de
+    // documentos, cuando se soltó el fichero sobre esa partida) — usa
+    // `partida_id` (destino) y `mediciones_propuestas`.
+    | 'anadir_mediciones_partida'
   descripcion: string
-  // copiar_partida:
+  // copiar_partida: origen. anadir_mediciones_partida: destino.
   partida_id: string | null
   // crear_partida:
   resumen: string | null
@@ -1517,6 +1666,12 @@ export interface PropuestaIA {
   // cada capítulo es una ya existente que se mueve aquí (`partida_id`) o
   // una nueva con su descompuesto real contra el banco de precios.
   capitulos_propuestos: CapituloPropuesto[]
+  // organizar_capitulos_banco (Fase 50): capítulos del BANCO propuestos,
+  // cada uno con las fichas ya existentes que se le mueven.
+  capitulos_banco_propuestos: CapituloBancoPropuesto[]
+  // anadir_mediciones_partida (Fase 51c): líneas para la partida indicada
+  // en `partida_id`, ya existente — mismo tipo que `LeerPlanoModal`.
+  mediciones_propuestas: LineaSugerida[]
 }
 
 export interface AnalisisBC3 {
@@ -2067,15 +2222,35 @@ export const api = {
      *  cliente de un presupuesto/obra/factura, como proveedor de un albarán
      *  o de una tarifa del banco de precios. */
     apariciones: (id: string) => request<Aparicion[]>(`/api/terceros/${id}/apariciones`),
+    /** Fase 47: IBAN que el tercero nos ha dado — distinto de
+     *  `ajustes.cuentasFinancieras`, que son las cuentas PROPIAS de la
+     *  empresa. */
+    cuentasBancarias: {
+      list: (terceroId: string) =>
+        request<CuentaBancariaTercero[]>(`/api/terceros/${terceroId}/cuentas-bancarias`),
+      create: (terceroId: string, datos: CuentaBancariaTerceroCreate) =>
+        post<CuentaBancariaTercero>(`/api/terceros/${terceroId}/cuentas-bancarias`, datos),
+      update: (terceroId: string, cuentaId: string, datos: Partial<CuentaBancariaTerceroCreate>) =>
+        patch<CuentaBancariaTercero>(
+          `/api/terceros/${terceroId}/cuentas-bancarias/${cuentaId}`,
+          datos,
+        ),
+      remove: (terceroId: string, cuentaId: string) =>
+        del(`/api/terceros/${terceroId}/cuentas-bancarias/${cuentaId}`),
+    },
   },
 
   contactos: {
     list: (params: { tercero_id?: string; q?: string; limit?: number; offset?: number }) =>
       request<Page<Contacto>>(`/api/contactos${query(params)}`),
+    get: (id: string) => request<Contacto>(`/api/contactos/${id}`),
     create: (datos: Partial<Contacto>) => post<Contacto>('/api/contactos', datos),
     update: (id: string, datos: Partial<Contacto>) =>
       patch<Contacto>(`/api/contactos/${id}`, datos),
     remove: (id: string) => del(`/api/contactos/${id}`),
+    /** Fase 49: ficha propia del contacto. */
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/contactos/${id}/historial`),
+    apariciones: (id: string) => request<Aparicion[]>(`/api/contactos/${id}/apariciones`),
   },
 
   contactosAsociados: {
@@ -2146,6 +2321,42 @@ export const api = {
     update: (id: string, datos: Partial<Familia>) =>
       patch<Familia>(`/api/familias/${id}`, datos),
     remove: (id: string) => del(`/api/familias/${id}`),
+  },
+
+  /** El banco de precios como árbol (Fase 50). `capitulo_id` dice DÓNDE está
+   *  la ficha (estructura, se arrastra) y `familia_id` QUÉ es (clasificación,
+   *  se asigna en masa) — son cosas distintas a propósito. */
+  banco: {
+    arbol: () => request<ArbolBanco>('/api/banco/arbol'),
+    fichas: (params: {
+      capitulo_id?: string
+      sin_capitulo?: boolean
+      q?: string
+      limit?: number
+      offset?: number
+    }) => request<PaginaFichas>(`/api/banco/fichas${query(params)}`),
+    crearCapitulo: (datos: Partial<CapituloBanco>) =>
+      post<CapituloBanco>('/api/banco/capitulos', datos),
+    actualizarCapitulo: (id: string, datos: Partial<CapituloBanco>) =>
+      patch<CapituloBanco>(`/api/banco/capitulos/${id}`, datos),
+    eliminarCapitulo: (id: string) => del(`/api/banco/capitulos/${id}`),
+    asignarFamilia: (conceptoIds: string[], familiaId: string | null) =>
+      post<{ actualizados: number }>('/api/banco/asignar-familia', {
+        concepto_ids: conceptoIds,
+        familia_id: familiaId,
+      }),
+    mover: (conceptoIds: string[], capituloId: string | null) =>
+      post<{ actualizados: number }>('/api/banco/mover', {
+        concepto_ids: conceptoIds,
+        capitulo_id: capituloId,
+      }),
+    /** Mueve TODAS las fichas de una naturaleza de una vez — la usa la
+     *  confirmación de "Ayuda con IA" cuando organiza por naturaleza. */
+    moverPorNaturaleza: (naturaleza: string, capituloId: string | null) =>
+      post<{ actualizados: number }>('/api/banco/mover-por-naturaleza', {
+        naturaleza,
+        capitulo_id: capituloId,
+      }),
   },
 
   suministros: {
@@ -2260,6 +2471,7 @@ export const api = {
           partida_id?: string | null
           resumen?: string | null
           unidad?: string | null
+          texto?: string | null
           componentes?: {
             concepto_id?: string | null
             rendimiento: string
@@ -2269,12 +2481,32 @@ export const api = {
             precio?: string | null
             naturaleza?: string | null
           }[]
+          mediciones?: {
+            comentario?: string | null
+            uds?: string | null
+            longitud?: string | null
+            anchura?: string | null
+            altura?: string | null
+          }[]
         }[]
       },
     ) => post<{ id: string; resumen: string; partidas: number }>(
       `/api/presupuestos/${id}/aplicar-capitulo-ia`,
       datos,
     ),
+    /** «Cambiar por banco de precios» (Fase 52): candidatos de las tres
+     *  fuentes (banco, presupuestos, certificaciones — o solo banco en
+     *  modo 'componente'). `texto` vacío en la carga inicial busca con
+     *  `resumen_actual` y, si `con_ia`, pide a DeepSeek que destaque
+     *  unos pocos arriba. */
+    buscarSustitutos: (datos: {
+      texto?: string | null
+      resumen_actual: string
+      unidad_actual?: string
+      modo: 'partida' | 'componente'
+      excluir_partida_id?: string | null
+      con_ia?: boolean
+    }) => post<SustitutoCandidato[]>('/api/presupuestos/sustitutos/buscar', datos),
     addCapitulo: (
       id: string,
       datos: { resumen: string; parent_id?: string | null; orden?: number },
@@ -2387,6 +2619,17 @@ export const api = {
       patch<DescomposicionPartida>(`/api/partidas/${id}/descomposicion/unidad`, datos),
     pegarComponentes: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
       post<ResultadoPegado>(`/api/partidas/${id}/descomposicion/pegar`, datos),
+    /** «Cambiar por banco de precios» (Fase 52): aplica un candidato ya
+     *  elegido por el usuario en `BuscadorSustitutoModal`. */
+    sustituir: (
+      id: string,
+      datos: {
+        origen: 'banco' | 'presupuesto' | 'certificacion'
+        concepto_id?: string | null
+        partida_origen_id?: string | null
+        copiar_descompuesto?: boolean
+      },
+    ) => post<Partida>(`/api/partidas/${id}/sustituir`, datos),
     addLinea: (
       id: string,
       datos: {
@@ -2420,7 +2663,13 @@ export const api = {
     },
     importar: (
       fichero: File,
-      opciones: { estrategia: string; crear_presupuesto: boolean; nombre_presupuesto?: string },
+      opciones: {
+        estrategia: string
+        crear_presupuesto: boolean
+        nombre_presupuesto?: string
+        /** Fase 50: capítulo del banco donde dejar las fichas del fichero. */
+        capitulo_banco_id?: string | null
+      },
     ) => {
       const f = new FormData()
       f.append('fichero', fichero)
@@ -2428,6 +2677,9 @@ export const api = {
       f.append('crear_presupuesto', String(opciones.crear_presupuesto))
       if (opciones.nombre_presupuesto) {
         f.append('nombre_presupuesto', opciones.nombre_presupuesto)
+      }
+      if (opciones.capitulo_banco_id) {
+        f.append('capitulo_banco_id', opciones.capitulo_banco_id)
       }
       return subir<ImportacionBC3>('/api/fiebdc/importar', f)
     },
@@ -2621,16 +2873,36 @@ export const api = {
           altura?: string | null
         }[],
       ) => post<LineaMedicion[]>(`/api/ia/mediciones/${id}/aplicar`, { lineas }),
+      /** Confirma una propuesta `anadir_mediciones_partida` salida del chat
+       *  de documentos — a diferencia de `aplicar`, no hay lectura de plano
+       *  de por medio, la partida de destino va explícita. */
+      aplicarDirecto: (
+        partidaId: string,
+        lineas: {
+          comentario?: string | null
+          uds?: string | null
+          longitud?: string | null
+          anchura?: string | null
+          altura?: string | null
+        }[],
+      ) =>
+        post<LineaMedicion[]>('/api/ia/mediciones/aplicar-directo', {
+          partida_id: partidaId,
+          lineas,
+        }),
     },
     ayudaLineaConversar: (datos: {
       contexto: {
-        tipo: 'capitulo' | 'partida'
+        tipo: 'capitulo' | 'partida' | 'ficha'
         codigo?: string | null
         resumen: string
         unidad?: string | null
         precio?: string | null
-        presupuesto_id: string
-        presupuesto_nombre: string
+        // Presupuesto: obligatorios para tipo 'capitulo'/'partida'. Ficha
+        // (Fase 50): en su lugar, concepto_id.
+        presupuesto_id?: string
+        presupuesto_nombre?: string
+        concepto_id?: string
       }
       mensajes: { rol: 'user' | 'assistant'; contenido: string }[]
     }) => post<{ respuesta: string; propuesta: PropuestaIA | null }>('/api/ia/ayuda-linea/conversar', datos),
@@ -2638,11 +2910,16 @@ export const api = {
       ficheros: File[],
       mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
       presupuestoId?: string,
+      // Fase 51c: cuando el fichero se soltó sobre una partida ya
+      // existente (no la raíz ni un capítulo), la IA puede además proponer
+      // mediciones para esa partida en concreto.
+      partidaId?: string,
     ) => {
       const f = new FormData()
       for (const fichero of ficheros) f.append('ficheros', fichero)
       f.append('mensajes', JSON.stringify(mensajes))
       if (presupuestoId) f.append('presupuesto_id', presupuestoId)
+      if (partidaId) f.append('partida_id', partidaId)
       return subir<{ respuesta: string; propuesta: PropuestaIA | null }>(
         '/api/ia/documentos/conversar',
         f,

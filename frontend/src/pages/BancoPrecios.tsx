@@ -1,23 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useNavigate, useOutletContext } from 'react-router-dom'
 import { FolderTree, Pencil, Plus, Trash2, X } from 'lucide-react'
 
-import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
-import { DataTable } from '../components/DataTable'
-import type { ColumnaTabla } from '../components/DataTable'
-import {
-  ETIQUETA_NATURALEZA,
-  ETIQUETA_ORIGEN_PRECIO,
-  ETIQUETA_TIPO_CONCEPTO,
-  api,
-} from '../lib/api'
-import type { Concepto, Familia, NaturalezaConcepto, TipoConcepto } from '../lib/api'
+import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip } from '../components/ui'
+import { DescompuestoConcepto } from '../components/DescompuestoConcepto'
+import { DescripcionEditor } from '../components/DescripcionEditor'
+import type { FilaBanco } from '../components/RejillaBancoPrecios'
+import { ID_RAIZ, RejillaBancoPrecios } from '../components/RejillaBancoPrecios'
+import { WidgetGrid } from '../components/WidgetGrid'
+import { ETIQUETA_NATURALEZA, ETIQUETA_TIPO_CONCEPTO, api } from '../lib/api'
+import type { ArbolBanco, Familia, NaturalezaConcepto, TipoConcepto } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
-
-// El listado ya no pagina en el servidor: el `DataTable` pagina, ordena y
-// filtra en el navegador sobre este lote — 500 es el máximo que admite el
-// endpoint (`le=500`).
-const LIMITE = 500
 
 export type ContextoBancoPrecios = { onCambio: () => void }
 
@@ -26,21 +19,26 @@ export function useContextoBancoPrecios() {
 }
 
 export function BancoPrecios() {
-  const [items, setItems] = useState<Concepto[]>([])
-  const [cargando, setCargando] = useState(true)
+  const [arbol, setArbol] = useState<ArbolBanco | null>(null)
+  const [familias, setFamilias] = useState<Familia[]>([])
   const [error, setError] = useState<string | null>(null)
   const [mostrarFamilias, setMostrarFamilias] = useState(false)
+  // La fila que siguen los widgets de la derecha y de abajo. Se guarda la
+  // fila entera (no solo el id) para poder pintar el descompuesto y la
+  // descripción sin volver a buscarla en el árbol.
+  const [seleccion, setSeleccion] = useState<FilaBanco | null>(null)
 
   const cargar = useCallback(async () => {
-    setCargando(true)
     try {
-      const page = await api.conceptos.list({ limit: LIMITE })
-      setItems(page.items)
+      const [datos, listaFamilias] = await Promise.all([
+        api.banco.arbol(),
+        api.familias.list(),
+      ])
+      setArbol(datos)
+      setFamilias(listaFamilias)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
-    } finally {
-      setCargando(false)
     }
   }, [])
 
@@ -48,59 +46,8 @@ export function BancoPrecios() {
     void cargar()
   }, [cargar])
 
-  const columnas = useMemo<ColumnaTabla<Concepto>[]>(
-    () => [
-      { id: 'codigo', encabezado: 'Código', accessor: (c) => c.codigo, anchoInicial: 110 },
-      {
-        id: 'resumen',
-        encabezado: 'Descripción',
-        accessor: (c) => c.resumen,
-        render: (c) => (
-          <>
-            <Link className="table__link" to={`${c.id}`}>
-              {c.resumen}
-            </Link>
-            {!c.activo && <span className="chip chip--inactivo"> inactivo</span>}
-          </>
-        ),
-        anchoInicial: 280,
-      },
-      {
-        id: 'tipo',
-        encabezado: 'Nivel',
-        accessor: (c) => c.tipo,
-        render: (c) => <span className={`chip chip--${c.tipo}`}>{ETIQUETA_TIPO_CONCEPTO[c.tipo]}</span>,
-        tipo: 'select',
-        opciones: Object.entries(ETIQUETA_TIPO_CONCEPTO).map(([value, label]) => ({ value, label })),
-        anchoInicial: 110,
-      },
-      {
-        id: 'naturaleza',
-        encabezado: 'Naturaleza',
-        accessor: (c) => ETIQUETA_NATURALEZA[c.naturaleza],
-        tipo: 'select',
-        opciones: Object.entries(ETIQUETA_NATURALEZA).map(([value, label]) => ({ value, label })),
-        anchoInicial: 130,
-      },
-      { id: 'unidad', encabezado: 'Ud.', accessor: (c) => c.unidad, anchoInicial: 70 },
-      {
-        id: 'precio',
-        encabezado: 'Precio',
-        accessor: (c) => c.precio,
-        render: (c) => <strong>{formatoImporte(c.precio)}</strong>,
-        tipo: 'importe',
-        anchoInicial: 110,
-      },
-      {
-        id: 'origen_precio',
-        encabezado: 'Precio según',
-        accessor: (c) => ETIQUETA_ORIGEN_PRECIO[c.origen_precio],
-        anchoInicial: 150,
-      },
-      { id: 'ean', encabezado: 'EAN', accessor: (c) => c.ean ?? '', anchoInicial: 120 },
-    ],
-    [],
-  )
+  const fichaSeleccionada =
+    seleccion && seleccion.tipo === 'ficha' && seleccion.id !== ID_RAIZ ? seleccion : null
 
   return (
     <>
@@ -130,26 +77,108 @@ export function BancoPrecios() {
 
       <ErrorNotice error={error} />
 
-      {!cargando && items.length === 0 ? (
-        <EmptyState title="Sin resultados">
-          Empieza por los básicos: mano de obra, materiales, maquinaria y servicios.
-        </EmptyState>
-      ) : (
-        <DataTable
+      {arbol && (
+        <WidgetGrid
           id="banco-precios"
-          columnas={columnas}
-          datos={items}
-          claveFila={(c) => c.id}
-          vacio="Sin resultados con estos filtros"
+          widgets={[
+            {
+              id: 'lineas',
+              titulo: 'Capítulos y fichas',
+              x: 0,
+              y: 0,
+              w: 12,
+              h: 13,
+              minW: 5,
+              minH: 6,
+              contenido: (
+                <RejillaBancoPrecios
+                  arbol={arbol}
+                  familias={familias}
+                  onCambio={cargar}
+                  seleccionadaId={seleccion?.id ?? null}
+                  onSeleccionar={setSeleccion}
+                />
+              ),
+            },
+            {
+              id: 'descompuesto',
+              titulo: 'Descompuesto',
+              x: 0,
+              y: 13,
+              w: 12,
+              h: 10,
+              minW: 5,
+              minH: 5,
+              contenido: fichaSeleccionada ? (
+                <DescompuestoConcepto
+                  key={fichaSeleccionada.id}
+                  conceptoId={fichaSeleccionada.id}
+                  onCambio={cargar}
+                />
+              ) : (
+                <EmptyState title="Ninguna ficha seleccionada">
+                  Elige una ficha de la rejilla para ver y editar su descompuesto.
+                </EmptyState>
+              ),
+            },
+            {
+              id: 'descripcion',
+              titulo: 'Descripción ampliada',
+              x: 0,
+              y: 23,
+              w: 12,
+              h: 12,
+              minW: 5,
+              minH: 6,
+              contenido: !seleccion || seleccion.id === ID_RAIZ ? (
+                <EmptyState title="Nada seleccionado">
+                  Selecciona un capítulo o una ficha para ver y editar su descripción aquí.
+                </EmptyState>
+              ) : seleccion.tipo === 'ficha' ? (
+                <DescripcionEditor
+                  key={seleccion.id}
+                  id={seleccion.id}
+                  html={seleccion.texto}
+                  entidad="concepto"
+                  entidadId={seleccion.id}
+                  onGuardar={async (texto) => {
+                    await api.conceptos.update(seleccion.id, { texto })
+                  }}
+                />
+              ) : (
+                <DescripcionEditor
+                  key={seleccion.id}
+                  id={seleccion.id}
+                  html={seleccion.texto}
+                  // Las imágenes de un capítulo del banco no cuelgan de una
+                  // ficha concreta; se guardan en la primera que tenga a mano
+                  // — aquí el propio capítulo no es una entidad documental.
+                  entidad="concepto"
+                  entidadId={seleccion.id}
+                  onGuardar={async (texto) => {
+                    await api.banco.actualizarCapitulo(seleccion.id, { texto })
+                  }}
+                />
+              ),
+            },
+          ]}
         />
       )}
 
-      {mostrarFamilias && <FamiliasModal onClose={() => setMostrarFamilias(false)} />}
+      {mostrarFamilias && (
+        <FamiliasModal
+          onClose={() => {
+            setMostrarFamilias(false)
+            void cargar()
+          }}
+        />
+      )}
 
       <Outlet context={{ onCambio: cargar } satisfies ContextoBancoPrecios} />
     </>
   )
 }
+
 
 function FamiliasModal({ onClose }: { onClose: () => void }) {
   const [familias, setFamilias] = useState<Familia[]>([])

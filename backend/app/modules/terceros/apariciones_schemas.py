@@ -9,6 +9,9 @@ class TipoAparicion(StrEnum):
     ALBARAN = "albaran"
     FACTURA = "factura"
     CONCEPTO = "concepto"
+    # Solo la usan las apariciones de un Contacto (Fase 49) — un tercero no
+    # se certifica, se le certifica una obra.
+    CERTIFICACION = "certificacion"
 
 
 class AparicionOut(BaseModel):

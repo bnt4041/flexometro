@@ -110,6 +110,11 @@ class Tercero(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
         cascade="all, delete-orphan",
         order_by="Contacto.nombre",
     )
+    cuentas_bancarias: Mapped[list["CuentaBancariaTercero"]] = relationship(
+        back_populates="tercero",
+        cascade="all, delete-orphan",
+        order_by="CuentaBancariaTercero.es_principal.desc()",
+    )
 
 
 class Contacto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
@@ -140,7 +145,48 @@ class Contacto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMi
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    tercero: Mapped[Tercero | None] = relationship(back_populates="contactos")
+    # `selectin`: la razón social de la empresa hace falta en cuanto se
+    # serializa un contacto (listado, ficha) — con carga perezosa reventaría
+    # en async (`MissingGreenlet`), igual que `Cobro.cuenta_financiera`.
+    tercero: Mapped[Tercero | None] = relationship(back_populates="contactos", lazy="selectin")
+
+    @property
+    def tercero_razon_social(self) -> str | None:
+        return self.tercero.razon_social if self.tercero else None
+
+
+class CuentaBancariaTercero(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
+    """Una cuenta bancaria que el tercero nos ha dado — a diferencia de
+    `core.CuentaFinanciera` (Fase 44), que son las cuentas PROPIAS de la
+    empresa. Puede haber varias por tercero: un proveedor a veces factura
+    desde una cuenta y cobra por otra, y a un cliente domiciliado hay que
+    guardarle el IBAN del que se le gira el recibo.
+
+    Maestro compartido desde que nace (`activar_rls_maestro`, no
+    `activar_rls`), igual que `Contacto`: si la cuenta está en
+    `compartir_maestros`, el tercero es el mismo en sus dos empresas y sus
+    cuentas bancarias también lo son — no tendría sentido que el mismo IBAN
+    del mismo proveedor hubiera que darlo de alta dos veces."""
+
+    __tablename__ = "cuenta_bancaria"
+    __table_args__ = (
+        Index("ix_terceros_cuenta_bancaria_tercero", "tercero_id"),
+        {"schema": SCHEMA},
+    )
+
+    tercero_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.tercero.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    titular: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    iban: Mapped[str] = mapped_column(String(34), nullable=False)
+    bic: Mapped[str | None] = mapped_column(String(11), nullable=True)
+    es_principal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    tercero: Mapped[Tercero] = relationship(back_populates="cuentas_bancarias")
 
 
 class EntidadContacto(StrEnum):

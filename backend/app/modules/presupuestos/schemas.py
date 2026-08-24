@@ -39,6 +39,105 @@ class FamiliaOut(FamiliaBase):
     creado_por_nombre: str | None = None
 
 
+# --- Capítulos del banco de precios (Fase 50) ---
+
+
+class CapituloBancoBase(BaseModel):
+    codigo: str = Field(min_length=1, max_length=32)
+    resumen: str = Field(min_length=1, max_length=250)
+    texto: str | None = None
+    parent_id: uuid.UUID | None = None
+    orden: int = 0
+
+
+class CapituloBancoCreate(CapituloBancoBase):
+    # El código se genera solo si no se da — la rejilla crea capítulos sin
+    # pedirlo, igual que en un presupuesto.
+    codigo: str | None = Field(default=None, max_length=32)
+
+
+class CapituloBancoUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str | None = Field(default=None, min_length=1, max_length=32)
+    resumen: str | None = Field(default=None, min_length=1, max_length=250)
+    texto: str | None = None
+    parent_id: uuid.UUID | None = None
+    orden: int | None = None
+
+
+class CapituloBancoOut(CapituloBancoBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    creado_por_nombre: str | None = None
+
+
+class ConceptoEnBanco(BaseModel):
+    """Una ficha tal y como la pinta la rejilla del banco — no lleva el
+    detalle completo (`ConceptoDetalle`), solo lo que se ve en una fila."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    codigo: str
+    tipo: TipoConcepto
+    naturaleza: NaturalezaConcepto
+    unidad: str
+    resumen: str
+    texto: str | None
+    precio: Decimal
+    precio_venta: Decimal | None
+    origen_precio: OrigenPrecio
+    familia_id: uuid.UUID | None
+    capitulo_id: uuid.UUID | None
+    orden: int
+    activo: bool
+    tiene_descompuesto: bool = False
+
+
+class ArbolBanco(BaseModel):
+    """SOLO el esqueleto: los capítulos y cuántas fichas cuelgan de cada uno.
+
+    Las fichas NO viajan aquí. Un banco de precios real (un BEDEC, una tarifa
+    de proveedor) trae decenas de miles: mandarlas todas eran 6 MB de JSON y,
+    peor, decenas de miles de filas en el DOM que dejaban el navegador
+    inservible. Se piden por capítulo con `/api/banco/fichas`, que sí pagina.
+    """
+
+    capitulos: list[CapituloBancoOut]
+    # id de capítulo -> cuántas fichas tiene. La raíz va bajo la clave "".
+    fichas_por_capitulo: dict[str, int]
+    total_fichas: int
+
+
+class PaginaFichas(BaseModel):
+    items: list[ConceptoEnBanco]
+    total: int
+
+
+class AsignarFamiliaIn(BaseModel):
+    """Asignación masiva o individual — la rejilla manda siempre una lista,
+    aunque sea de un solo elemento."""
+
+    concepto_ids: list[uuid.UUID] = Field(min_length=1)
+    familia_id: uuid.UUID | None = None
+
+
+class MoverAlCapituloIn(BaseModel):
+    concepto_ids: list[uuid.UUID] = Field(min_length=1)
+    capitulo_id: uuid.UUID | None = None
+
+
+class MoverPorNaturalezaIn(BaseModel):
+    """Mover TODAS las fichas de una naturaleza, sin enumerarlas — la usa la
+    IA (Fase 50) para organizar el banco por naturaleza sin depender de
+    ningún límite de búsqueda de texto."""
+
+    naturaleza: NaturalezaConcepto
+    capitulo_id: uuid.UUID | None = None
+
+
 class PrecioSuministroBase(BaseModel):
     proveedor_id: uuid.UUID
     precio: Decimal = Field(ge=0, decimal_places=4)
@@ -125,6 +224,8 @@ class ConceptoUpdate(BaseModel):
     fecha_precio: date | None = None
     ean: str | None = None
     familia_id: uuid.UUID | None = None
+    capitulo_id: uuid.UUID | None = None
+    orden: int | None = None
     precio_venta: Decimal | None = Field(default=None, ge=0)
     tipo_iva: TipoIVA | None = None
     activo: bool | None = None

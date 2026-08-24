@@ -579,7 +579,8 @@ export function PresupuestoDetalle() {
                   key={seleccion.partida.id}
                   id={seleccion.partida.id}
                   html={seleccion.partida.texto}
-                  presupuestoId={id}
+                  entidad="presupuesto"
+                  entidadId={id}
                   onGuardar={async (texto) => {
                     await api.partidas.update(seleccion.partida.id, { texto })
                   }}
@@ -593,7 +594,8 @@ export function PresupuestoDetalle() {
                   key={seleccion.fila.id}
                   id={seleccion.fila.id}
                   html={seleccion.fila.texto}
-                  presupuestoId={id}
+                  entidad="presupuesto"
+                  entidadId={id}
                   onGuardar={async (texto) => {
                     await api.capitulos.update(seleccion.fila.id, { texto })
                   }}
@@ -1675,7 +1677,9 @@ function LeerPlanoModal({
                           className="input"
                           style={{ width: '70px' }}
                           value={linea.uds ?? ''}
-                          onChange={(e) => editarLinea(i, { uds: e.target.value || null })}
+                          onChange={(e) =>
+                            editarLinea(i, { uds: e.target.value ? e.target.value.replace(',', '.') : null })
+                          }
                         />
                       </td>
                       <td>
@@ -1683,7 +1687,11 @@ function LeerPlanoModal({
                           className="input"
                           style={{ width: '70px' }}
                           value={linea.longitud ?? ''}
-                          onChange={(e) => editarLinea(i, { longitud: e.target.value || null })}
+                          onChange={(e) =>
+                            editarLinea(i, {
+                              longitud: e.target.value ? e.target.value.replace(',', '.') : null,
+                            })
+                          }
                         />
                       </td>
                       <td>
@@ -1691,7 +1699,11 @@ function LeerPlanoModal({
                           className="input"
                           style={{ width: '70px' }}
                           value={linea.anchura ?? ''}
-                          onChange={(e) => editarLinea(i, { anchura: e.target.value || null })}
+                          onChange={(e) =>
+                            editarLinea(i, {
+                              anchura: e.target.value ? e.target.value.replace(',', '.') : null,
+                            })
+                          }
                         />
                       </td>
                       <td>
@@ -1699,7 +1711,11 @@ function LeerPlanoModal({
                           className="input"
                           style={{ width: '70px' }}
                           value={linea.altura ?? ''}
-                          onChange={(e) => editarLinea(i, { altura: e.target.value || null })}
+                          onChange={(e) =>
+                            editarLinea(i, {
+                              altura: e.target.value ? e.target.value.replace(',', '.') : null,
+                            })
+                          }
                         />
                       </td>
                       <td className="table__num muted">{formatoImporte(linea.parcial, 3)}</td>

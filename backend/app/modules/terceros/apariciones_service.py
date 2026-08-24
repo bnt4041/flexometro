@@ -1,4 +1,5 @@
-"""Dónde aparece un tercero (Fase 46): la pestaña "Apariciones" de su ficha.
+"""Dónde aparecen un tercero o un contacto (Fases 46/49): la pestaña
+"Apariciones" de sus fichas.
 
 Cruza los cuatro módulos que guardan una referencia directa a `Tercero`
 (presupuesto.cliente_id, albaran.proveedor_id, factura.cliente_id,
@@ -141,5 +142,92 @@ async def apariciones_de(session: AsyncSession, tercero_id: uuid.UUID) -> list[A
                 + (" · preferente" if precio.es_preferente else ""),
             )
         )
+
+    return resultado
+
+
+async def apariciones_de_contacto(session: AsyncSession, contacto_id: uuid.UUID) -> list[AparicionOut]:
+    """A diferencia del tercero, un contacto no tiene columnas FK propias en
+    ningún módulo: se vincula por `ContactoAsociado` (entidad/entidad_id
+    genéricos, Fase 28), así que aquí no hay más remedio que agrupar por
+    entidad y resolver cada tabla aparte."""
+    from app.modules.facturacion.models import Certificacion, Factura
+    from app.modules.obras.models import Obra
+    from app.modules.presupuestos.models_presupuesto import Presupuesto
+    from app.modules.terceros.models import ContactoAsociado, EntidadContacto
+
+    asociaciones = list(
+        (
+            await session.execute(
+                select(ContactoAsociado).where(ContactoAsociado.contacto_id == contacto_id)
+            )
+        ).scalars()
+    )
+    ids_por_entidad: dict[EntidadContacto, set[uuid.UUID]] = {}
+    for asociacion in asociaciones:
+        ids_por_entidad.setdefault(asociacion.entidad, set()).add(asociacion.entidad_id)
+
+    resultado: list[AparicionOut] = []
+
+    presupuesto_ids = ids_por_entidad.get(EntidadContacto.PRESUPUESTO)
+    if presupuesto_ids:
+        filas = (
+            await session.execute(select(Presupuesto).where(Presupuesto.id.in_(presupuesto_ids)))
+        ).scalars()
+        for p in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.PRESUPUESTO,
+                    id=str(p.id),
+                    codigo=p.codigo,
+                    titulo=p.nombre,
+                    estado=p.estado.value,
+                )
+            )
+
+    obra_ids = ids_por_entidad.get(EntidadContacto.OBRA)
+    if obra_ids:
+        filas = (await session.execute(select(Obra).where(Obra.id.in_(obra_ids)))).scalars()
+        for o in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.OBRA,
+                    id=str(o.id),
+                    codigo=o.codigo,
+                    titulo=o.nombre,
+                    estado=o.estado.value,
+                )
+            )
+
+    certificacion_ids = ids_por_entidad.get(EntidadContacto.CERTIFICACION)
+    if certificacion_ids:
+        filas = (
+            await session.execute(select(Certificacion).where(Certificacion.id.in_(certificacion_ids)))
+        ).scalars()
+        for c in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.CERTIFICACION,
+                    id=str(c.id),
+                    codigo=c.codigo,
+                    titulo=f"Certificación nº {c.numero}",
+                    subtitulo=c.fecha.isoformat(),
+                    estado=c.estado.value,
+                )
+            )
+
+    factura_ids = ids_por_entidad.get(EntidadContacto.FACTURA)
+    if factura_ids:
+        filas = (await session.execute(select(Factura).where(Factura.id.in_(factura_ids)))).scalars()
+        for f in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.FACTURA,
+                    id=str(f.id),
+                    codigo=f.codigo,
+                    titulo=f.concepto,
+                    estado=f.estado.value,
+                )
+            )
 
     return resultado

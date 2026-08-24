@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Save, Trash2, Unlink, X } from 'lucide-react'
+import { ArrowLeftRight, Plus, Save, Trash2, Unlink, X } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
+import { BuscadorSustitutoModal } from './BuscadorSustitutoModal'
 import { PegarModal } from './PegarModal'
-import type { ColumnaRejilla, OpcionCelda } from './RejillaEditable'
+import type { ColumnaRejilla, ItemMenuContextual, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Modal, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
@@ -97,6 +98,23 @@ export function DescompuestoPartida({
   useEffect(() => {
     void cargar()
   }, [cargar])
+
+  // «Cambiar por banco de precios» (Fase 52) sobre un componente: quita la
+  // línea vieja y añade una nueva con el concepto elegido, mismo
+  // rendimiento — no hay un endpoint de "sustituir componente" propio, es
+  // la misma pareja de llamadas que ya usan el resto de acciones de esta
+  // rejilla (independiza sola si aún heredaba del banco, ver `anadir_componente`).
+  const [sustituyendoLinea, setSustituyendoLinea] = useState<LineaDescomposicion | null>(null)
+
+  async function sustituirComponente(linea: LineaDescomposicion, conceptoId: string) {
+    await api.partidas.quitarComponente(partida.id, linea.id)
+    await api.partidas.anadirComponente(partida.id, {
+      hijo_id: conceptoId,
+      rendimiento: linea.rendimiento,
+    })
+    await cargar()
+    onCambio()
+  }
 
   async function aplicar(alcance: AlcancePrecio) {
     if (!pendiente?.linea.hijo_id) return
@@ -548,6 +566,18 @@ export function DescompuestoPartida({
         onPegar={pegar}
         onSoltarEn={() => pegar()}
         puedeArrastrar={(l) => l.id !== ID_BORRADOR}
+        menuContextual={(l): ItemMenuContextual[] | null =>
+          l.id === ID_BORRADOR || l.hijo_id === null
+            ? null
+            : [
+                {
+                  id: 'sustituir',
+                  etiqueta: 'Cambiar por banco de precios…',
+                  icono: <ArrowLeftRight size={14} aria-hidden="true" />,
+                  onClick: () => setSustituyendoLinea(l),
+                },
+              ]
+        }
         filtros={filtros}
         onFiltrar={(columnaId, valor) => setFiltros((f) => ({ ...f, [columnaId]: valor }))}
         filaAEditarId={anadiendo ? ID_BORRADOR : null}
@@ -682,6 +712,20 @@ export function DescompuestoPartida({
           origenEtiqueta={pegando.origenEtiqueta}
           onElegir={(alcance) => void confirmarPegado(alcance)}
           onClose={() => setPegando(null)}
+        />
+      )}
+
+      {sustituyendoLinea && (
+        <BuscadorSustitutoModal
+          resumenActual={sustituyendoLinea.resumen}
+          unidadActual={sustituyendoLinea.unidad}
+          modo="componente"
+          onAplicar={async (candidato) => {
+            if (!candidato.concepto_id) return
+            await sustituirComponente(sustituyendoLinea, candidato.concepto_id)
+            notificar(`«${sustituyendoLinea.resumen}» sustituido por «${candidato.resumen}»`)
+          }}
+          onClose={() => setSustituyendoLinea(null)}
         />
       )}
     </>

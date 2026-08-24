@@ -6,9 +6,9 @@ import { EmptyState, ErrorNotice } from './ui'
 import {
   ETIQUETA_ESTADO,
   ETIQUETA_ESTADO_ALBARAN,
+  ETIQUETA_ESTADO_CERTIFICACION,
   ETIQUETA_ESTADO_FACTURA,
   ETIQUETA_ESTADO_OBRA,
-  api,
 } from '../lib/api'
 import type { Aparicion, TipoAparicion } from '../lib/api'
 
@@ -18,6 +18,7 @@ const ETIQUETA_TIPO: Record<TipoAparicion, string> = {
   albaran: 'Albarán',
   factura: 'Factura',
   concepto: 'Banco de precios',
+  certificacion: 'Certificación',
 }
 
 // Mismo icono que usa cada módulo en su propia navegación (ver `nav` de
@@ -29,6 +30,7 @@ const ICONO_TIPO: Record<TipoAparicion, string> = {
   albaran: 'truck',
   factura: 'receipt',
   concepto: 'layers',
+  certificacion: 'clipboard-check',
 }
 
 const RUTA_TIPO: Record<TipoAparicion, (id: string) => string> = {
@@ -37,6 +39,7 @@ const RUTA_TIPO: Record<TipoAparicion, (id: string) => string> = {
   albaran: (id) => `/albaranes/${id}`,
   factura: (id) => `/facturas/${id}`,
   concepto: (id) => `/banco-precios/${id}`,
+  certificacion: (id) => `/certificaciones/${id}`,
 }
 
 function etiquetaEstado(a: Aparicion): string | null {
@@ -50,17 +53,30 @@ function etiquetaEstado(a: Aparicion): string | null {
       return ETIQUETA_ESTADO_ALBARAN[a.estado as keyof typeof ETIQUETA_ESTADO_ALBARAN] ?? a.estado
     case 'factura':
       return ETIQUETA_ESTADO_FACTURA[a.estado as keyof typeof ETIQUETA_ESTADO_FACTURA] ?? a.estado
+    case 'certificacion':
+      return (
+        ETIQUETA_ESTADO_CERTIFICACION[a.estado as keyof typeof ETIQUETA_ESTADO_CERTIFICACION] ??
+        a.estado
+      )
     default:
       return a.estado
   }
 }
 
-/** Pestaña "Apariciones" (Fase 46) de la ficha de un tercero: en qué
- *  presupuestos es cliente, en qué obras (heredado del presupuesto), en qué
- *  albaranes es proveedor, qué facturas tiene y en qué tarifas del banco de
- *  precios aparece como suministrador. Solo lectura — para ir directo a la
- *  ficha real se pincha la fila. */
-export function Apariciones({ terceroId }: { terceroId: string }) {
+// La certificación usa un prefijo de clase distinto (`chip--estado-cert-*`)
+// para no compartir color con el "borrador"/"emitida" de presupuesto y
+// factura, que significan otra cosa — ver `CertificacionDetalle.tsx`.
+function claseEstado(a: Aparicion): string {
+  return a.tipo === 'certificacion' ? `chip--estado-cert-${a.estado}` : `chip--estado-${a.estado}`
+}
+
+/** Pestaña "Apariciones" de una ficha (Tercero, Fase 46; Contacto, Fase 49):
+ *  en qué presupuestos/obras/albaranes/facturas/certificaciones/tarifas del
+ *  banco de precios aparece. Solo lectura — para ir directo a la ficha real
+ *  se pincha la fila. Recibe la función de carga en vez de un id — a
+ *  diferencia de Notas/Documentos, cada entidad tiene su propia consulta de
+ *  apariciones (ver `Historial`, mismo motivo). */
+export function Apariciones({ cargar: cargarFilas }: { cargar: () => Promise<Aparicion[]> }) {
   const [filas, setFilas] = useState<Aparicion[]>([])
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -68,14 +84,15 @@ export function Apariciones({ terceroId }: { terceroId: string }) {
   const cargar = useCallback(async () => {
     setCargando(true)
     try {
-      setFilas(await api.terceros.apariciones(terceroId))
+      setFilas(await cargarFilas())
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
       setCargando(false)
     }
-  }, [terceroId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     void cargar()
@@ -89,8 +106,8 @@ export function Apariciones({ terceroId }: { terceroId: string }) {
 
       {filas.length === 0 ? (
         <EmptyState title="No aparece en ninguna ficha todavía">
-          En cuanto se use como cliente o proveedor en un presupuesto, obra, albarán, factura o
-          tarifa del banco de precios, aparecerá aquí.
+          En cuanto se use en un presupuesto, obra, albarán, factura, certificación o tarifa del
+          banco de precios, aparecerá aquí.
         </EmptyState>
       ) : (
         <div className="table-wrap">
@@ -119,7 +136,7 @@ export function Apariciones({ terceroId }: { terceroId: string }) {
                   </td>
                   <td>
                     {etiquetaEstado(a) && (
-                      <span className={`chip chip--estado-${a.estado}`}>{etiquetaEstado(a)}</span>
+                      <span className={`chip ${claseEstado(a)}`}>{etiquetaEstado(a)}</span>
                     )}
                   </td>
                 </tr>

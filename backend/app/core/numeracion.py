@@ -27,6 +27,7 @@ Fase 8 (correlativo por organización+serie, nunca se reutiliza, ver
 
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -150,3 +151,39 @@ async def siguiente_referencia(
     ambito_id = cuenta_id if compartida else organization_id
     secuencia = await _siguiente_secuencia(session, ambito_id=ambito_id, tipo_documento=tipo_documento)
     return renderizar_patron(patron, fecha=date.today(), org_slug=org_slug, secuencia=secuencia)
+
+
+async def siguiente_referencia_libre(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    tipo_documento: str,
+    existe: Callable[[str], Awaitable[bool]],
+    intentos: int = 20,
+) -> str:
+    """Como `siguiente_referencia`, pero se asegura de que el código no esté
+    ya en uso antes de devolverlo (Fase 51).
+
+    El contador (`ContadorDocumento`) puede quedar por detrás de la
+    realidad: activar `secuencia_compartida` cambia el ámbito que se cuenta
+    (de la organización a la cuenta) y el nuevo ámbito arranca desde cero
+    aunque ya hubiera documentos con código bajo el ámbito anterior; lo
+    mismo si algún documento llegó sin pasar por el contador (una fila
+    sembrada a mano, una migración). Sin esto, cada intento repite el mismo
+    código ya usado y la creación queda bloqueada para siempre, porque el
+    incremento se deshace con el resto de la transacción cuando falla.
+
+    `existe` es quien sabe consultar la tabla del propio módulo (Presupuesto,
+    Albarán o Factura) — este motor no conoce esas tablas."""
+    ultimo_probado = ""
+    for _ in range(intentos):
+        candidato = await siguiente_referencia(
+            session, organization_id=organization_id, tipo_documento=tipo_documento
+        )
+        if not await existe(candidato):
+            return candidato
+        ultimo_probado = candidato
+    raise RuntimeError(
+        f"No se ha encontrado un código libre para «{tipo_documento}» tras {intentos} intentos "
+        f"(el último probado fue «{ultimo_probado}») — revisa el contador de numeración de la cuenta."
+    )

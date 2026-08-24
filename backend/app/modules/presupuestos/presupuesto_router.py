@@ -15,7 +15,9 @@ from app.modules.presupuestos import exportador_excel, formulas
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos import service as banco_service
+from app.modules.presupuestos import sustitucion_service
 from app.modules.presupuestos import versionado
+from app.modules.presupuestos.models import NaturalezaConcepto
 from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, Presupuesto
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
@@ -24,6 +26,7 @@ from app.modules.presupuestos.schemas import ConceptoCreate
 from app.modules.presupuestos.presupuesto_schemas import (
     AplicarCapituloConComponentesIA,
     AplicarPropuestaIA,
+    BuscarSustitutosIn,
     CambioOut,
     CapituloCreate,
     CapituloUpdate,
@@ -69,6 +72,8 @@ from app.modules.presupuestos.presupuesto_schemas import (
     RecursosPresupuesto,
     ResultadoCambioPrecio,
     ResultadoSincronizacion,
+    SustituirPartidaIn,
+    SustitutoCandidatoOut,
     VersionOut,
 )
 
@@ -278,9 +283,27 @@ async def aplicar_capitulo_ia(
         partida = await service.crear_partida(
             session,
             capitulo.id,
-            PartidaCreate(resumen=partida_datos.resumen, unidad=partida_datos.unidad, orden=orden),
+            PartidaCreate(
+                resumen=partida_datos.resumen,
+                unidad=partida_datos.unidad,
+                texto=partida_datos.texto,
+                orden=orden,
+            ),
         )
         assert partida is not None
+        for orden_linea, linea_datos in enumerate(partida_datos.mediciones):
+            await service.crear_linea(
+                session,
+                partida.id,
+                LineaMedicionCreate(
+                    comentario=linea_datos.comentario,
+                    uds=linea_datos.uds,
+                    longitud=linea_datos.longitud,
+                    anchura=linea_datos.anchura,
+                    altura=linea_datos.altura,
+                    orden=orden_linea,
+                ),
+            )
         for comp in partida_datos.componentes:
             if comp.personalizado:
                 if not comp.resumen or not comp.unidad or comp.precio is None:
@@ -292,7 +315,7 @@ async def aplicar_capitulo_ia(
                     session,
                     ConceptoCreate(
                         tipo="basico",
-                        naturaleza=comp.naturaleza,
+                        naturaleza=comp.naturaleza or NaturalezaConcepto.SIN_CLASIFICAR,
                         unidad=comp.unidad,
                         resumen=comp.resumen,
                         precio=comp.precio,
@@ -343,6 +366,69 @@ async def aplicar_capitulo_ia(
         "resumen": capitulo.resumen,
         "partidas": total_partidas,
     }
+
+
+@presupuestos_router.post(
+    "/sustitutos/buscar", response_model=list[SustitutoCandidatoOut]
+)
+async def buscar_sustitutos(
+    datos: BuscarSustitutosIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> list[SustitutoCandidatoOut]:
+    """«Cambiar por banco de precios» (Fase 52): candidatos para sustituir
+    una partida o un componente. `texto` es lo que teclea el usuario; en la
+    carga inicial del buscador (sin texto todavía) se busca con
+    `resumen_actual`, y si `con_ia` está activo se le pide a DeepSeek que
+    destaque unos pocos arriba — nunca inventa candidatos, solo ordena y
+    explica los que ya salieron de la búsqueda."""
+    texto = (datos.texto or datos.resumen_actual).strip()
+    candidatos = await sustitucion_service.buscar_candidatos(
+        session,
+        texto=texto,
+        modo=datos.modo,
+        excluir_partida_id=datos.excluir_partida_id,
+    )
+    if datos.con_ia:
+        candidatos = await sustitucion_service.sugerir_ia(
+            session,
+            resumen=datos.resumen_actual,
+            unidad=datos.unidad_actual,
+            candidatos=candidatos,
+        )
+    return candidatos
+
+
+@partidas_router.post("/{partida_id}/sustituir", response_model=PartidaOut)
+async def sustituir_partida(
+    partida_id: uuid.UUID,
+    datos: SustituirPartidaIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> PartidaOut:
+    """Aplica la sustitución que el usuario ya eligió en el buscador —esto
+    no busca ni sugiere nada, solo escribe lo que se le pide."""
+    await _partida_propia(session, partida_id, alcance, principal)
+    try:
+        partida = await service.sustituir_partida(
+            session,
+            partida_id,
+            origen=datos.origen,
+            concepto_id=datos.concepto_id,
+            partida_origen_id=datos.partida_origen_id,
+            copiar_descompuesto=datos.copiar_descompuesto,
+        )
+    except service.ConceptoInvalido as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except service.PartidaOrigenInvalida as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    if partida is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partida no encontrada")
+    await session.commit()
+    return PartidaOut.model_validate(partida)
 
 
 @presupuestos_router.patch("/{presupuesto_id}/lineas", response_model=PresupuestoDetalle)
@@ -1120,7 +1206,7 @@ async def guardar_como_plantilla(
             session,
             presupuesto_id,
             nombre=datos.nombre,
-            codigo=datos.codigo or await service.siguiente_codigo(session),
+            codigo=datos.codigo or await service.siguiente_codigo_libre(session),
             tipo_obra=datos.tipo_obra,
             con_mediciones=datos.con_mediciones,
         )
@@ -1153,7 +1239,7 @@ async def instanciar(
             session,
             plantilla_id,
             nombre=datos.nombre,
-            codigo=datos.codigo or await service.siguiente_codigo(session),
+            codigo=datos.codigo or await service.siguiente_codigo_libre(session),
             cliente_id=datos.cliente_id,
             emplazamiento=datos.emplazamiento,
         )

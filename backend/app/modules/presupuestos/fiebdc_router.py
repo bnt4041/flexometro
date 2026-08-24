@@ -99,6 +99,9 @@ async def importar(
     estrategia: EstrategiaCodigos = Form(default=EstrategiaCodigos.OMITIR),
     crear_presupuesto: bool = Form(default=True),
     nombre_presupuesto: str | None = Form(default=None),
+    # Fase 50: soltar un BC3 sobre un capítulo del banco coloca ahí las
+    # fichas del fichero. Sin él, caen en la raíz como hasta ahora.
+    capitulo_banco_id: uuid.UUID | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> ImportacionOut:
     archivo = fiebdc.parsear(await _leer(fichero))
@@ -108,6 +111,7 @@ async def importar(
         estrategia=estrategia,
         crear_presupuesto=crear_presupuesto,
         nombre_presupuesto=nombre_presupuesto,
+        capitulo_banco_id=capitulo_banco_id,
     )
 
     if resultado.ciclos:

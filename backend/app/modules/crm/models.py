@@ -24,6 +24,7 @@ SCHEMA = "crm"
 
 class EntidadNota(StrEnum):
     TERCERO = "tercero"
+    CONTACTO = "contacto"
     PRESUPUESTO = "presupuesto"
     OBRA = "obra"
     CERTIFICACION = "certificacion"

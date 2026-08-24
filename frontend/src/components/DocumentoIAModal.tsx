@@ -39,6 +39,7 @@ export function DocumentoIAModal({
   entidad,
   entidadId,
   presupuestoId,
+  partidaId,
   onClose,
   onGuardado,
   onCambio,
@@ -47,6 +48,10 @@ export function DocumentoIAModal({
   entidad: EntidadDocumento
   entidadId: string
   presupuestoId?: string
+  // Fase 51c: si el documento se soltó sobre una partida ya existente, la
+  // IA además puede proponerle mediciones directamente en vez de solo
+  // crear capítulos nuevos — ver `proponer_mediciones_partida` en el backend.
+  partidaId?: string | null
   onClose: () => void
   onGuardado?: () => void
   onCambio?: () => void
@@ -119,6 +124,7 @@ export function DocumentoIAModal({
         ficherosActuales,
         historial.map((m) => ({ rol: m.rol, contenido: m.contenido })),
         presupuestoId,
+        partidaId ?? undefined,
       )
       setMensajes((actual) => [...actual, { rol: 'assistant', contenido: respuesta }])
       if (nueva) setPropuesta(nueva)
@@ -176,43 +182,75 @@ export function DocumentoIAModal({
     }
   }
 
+  async function guardarDocumentoSiHaceFalta() {
+    // El documento que dio origen a la propuesta se guarda solo al
+    // confirmarla: en ese momento el usuario ya ha dado por buena la
+    // lectura, así que el documento merece quedar archivado sin un clic
+    // aparte en "Guardar en Documentos".
+    if (guardado) return
+    try {
+      for (const fichero of ficheros) {
+        await api.documentos.upload(entidad, entidadId, fichero)
+      }
+      setGuardado(true)
+      onGuardado?.()
+    } catch {
+      /* si el documento no se puede guardar, no se pierde el capítulo ya
+         creado — el usuario siempre puede reintentar con el botón */
+    }
+  }
+
   async function confirmarPropuesta() {
     if (!propuesta || !presupuestoId || confirmando) return
     setConfirmando(true)
     setError(null)
     try {
-      // Un único endpoint atómico (capítulo + partidas + rastro en el
-      // historial) en vez de crear el capítulo y luego cada partida por
-      // separado: si algo falla a media lista no queda un capítulo huérfano,
-      // y el historial del presupuesto deja constancia de que fue la IA.
-      const resultado = await api.presupuestos.aplicarPropuestaIA(presupuestoId, {
-        capitulo_resumen: propuesta.capitulo_resumen || 'Importado de documento',
-        partidas: propuesta.partidas_propuestas,
-      })
-      // El documento que dio origen a la propuesta se guarda solo al
-      // confirmarla: en ese momento el usuario ya ha dado por buena la
-      // lectura, así que el documento merece quedar archivado sin un clic
-      // aparte en "Guardar en Documentos".
-      if (!guardado) {
-        try {
-          for (const fichero of ficheros) {
-            await api.documentos.upload(entidad, entidadId, fichero)
-          }
-          setGuardado(true)
-          onGuardado?.()
-        } catch {
-          /* si el documento no se puede guardar, no se pierde el capítulo ya
-             creado — el usuario siempre puede reintentar con el botón */
+      let mensaje: string
+      if (propuesta.tipo === 'crear_capitulos') {
+        // Precios reales del banco (Fase 51): un capítulo por llamada, en
+        // secuencia — mismo endpoint y mismo patrón que "Ayuda con IA"
+        // sobre un presupuesto, aquí resuelto desde el documento en vez de
+        // la conversación.
+        const hechos: string[] = []
+        for (const capitulo of propuesta.capitulos_propuestos) {
+          const resultado = await api.presupuestos.aplicarCapituloIA(presupuestoId, {
+            capitulo_resumen: capitulo.resumen,
+            partidas: capitulo.partidas,
+          })
+          hechos.push(
+            `«${resultado.resumen}» (${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'})`,
+          )
         }
+        mensaje = `Hecho: capítulo${hechos.length === 1 ? '' : 's'} creado${hechos.length === 1 ? '' : 's'} ${hechos.join(', ')}.`
+      } else if (propuesta.tipo === 'anadir_mediciones_partida') {
+        if (!propuesta.partida_id) throw new Error('La propuesta no trae la partida de destino')
+        const creadas = await api.ia.mediciones.aplicarDirecto(
+          propuesta.partida_id,
+          propuesta.mediciones_propuestas.map(({ comentario, uds, longitud, anchura, altura }) => ({
+            comentario,
+            uds,
+            longitud,
+            anchura,
+            altura,
+          })),
+        )
+        mensaje = `Hecho: ${creadas.length} línea${creadas.length === 1 ? '' : 's'} de medición añadida${creadas.length === 1 ? '' : 's'} a la partida.`
+      } else {
+        // Un único endpoint atómico (capítulo + partidas + rastro en el
+        // historial) en vez de crear el capítulo y luego cada partida por
+        // separado: si algo falla a media lista no queda un capítulo
+        // huérfano, y el historial del presupuesto deja constancia de que
+        // fue la IA.
+        const resultado = await api.presupuestos.aplicarPropuestaIA(presupuestoId, {
+          capitulo_resumen: propuesta.capitulo_resumen || 'Importado de documento',
+          partidas: propuesta.partidas_propuestas,
+        })
+        mensaje = `Hecho: capítulo «${resultado.resumen}» creado con ${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'}.`
       }
+
+      await guardarDocumentoSiHaceFalta()
       setPropuesta(null)
-      setMensajes((actual) => [
-        ...actual,
-        {
-          rol: 'assistant',
-          contenido: `Hecho: capítulo «${resultado.resumen}» creado con ${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'}.`,
-        },
-      ])
+      setMensajes((actual) => [...actual, { rol: 'assistant', contenido: mensaje }])
       onCambio?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -305,14 +343,80 @@ export function DocumentoIAModal({
           {propuesta && (
             <div className="chat-ia__propuesta">
               <p>{propuesta.descripcion}</p>
-              {propuesta.partidas_propuestas.length > 0 && (
-                <ul className="chat-ia__componentes">
-                  {propuesta.partidas_propuestas.map((p, i) => (
-                    <li key={i}>
-                      {p.resumen} — {p.medicion} {p.unidad} × {p.precio} €
-                    </li>
+              {propuesta.tipo === 'crear_capitulos' ? (
+                // Precios reales del banco de precios (Fase 51): el
+                // documento no traía precio propio, así que cada partida
+                // lleva su descompuesto resuelto contra el banco en vez de
+                // un precio suelto.
+                <div className="chat-ia__capitulos">
+                  {propuesta.capitulos_propuestos.map((cap, k) => (
+                    <div key={k} className="chat-ia__capitulo">
+                      <strong>{cap.resumen}</strong>
+                      <ul className="chat-ia__componentes">
+                        {cap.partidas.map((p, i) => (
+                          <li key={i}>
+                            <strong>
+                              {p.resumen} {p.unidad ? `(${p.unidad})` : ''}
+                            </strong>
+                            <ul className="chat-ia__componentes">
+                              {p.componentes.map((c, j) => (
+                                <li key={c.concepto_id ?? j}>
+                                  {c.rendimiento} {c.unidad} —{' '}
+                                  {c.personalizado ? (
+                                    <>
+                                      {c.resumen} · <strong>estimado, {c.precio} €</strong>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {c.codigo} · {c.resumen}
+                                    </>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                </div>
+              ) : propuesta.tipo === 'anadir_mediciones_partida' ? (
+                propuesta.mediciones_propuestas.length > 0 && (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Comentario</th>
+                        <th className="table__num">Uds</th>
+                        <th className="table__num">Longitud</th>
+                        <th className="table__num">Anchura</th>
+                        <th className="table__num">Altura</th>
+                        <th className="table__num">Parcial</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {propuesta.mediciones_propuestas.map((l, i) => (
+                        <tr key={i}>
+                          <td>{l.comentario}</td>
+                          <td className="table__num">{l.uds}</td>
+                          <td className="table__num">{l.longitud}</td>
+                          <td className="table__num">{l.anchura}</td>
+                          <td className="table__num">{l.altura}</td>
+                          <td className="table__num">{l.parcial}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              ) : (
+                propuesta.partidas_propuestas.length > 0 && (
+                  <ul className="chat-ia__componentes">
+                    {propuesta.partidas_propuestas.map((p, i) => (
+                      <li key={i}>
+                        {p.resumen} — {p.medicion} {p.unidad} × {p.precio} €
+                      </li>
+                    ))}
+                  </ul>
+                )
               )}
               {presupuestoId ? (
                 <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
@@ -322,7 +426,9 @@ export function DocumentoIAModal({
                     onClick={() => void confirmarPropuesta()}
                   >
                     <Check size={14} aria-hidden="true" />
-                    Confirmar y crear aquí
+                    {propuesta.tipo === 'anadir_mediciones_partida'
+                      ? 'Confirmar y añadir a la partida'
+                      : 'Confirmar y crear aquí'}
                   </button>
                   <button
                     className="btn btn--sm"

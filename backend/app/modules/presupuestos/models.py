@@ -59,6 +59,52 @@ class Familia(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
     )
 
 
+class CapituloBanco(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
+    """Capítulo del banco de precios (Fase 50) — cómo se ORGANIZA el banco,
+    en árbol, igual que los capítulos de un presupuesto.
+
+    Deliberadamente distinto de `Familia`, aunque las dos sean jerárquicas:
+    el capítulo dice DÓNDE está la ficha dentro del banco (una sola, y se
+    mueve arrastrando), mientras que la familia sigue siendo una etiqueta de
+    clasificación —qué ES la ficha— que se asigna aparte y en masa. Una
+    ficha de hormigón puede vivir en el capítulo "Estructura" y llevar la
+    familia "Material" sin que una cosa implique la otra.
+
+    No se reutiliza `Capitulo` (el de presupuesto) porque aquel cuelga
+    obligatoriamente de un `presupuesto_id`: son árboles distintos con
+    ciclos de vida distintos.
+    """
+
+    __tablename__ = "capitulo_banco"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "codigo", name="capitulo_banco_codigo_unique"),
+        Index("ix_presupuestos_capitulo_banco_padre", "organization_id", "parent_id"),
+        {"schema": SCHEMA},
+    )
+
+    # RESTRICT como en `Familia`: borrar un capítulo con subcapítulos dentro
+    # sería perder la rama entera sin avisar.
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.capitulo_banco.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    # Descripción ampliada, en HTML — el mismo editor enriquecido que usan
+    # los capítulos de presupuesto.
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    hijos: Mapped[list["CapituloBanco"]] = relationship(
+        back_populates="padre", cascade="save-update"
+    )
+    padre: Mapped["CapituloBanco | None"] = relationship(
+        back_populates="hijos", remote_side="CapituloBanco.id"
+    )
+
+
 class TipoConcepto(StrEnum):
     """Niveles de la cadena de Ramírez de Arellano que viven en el árbol.
 
@@ -169,6 +215,19 @@ class Concepto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMi
         nullable=True,
         index=True,
     )
+    # Dónde vive la ficha dentro del árbol del banco (Fase 50) — distinto de
+    # `familia_id`, que es su clasificación. SET NULL: borrar un capítulo
+    # deja sus fichas sueltas en la raíz, nunca las borra.
+    capitulo_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.capitulo_banco.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Posición dentro de su capítulo. Antes el banco se ordenaba solo por
+    # `tipo, codigo`; con la rejilla hace falta un orden que el usuario pueda
+    # cambiar arrastrando.
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     precio_venta: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     tipo_iva: Mapped[TipoIVA] = mapped_column(
         enum_column(TipoIVA, "tipo_iva"), nullable=False, default=TipoIVA.GENERAL

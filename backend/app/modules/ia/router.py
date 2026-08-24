@@ -16,6 +16,7 @@ from app.modules.ia.deepseek import DeepSeekError
 from app.modules.ia.gemini import GeminiError
 from app.modules.ia.models import LecturaPlano, SugerenciaPatron
 from app.modules.ia.schemas import (
+    AnadirMedicionesDirecto,
     AplicarLecturaPlano,
     ConversarAyudaLinea,
     CrearPlantillaDesdeSugerencia,
@@ -278,6 +279,27 @@ async def aplicar_lectura(
     return [LineaMedicionOut.model_validate(l) for l in creadas]
 
 
+@router.post("/mediciones/aplicar-directo", response_model=list[LineaMedicionOut])
+async def aplicar_mediciones_directo(
+    datos: AnadirMedicionesDirecto,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+) -> list[LineaMedicionOut]:
+    """Confirma una propuesta `anadir_mediciones_partida` salida de la
+    conversación general de documentos (`documento.conversar`) — a
+    diferencia de `/mediciones/{id}/aplicar`, no hay una `LecturaPlano` de
+    por medio, así que la partida de destino viaja explícita en el body."""
+    try:
+        creadas = await medicion.anadir_mediciones(session, datos.partida_id, datos.lineas)
+    except medicion.PartidaInvalida as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return [LineaMedicionOut.model_validate(l) for l in creadas]
+
+
 # --- Conversación sobre un documento arrastrado (Fase "Arrastrar al presupuesto") ---
 
 
@@ -308,6 +330,10 @@ async def documento_conversar(
     # puede además proponer un capítulo nuevo con lo que lea de los
     # documentos (Fase 39) — sin esto, se queda en solo lectura como antes.
     presupuesto_id: uuid.UUID | None = Form(default=None),
+    # Cuando el documento se soltó sobre una partida ya existente (no la raíz
+    # ni un capítulo), la IA puede además proponer mediciones para esa
+    # partida en concreto — ver `documento.conversar`.
+    partida_id: uuid.UUID | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
     _alcance: Alcance = Depends(require_permiso("ia", "editar")),
@@ -334,6 +360,7 @@ async def documento_conversar(
             historial,
             principal,
             presupuesto_id=presupuesto_id,
+            partida_id=partida_id,
         )
     except documento.DocumentoInvalido as exc:
         raise HTTPException(

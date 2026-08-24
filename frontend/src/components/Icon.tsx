@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Ban,
+  Banknote,
   Calculator,
   Check,
   CircleAlert,
@@ -98,6 +99,7 @@ const ICONOS: Record<string, LucideIcon> = {
   documentos: FilePlus,
   historial: History,
   apariciones: Link2,
+  'cuentas-bancarias': Banknote,
 }
 
 export type NombreIcono = keyof typeof ICONOS | (string & {})

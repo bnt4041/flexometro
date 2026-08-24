@@ -26,6 +26,7 @@ import { BancoPrecios, ConceptoCrear } from './pages/BancoPrecios'
 import { Certificaciones } from './pages/Certificaciones'
 import { CertificacionDetalle } from './pages/CertificacionDetalle'
 import { Comparador } from './pages/Comparador'
+import { ContactoDetalle } from './pages/ContactoDetalle'
 import { Contactos } from './pages/Contactos'
 import { CosteReal } from './pages/CosteReal'
 import { FacturaDetalle } from './pages/FacturaDetalle'
@@ -95,6 +96,12 @@ const MODALES: Record<
     // Sin alta propia: una certificación siempre se crea desde la ficha de
     // una obra, nunca desde este listado.
     { path: ':id', modulo: 'facturacion', componente: CertificacionDetalle },
+  ],
+  '/contactos': [
+    // Sin alta propia tampoco: un contacto nace desde la ficha de un
+    // tercero (o suelto, desde el mismo formulario) — este listado solo da
+    // acceso a su ficha ya creada.
+    { path: ':id', modulo: 'terceros', componente: ContactoDetalle },
   ],
   '/facturas': [
     { path: 'nueva', modulo: 'facturacion', componente: FacturaSueltaCrear },

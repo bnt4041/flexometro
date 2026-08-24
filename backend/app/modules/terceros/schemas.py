@@ -56,6 +56,43 @@ class ContactoOut(ContactoBase):
 
     id: uuid.UUID
     tercero_id: uuid.UUID | None
+    # Para listarlo sin tener que ir contacto a contacto a resolverlo (Fase
+    # 49) — sale de `Contacto.tercero_razon_social`, ver ese modelo.
+    tercero_razon_social: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    creado_por_nombre: str | None = None
+
+
+class CuentaBancariaTerceroBase(BaseModel):
+    titular: str | None = Field(default=None, max_length=200)
+    iban: str = Field(min_length=1, max_length=34)
+    bic: str | None = Field(default=None, max_length=11)
+    es_principal: bool = False
+    notas: str | None = None
+    activo: bool = True
+
+
+class CuentaBancariaTerceroCreate(CuentaBancariaTerceroBase):
+    tercero_id: uuid.UUID
+
+
+class CuentaBancariaTerceroUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    titular: str | None = None
+    iban: str | None = Field(default=None, min_length=1, max_length=34)
+    bic: str | None = None
+    es_principal: bool | None = None
+    notas: str | None = None
+    activo: bool | None = None
+
+
+class CuentaBancariaTerceroOut(CuentaBancariaTerceroBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tercero_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     creado_por_nombre: str | None = None

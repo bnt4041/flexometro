@@ -228,6 +228,19 @@ export async function tokenValido(): Promise<string | null> {
   return tokens.access_token
 }
 
+/** Sesión perdida a media navegación (Fase 48): el token ya no vale y el
+ *  refresco tampoco (`tokenValido()` devolvió `null`), o el backend contestó
+ *  401 directamente. No hay nada que cerrar en el servidor —la sesión ya
+ *  está muerta—, así que a diferencia de `cerrarSesion()` esto NO pasa por
+ *  `/logout` de Keycloak: solo limpia el estado local y manda al login,
+ *  que además recuerda dónde estaba el usuario (`iniciarSesion` guarda
+ *  `CLAVE_DESTINO`) para devolverlo ahí en cuanto vuelva a entrar. */
+export function sesionPerdida(): void {
+  tokens = null
+  sessionStorage.removeItem(CLAVE_TOKENS)
+  if (requiereLogin()) void iniciarSesion()
+}
+
 export function cerrarSesion(): void {
   const refresco = tokens?.refresh_token
   tokens = null

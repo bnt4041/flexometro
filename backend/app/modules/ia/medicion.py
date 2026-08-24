@@ -164,3 +164,26 @@ async def aplicar_lectura(
     lectura.aplicada_en = datetime.now(UTC)
     await session.flush()
     return creadas
+
+
+async def anadir_mediciones(
+    session: AsyncSession, partida_id: uuid.UUID, lineas: list[LineaSugeridaLLM]
+) -> list[LineaMedicion]:
+    """Igual que `aplicar_lectura` pero sin una `LecturaPlano` de por medio —
+    para las mediciones propuestas desde la conversación general de
+    documentos (`documento.conversar`, herramienta
+    `proponer_mediciones_partida`), que no pasa por `leer_plano` y por tanto
+    no tiene una lectura que marcar como aplicada."""
+    await _obtener_partida(session, partida_id)
+
+    creadas: list[LineaMedicion] = []
+    for orden, datos in enumerate(lineas):
+        linea = await crear_linea(
+            session, partida_id, LineaMedicionCreate(**datos.model_dump(), orden=orden)
+        )
+        if linea is None:
+            raise PartidaInvalida("La partida ya no existe")
+        creadas.append(linea)
+
+    await session.flush()
+    return creadas

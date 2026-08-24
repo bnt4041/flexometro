@@ -28,6 +28,7 @@ export function Documentos({ entidad, entidadId }: { entidad: EntidadDocumento; 
   const [documentos, setDocumentos] = useState<Documento[]>([])
   const [error, setError] = useState<string | null>(null)
   const [subiendo, setSubiendo] = useState(false)
+  const [arrastrando, setArrastrando] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const cargar = useCallback(async () => {
@@ -44,12 +45,18 @@ export function Documentos({ entidad, entidadId }: { entidad: EntidadDocumento; 
     void cargar()
   }, [cargar])
 
-  async function subirFichero(fichero: File | null) {
-    if (!fichero) return
+  async function subirFicheros(ficheros: FileList | File[] | null) {
+    const lista = ficheros ? Array.from(ficheros) : []
+    if (lista.length === 0) return
     setSubiendo(true)
     setError(null)
     try {
-      await api.documentos.upload(entidad, entidadId, fichero)
+      // Secuencial y no en paralelo: son subidas a MinIO de un tamaño
+      // arbitrario, y varias a la vez complicarían saber cuál falló si el
+      // usuario arrastra un lote grande.
+      for (const fichero of lista) {
+        await api.documentos.upload(entidad, entidadId, fichero)
+      }
       await cargar()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -83,25 +90,45 @@ export function Documentos({ entidad, entidadId }: { entidad: EntidadDocumento; 
         <p className="page-lead" style={{ marginBottom: 0 }}>
           Ficheros guardados sobre este registro.
         </p>
-        <Tooltip texto="Subir un fichero nuevo">
-          <button
-            className="btn"
-            disabled={subiendo}
-            onClick={() => inputRef.current?.click()}
-          >
-            <Upload size={16} aria-hidden="true" />
-            {subiendo ? 'Subiendo…' : 'Subir documento'}
-          </button>
-        </Tooltip>
-        <input
-          ref={inputRef}
-          type="file"
-          style={{ display: 'none' }}
-          onChange={(e) => void subirFichero(e.target.files?.[0] ?? null)}
-        />
       </div>
 
       <ErrorNotice error={error} />
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setArrastrando(true)
+        }}
+        onDragLeave={() => setArrastrando(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setArrastrando(false)
+          void subirFicheros(e.dataTransfer.files)
+        }}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `1px dashed ${arrastrando ? 'var(--c-accent-strong)' : 'var(--c-border)'}`,
+          borderRadius: 'var(--radius)',
+          background: arrastrando ? 'var(--c-accent-soft)' : 'var(--c-surface-2)',
+          padding: 'var(--sp-4)',
+          textAlign: 'center',
+          cursor: 'pointer',
+          marginBottom: 'var(--sp-4)',
+        }}
+      >
+        <Upload size={18} aria-hidden="true" style={{ marginBottom: 'var(--sp-1)' }} />
+        <p className="form-section__note" style={{ margin: 0 }}>
+          {subiendo ? 'Subiendo…' : 'Arrastra aquí uno o varios ficheros, o haz clic para elegirlos'}
+        </p>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          disabled={subiendo}
+          style={{ display: 'none' }}
+          onChange={(e) => void subirFicheros(e.target.files)}
+        />
+      </div>
 
       {documentos.length === 0 ? (
         <EmptyState title="Sin documentos todavía">

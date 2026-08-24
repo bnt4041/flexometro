@@ -5,7 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from app.core.numeracion import siguiente_referencia
+from app.core.numeracion import siguiente_referencia, siguiente_referencia_libre
 from app.core.redondeo import redondear_medicion, redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.modules.presupuestos import calculo, formulas
@@ -63,15 +63,48 @@ class ConceptoYaVinculado(Exception):
     pass
 
 
+class PartidaOrigenInvalida(Exception):
+    pass
+
+
 class FormulaNoEncontrada(Exception):
     pass
 
 
 async def siguiente_codigo(session: AsyncSession) -> str:
     """Fase 16: patrón configurable por cuenta (Administración → ficha de
-    cuenta → Numeración), en vez del prefijo "PRE" fijo de antes."""
+    cuenta → Numeración), en vez del prefijo "PRE" fijo de antes.
+
+    Solo de PREVISUALIZACIÓN (el que se enseña en un formulario antes de
+    guardar): no reserva el número, así que dos usuarios pueden ver el
+    mismo código a la vez. Para crear de verdad usar `siguiente_codigo_libre`,
+    que además salta cualquier código ya en uso."""
     org_id = require_organization_id()
     return await siguiente_referencia(session, organization_id=org_id, tipo_documento="presupuesto")
+
+
+async def siguiente_codigo_libre(
+    session: AsyncSession, *, organization_id: uuid.UUID | None = None
+) -> str:
+    """El código a usar al crear de verdad — salta al siguiente libre si el
+    contador va por detrás de la realidad (Fase 51, ver docstring de
+    `siguiente_referencia_libre`). `organization_id` solo hace falta al
+    copiar un presupuesto a OTRA empresa de la cuenta (`versionado.copiar`);
+    el resto de casos crean en la organización activa."""
+    org_id = organization_id or require_organization_id()
+
+    async def _existe(codigo: str) -> bool:
+        return (
+            await session.scalar(
+                select(Presupuesto.id).where(
+                    Presupuesto.organization_id == org_id, Presupuesto.codigo == codigo
+                )
+            )
+        ) is not None
+
+    return await siguiente_referencia_libre(
+        session, organization_id=org_id, tipo_documento="presupuesto", existe=_existe
+    )
 
 
 # --- Presupuesto ---
@@ -144,14 +177,22 @@ async def obtener(session: AsyncSession, presupuesto_id: uuid.UUID) -> Presupues
 
 async def crear(session: AsyncSession, datos: PresupuestoCreate) -> Presupuesto:
     org_id = require_organization_id()
-    codigo = datos.codigo or await siguiente_codigo(session)
-    existe = await session.scalar(
-        select(Presupuesto.id).where(
-            Presupuesto.organization_id == org_id, Presupuesto.codigo == codigo
-        )
-    )
-    if existe:
-        raise CodigoDuplicado(f"Ya existe un presupuesto con el código '{codigo}'")
+
+    async def _existe(codigo: str) -> bool:
+        return (
+            await session.scalar(
+                select(Presupuesto.id).where(
+                    Presupuesto.organization_id == org_id, Presupuesto.codigo == codigo
+                )
+            )
+        ) is not None
+
+    if datos.codigo:
+        if await _existe(datos.codigo):
+            raise CodigoDuplicado(f"Ya existe un presupuesto con el código '{datos.codigo}'")
+        codigo = datos.codigo
+    else:
+        codigo = await siguiente_codigo_libre(session, organization_id=org_id)
 
     presupuesto = Presupuesto(
         organization_id=org_id,
@@ -1301,6 +1342,82 @@ async def anadir_componente(
     await calc.recalcular_desde_descomposicion(session, partida)
     await _refrescar_venta(session, partida)
     return True
+
+
+async def _vaciar_descomposicion_propia(session: AsyncSession, partida_id: uuid.UUID) -> None:
+    """Borra el descompuesto PROPIO de la partida, si tiene uno — paso previo
+    a «cambiar por banco de precios» (Fase 52): sin esto, un concepto nuevo
+    enlazado se enseñaría con un descompuesto viejo que ya no le corresponde
+    (la lectura prioriza siempre lo propio sobre lo heredado, ver
+    `descomposicion_de_partida`)."""
+    propias = (
+        await session.execute(
+            select(PartidaDescomposicion).where(PartidaDescomposicion.partida_id == partida_id)
+        )
+    ).scalars()
+    for fila in propias:
+        await session.delete(fila)
+    await session.flush()
+
+
+async def sustituir_partida(
+    session: AsyncSession,
+    partida_id: uuid.UUID,
+    *,
+    origen: str,
+    concepto_id: uuid.UUID | None,
+    partida_origen_id: uuid.UUID | None,
+    copiar_descompuesto: bool,
+) -> Partida | None:
+    """«Cambiar por banco de precios» (Fase 52): sustituye resumen/unidad/
+    precio (y, si se pide, el descompuesto) de una partida ya existente por
+    los de un candidato elegido a mano por el usuario — del banco de
+    precios propio, o de otra partida (de otro presupuesto o ya
+    certificada). Nunca los mezcla automáticamente: la elección es siempre
+    del usuario, esto solo aplica la que ya hizo."""
+    org_id = require_organization_id()
+    partida = await obtener_partida(session, partida_id)
+    if partida is None:
+        return None
+
+    if origen == "banco":
+        assert concepto_id is not None
+        concepto = await session.scalar(
+            select(Concepto).where(Concepto.id == concepto_id, Concepto.organization_id == org_id)
+        )
+        if concepto is None:
+            raise ConceptoInvalido("El concepto no existe en esta organización")
+        await _vaciar_descomposicion_propia(session, partida_id)
+        partida.concepto_id = concepto.id
+        partida.codigo = concepto.codigo
+        partida.resumen = concepto.resumen
+        partida.unidad = concepto.unidad
+        partida.precio = concepto.precio
+    else:
+        assert partida_origen_id is not None
+        origen_partida = await obtener_partida(session, partida_origen_id)
+        if origen_partida is None or origen_partida.organization_id != org_id:
+            raise PartidaOrigenInvalida("La partida de origen no existe en esta cuenta")
+        await _vaciar_descomposicion_propia(session, partida_id)
+        partida.concepto_id = None
+        partida.codigo = origen_partida.codigo
+        partida.resumen = origen_partida.resumen
+        partida.unidad = origen_partida.unidad
+        partida.precio = origen_partida.precio
+        if copiar_descompuesto:
+            resultado = await descomposicion_de_partida(session, origen_partida.id)
+            lineas_origen = resultado[1] if resultado else []
+            for linea in lineas_origen:
+                if linea["hijo_id"] is None:
+                    continue
+                await anadir_componente(
+                    session, partida_id, linea["hijo_id"], linea["rendimiento"], linea["factor"]
+                )
+
+    await session.flush()
+    await calc.recalcular_partida(session, partida)
+    await _refrescar_venta(session, partida)
+    return partida
 
 
 async def quitar_componente(

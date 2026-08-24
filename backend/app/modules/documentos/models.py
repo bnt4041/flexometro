@@ -23,6 +23,8 @@ SCHEMA = "documentos"
 
 class EntidadDocumento(StrEnum):
     TERCERO = "tercero"
+    CONTACTO = "contacto"
+    CONCEPTO = "concepto"
     PRESUPUESTO = "presupuesto"
     OBRA = "obra"
     CERTIFICACION = "certificacion"

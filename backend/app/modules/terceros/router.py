@@ -14,7 +14,7 @@ from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.terceros import apariciones_service, service
-from app.modules.terceros.models import EntidadContacto, Tercero
+from app.modules.terceros.models import Contacto, EntidadContacto, Tercero
 from app.modules.terceros.apariciones_schemas import AparicionOut
 from app.modules.terceros.schemas import (
     ContactoAsociadoCreate,
@@ -22,6 +22,9 @@ from app.modules.terceros.schemas import (
     ContactoCreate,
     ContactoOut,
     ContactoUpdate,
+    CuentaBancariaTerceroCreate,
+    CuentaBancariaTerceroOut,
+    CuentaBancariaTerceroUpdate,
     TerceroCreate,
     TerceroDetalle,
     TerceroOut,
@@ -201,6 +204,51 @@ async def crear_contacto(
     return ContactoOut.model_validate(contacto)
 
 
+@contactos_router.get("/{contacto_id}", response_model=ContactoOut)
+async def detalle_contacto(
+    contacto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> ContactoOut:
+    contacto = await service.obtener_contacto_visible(session, contacto_id)
+    if contacto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    verificar_propiedad(alcance, principal, contacto.creado_por_subject)
+    return ContactoOut.model_validate(contacto)
+
+
+@contactos_router.get("/{contacto_id}/apariciones", response_model=list[AparicionOut])
+async def apariciones_contacto(
+    contacto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[AparicionOut]:
+    contacto = await service.obtener_contacto_visible(session, contacto_id)
+    if contacto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    verificar_propiedad(alcance, principal, contacto.creado_por_subject)
+    return await apariciones_service.apariciones_de_contacto(session, contacto_id)
+
+
+@contactos_router.get("/{contacto_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial_contacto(
+    contacto_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    contacto = await service.obtener_contacto_visible(session, contacto_id)
+    if contacto is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    verificar_propiedad(alcance, principal, contacto.creado_por_subject)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Contacto), registro_id=contacto_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
+
+
 @contactos_router.patch("/{contacto_id}", response_model=ContactoOut)
 async def actualizar_contacto(
     contacto_id: uuid.UUID,
@@ -296,9 +344,73 @@ async def eliminar_asociacion(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asociación no encontrada")
 
 
+# --- Cuentas bancarias de terceros (Fase 47) ---
+
+cuentas_bancarias_router = APIRouter(
+    prefix="/api/terceros/{tercero_id}/cuentas-bancarias",
+    tags=["terceros"],
+    dependencies=[Depends(require_module("terceros"))],
+)
+
+
+@cuentas_bancarias_router.get("", response_model=list[CuentaBancariaTerceroOut])
+async def listar_cuentas_bancarias(
+    tercero_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "ver")),
+) -> list[CuentaBancariaTerceroOut]:
+    cuentas = await service.listar_cuentas_bancarias(session, tercero_id)
+    return [CuentaBancariaTerceroOut.model_validate(c) for c in cuentas]
+
+
+@cuentas_bancarias_router.post(
+    "", response_model=CuentaBancariaTerceroOut, status_code=status.HTTP_201_CREATED
+)
+async def crear_cuenta_bancaria(
+    tercero_id: uuid.UUID,
+    datos: CuentaBancariaTerceroCreate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+) -> CuentaBancariaTerceroOut:
+    if datos.tercero_id != tercero_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="El tercero de la ruta no coincide con el del cuerpo",
+        )
+    cuenta = await service.crear_cuenta_bancaria(session, datos)
+    return CuentaBancariaTerceroOut.model_validate(cuenta)
+
+
+@cuentas_bancarias_router.patch("/{cuenta_id}", response_model=CuentaBancariaTerceroOut)
+async def actualizar_cuenta_bancaria(
+    tercero_id: uuid.UUID,
+    cuenta_id: uuid.UUID,
+    datos: CuentaBancariaTerceroUpdate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+) -> CuentaBancariaTerceroOut:
+    cuenta = await service.actualizar_cuenta_bancaria(session, cuenta_id, datos)
+    if cuenta is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
+    return CuentaBancariaTerceroOut.model_validate(cuenta)
+
+
+@cuentas_bancarias_router.delete("/{cuenta_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_cuenta_bancaria(
+    tercero_id: uuid.UUID,
+    cuenta_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+) -> None:
+    encontrado = await service.eliminar_cuenta_bancaria(session, cuenta_id)
+    if not encontrado:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
+
+
 # Router del módulo: FastAPI monta un único router por módulo, así que se
-# agregan aquí los tres grupos de endpoints (prefijos distintos, mismo módulo).
+# agregan aquí los cuatro grupos de endpoints (prefijos distintos, mismo módulo).
 router = APIRouter()
 router.include_router(terceros_router)
 router.include_router(contactos_router)
 router.include_router(contactos_asociados_router)
+router.include_router(cuentas_bancarias_router)

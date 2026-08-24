@@ -3,7 +3,15 @@
  *  memoria: así sobrevive a cambiar de pestaña o de presupuesto, que es
  *  justo lo que hace falta para pegar de un presupuesto a otro (Fase 1c). */
 
-export type TipoPortapapeles = 'capitulos' | 'partidas' | 'lineas_medicion' | 'componentes_descompuesto'
+export type TipoPortapapeles =
+  | 'capitulos'
+  | 'partidas'
+  | 'lineas_medicion'
+  | 'componentes_descompuesto'
+  // Fichas del banco de precios (Fase 50) — al pegarlas se MUEVEN de
+  // capítulo, no se duplican: una ficha del banco es única por código y
+  // tenerla dos veces sería un error, no una copia.
+  | 'fichas_banco'
 
 export interface ContenidoPortapapeles {
   tipo: TipoPortapapeles

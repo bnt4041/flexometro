@@ -23,6 +23,7 @@ from app.core.tenancy import require_organization_id
 from app.modules.core import billing_service
 from app.modules.ia import gemini
 from app.modules.ia.schemas import MensajeConversacionIn, PropuestaAccionOut
+from app.modules.presupuestos.presupuesto_service import obtener_partida
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MIME_PERMITIDOS = {"application/pdf", "image/png", "image/jpeg", "image/webp", *gemini.MIME_EXCEL}
@@ -46,6 +47,7 @@ async def conversar(
     principal: Principal,
     *,
     presupuesto_id: uuid.UUID | None = None,
+    partida_id: uuid.UUID | None = None,
 ) -> tuple[str, PropuestaAccionOut | None]:
     if not documentos:
         raise DocumentoInvalido("Hace falta al menos un fichero")
@@ -66,6 +68,22 @@ async def conversar(
         )
 
     org_id = require_organization_id()
+
+    partida_destino = None
+    if partida_id is not None:
+        # El documento se soltó sobre una partida ya existente (no la raíz
+        # ni un capítulo): además de poder crear capítulos nuevos, la IA
+        # puede proponer mediciones para ESTA partida en concreto — el caso
+        # típico de soltar un plano acotado encima de la partida a la que
+        # corresponde, en vez de dejar que cree una duplicada.
+        partida = await obtener_partida(session, partida_id)
+        if partida is not None:
+            partida_destino = {
+                "id": str(partida.id),
+                "resumen": partida.resumen,
+                "unidad": partida.unidad,
+            }
+
     historial = [
         {"role": "user" if m.rol == "user" else "model", "text": m.contenido} for m in mensajes
     ]
@@ -74,6 +92,7 @@ async def conversar(
         documentos,
         historial,
         permitir_propuesta=presupuesto_id is not None,
+        partida_destino=partida_destino,
     )
 
     await billing_service.registrar_uso_ia(

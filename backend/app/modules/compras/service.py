@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.numeracion import siguiente_referencia
+from app.core.numeracion import siguiente_referencia, siguiente_referencia_libre
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.modules.compras.models import Albaran, AlbaranLinea
@@ -125,12 +125,25 @@ async def crear_albaran(session: AsyncSession, datos: AlbaranCreate) -> Albaran:
     await _validar_obra(session, datos.obra_id)
     await _validar_proveedor(session, datos.proveedor_id)
 
-    codigo = datos.codigo or await siguiente_codigo(session)
-    existe = await session.scalar(
-        select(Albaran.id).where(Albaran.organization_id == org_id, Albaran.codigo == codigo)
-    )
-    if existe:
-        raise CodigoDuplicado(f"Ya existe un albarán con el código '{codigo}'")
+    async def _existe(codigo: str) -> bool:
+        return (
+            await session.scalar(
+                select(Albaran.id).where(
+                    Albaran.organization_id == org_id, Albaran.codigo == codigo
+                )
+            )
+        ) is not None
+
+    if datos.codigo:
+        if await _existe(datos.codigo):
+            raise CodigoDuplicado(f"Ya existe un albarán con el código '{datos.codigo}'")
+        codigo = datos.codigo
+    else:
+        # Autogenerado: salta al siguiente libre si el contador va por
+        # detrás de la realidad (Fase 51, ver `presupuesto_service.crear`).
+        codigo = await siguiente_referencia_libre(
+            session, organization_id=org_id, tipo_documento="albaran", existe=_existe
+        )
 
     albaran = Albaran(
         organization_id=org_id,

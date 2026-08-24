@@ -411,11 +411,9 @@ async def copiar(
     # `fijar_organizacion_activa` solo mueve la variable de PostgreSQL. Hay
     # que pedir la referencia con la organización de destino explícita, o la
     # copia consumiría un número de la serie de la empresa equivocada.
-    from app.core.numeracion import siguiente_referencia
+    from app.modules.presupuestos.presupuesto_service import siguiente_codigo_libre
 
-    codigo = await siguiente_referencia(
-        session, organization_id=org_destino, tipo_documento="presupuesto"
-    )
+    codigo = await siguiente_codigo_libre(session, organization_id=org_destino)
 
     copia = Presupuesto(
         organization_id=org_destino,

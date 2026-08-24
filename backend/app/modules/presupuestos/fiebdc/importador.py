@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import OrigenDato
@@ -253,6 +253,7 @@ async def importar(
     crear_presupuesto: bool = True,
     nombre_presupuesto: str | None = None,
     codigo_presupuesto: str | None = None,
+    capitulo_banco_id: uuid.UUID | None = None,
 ) -> ResultadoImportacion:
     resultado = ResultadoImportacion(
         incidencias=[f"línea {i.linea} {i.registro}: {i.detalle}" for i in archivo.incidencias]
@@ -267,6 +268,19 @@ async def importar(
     resultado.discrepancias = discrepancias
 
     existentes = await _importar_conceptos(session, archivo, precios, estrategia, resultado)
+
+    # Soltar un BC3 sobre un capítulo del banco (Fase 50): las fichas que
+    # venían en el fichero se colocan ahí. Solo las de ESTE fichero, no las
+    # que ya existían con otro código — `existentes` trae el mapa completo
+    # de la organización, así que se cruza con los códigos del archivo.
+    if capitulo_banco_id is not None:
+        ids = [existentes[c] for c in archivo.conceptos if c in existentes]
+        if ids:
+            await session.execute(
+                update(Concepto)
+                .where(Concepto.id.in_(ids))
+                .values(capitulo_id=capitulo_banco_id)
+            )
 
     if crear_presupuesto and archivo.es_presupuesto:
         await _importar_presupuesto(

@@ -1313,6 +1313,20 @@ textarea.input {
   font-size: var(--fs-xs);
 }
 
+/* Buscador del banco de precios (Fase 50): pregunta al servidor, porque con
+ * miles de fichas no están todas cargadas en el navegador. */
+.rejilla-barra__buscador {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-text-muted);
+}
+
+.rejilla-barra__buscador .input {
+  width: 260px;
+  max-width: 40vw;
+}
+
 .rejilla__tabla {
   table-layout: fixed;
 }
@@ -1404,6 +1418,13 @@ textarea.input {
  * partidas. */
 .rejilla__fila.fila-capitulo .rejilla__celda {
   font-weight: 600;
+}
+
+/* Ficha del banco dada de baja (Fase 50): sigue visible —se referencia desde
+ * presupuestos antiguos— pero apagada, para que no se elija por error en una
+ * ficha nueva. */
+.rejilla__fila.fila-inactiva .rejilla__celda {
+  opacity: 0.55;
 }
 
 /* La fila raíz (el presupuesto entero, Fase 1h) pesa más aún que un
@@ -2060,6 +2081,74 @@ kbd {
 .chat-ia__capitulo {
   padding-left: var(--sp-3);
   border-left: 2px solid var(--c-border);
+}
+
+/* Buscador de sustitutos («Cambiar por banco de precios», Fase 52): cada
+ * candidato es un botón entero, no una fila de tabla — la lista mezcla tres
+ * fuentes con forma de dato distinta (partida, ficha, línea certificada) y
+ * un botón deja hueco de sobra para mostrarlas sin que se vea apretado. */
+.sustituto-grupo__titulo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+
+.sustituto-lista {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sustituto-fila {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.sustituto-fila:hover {
+  background: var(--c-surface-2);
+}
+
+.sustituto-fila.is-elegida {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+}
+
+.sustituto-fila__cabecera {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.sustituto-fila__cabecera strong {
+  margin-left: auto;
+}
+
+.sustituto-fila__resumen {
+  font-size: var(--fs-sm);
+}
+
+.sustituto-fila__razon {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+  font-style: italic;
 }
 
 .tabla-presupuesto .fila-capitulo td {

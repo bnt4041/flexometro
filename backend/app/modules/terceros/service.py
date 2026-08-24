@@ -26,10 +26,18 @@ from sqlalchemy.orm import selectinload
 
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.core.visibilidad import organizaciones_visibles
-from app.modules.terceros.models import Contacto, ContactoAsociado, EntidadContacto, Tercero
+from app.modules.terceros.models import (
+    Contacto,
+    ContactoAsociado,
+    CuentaBancariaTercero,
+    EntidadContacto,
+    Tercero,
+)
 from app.modules.terceros.schemas import (
     ContactoAsociadoCreate,
     ContactoBase,
+    CuentaBancariaTerceroCreate,
+    CuentaBancariaTerceroUpdate,
     ContactoCreate,
     ContactoUpdate,
     TerceroCreate,
@@ -228,10 +236,27 @@ async def listar_contactos(
 async def obtener_contacto(
     session: AsyncSession, contacto_id: uuid.UUID
 ) -> Contacto | None:
+    """SOLO organización propia — uso interno de ediciones/bajas, igual que
+    `obtener_tercero`. Para mostrar la ficha, usar `obtener_contacto_visible`."""
     org_id = require_organization_id()
     return await session.scalar(
         select(Contacto).where(
             Contacto.id == contacto_id, Contacto.organization_id == org_id
+        )
+    )
+
+
+async def obtener_contacto_visible(
+    session: AsyncSession, contacto_id: uuid.UUID
+) -> Contacto | None:
+    """Para la ficha propia del contacto (Fase 49): propia organización o,
+    si la cuenta comparte maestros, también el de una organización hermana
+    — mismo patrón que `obtener_tercero_visible`."""
+    org_id = require_organization_id()
+    ids_visibles = await organizaciones_visibles(session, org_id)
+    return await session.scalar(
+        select(Contacto).where(
+            Contacto.id == contacto_id, Contacto.organization_id.in_(ids_visibles)
         )
     )
 
@@ -265,6 +290,95 @@ async def eliminar_contacto(session: AsyncSession, contacto_id: uuid.UUID) -> bo
     if contacto is None:
         return False
     await session.delete(contacto)
+    await session.flush()
+    return True
+
+
+# --- Cuentas bancarias de terceros (Fase 47) ---
+#
+# Mismo reparto que Contacto: el listado por tercero es visible entre
+# organizaciones hermanas (maestro compartido), pero altas/ediciones/bajas
+# siempre atadas a la organización propia — el `WITH CHECK` del RLS maestro
+# lo exige igual, esto es la segunda barrera a nivel de aplicación.
+
+
+async def listar_cuentas_bancarias(
+    session: AsyncSession, tercero_id: uuid.UUID
+) -> list[CuentaBancariaTercero]:
+    org_id = require_organization_id()
+    ids_visibles = await organizaciones_visibles(session, org_id)
+    filas = await session.execute(
+        select(CuentaBancariaTercero)
+        .where(
+            CuentaBancariaTercero.tercero_id == tercero_id,
+            CuentaBancariaTercero.organization_id.in_(ids_visibles),
+        )
+        .order_by(CuentaBancariaTercero.es_principal.desc(), CuentaBancariaTercero.created_at)
+    )
+    return list(filas.scalars())
+
+
+async def obtener_cuenta_bancaria(
+    session: AsyncSession, cuenta_id: uuid.UUID
+) -> CuentaBancariaTercero | None:
+    org_id = require_organization_id()
+    return await session.scalar(
+        select(CuentaBancariaTercero).where(
+            CuentaBancariaTercero.id == cuenta_id, CuentaBancariaTercero.organization_id == org_id
+        )
+    )
+
+
+async def _quitar_principal(
+    session: AsyncSession, tercero_id: uuid.UUID, *, excepto: uuid.UUID | None = None
+) -> None:
+    """Como mucho una cuenta principal por tercero — dentro de lo que esta
+    organización ve de él, ver docstring del bloque."""
+    org_id = require_organization_id()
+    condiciones = [
+        CuentaBancariaTercero.tercero_id == tercero_id,
+        CuentaBancariaTercero.organization_id == org_id,
+        CuentaBancariaTercero.es_principal.is_(True),
+    ]
+    if excepto is not None:
+        condiciones.append(CuentaBancariaTercero.id != excepto)
+    filas = await session.execute(select(CuentaBancariaTercero).where(*condiciones))
+    for fila in filas.scalars():
+        fila.es_principal = False
+
+
+async def crear_cuenta_bancaria(
+    session: AsyncSession, datos: CuentaBancariaTerceroCreate
+) -> CuentaBancariaTercero:
+    org_id = require_organization_id()
+    if datos.es_principal:
+        await _quitar_principal(session, datos.tercero_id)
+    cuenta = CuentaBancariaTercero(organization_id=org_id, **datos.model_dump(), **datos_autoria())
+    session.add(cuenta)
+    await session.flush()
+    return cuenta
+
+
+async def actualizar_cuenta_bancaria(
+    session: AsyncSession, cuenta_id: uuid.UUID, datos: CuentaBancariaTerceroUpdate
+) -> CuentaBancariaTercero | None:
+    cuenta = await obtener_cuenta_bancaria(session, cuenta_id)
+    if cuenta is None:
+        return None
+    cambios = datos.model_dump(exclude_unset=True)
+    if cambios.get("es_principal"):
+        await _quitar_principal(session, cuenta.tercero_id, excepto=cuenta_id)
+    for campo, valor in cambios.items():
+        setattr(cuenta, campo, valor)
+    await session.flush()
+    return cuenta
+
+
+async def eliminar_cuenta_bancaria(session: AsyncSession, cuenta_id: uuid.UUID) -> bool:
+    cuenta = await obtener_cuenta_bancaria(session, cuenta_id)
+    if cuenta is None:
+        return False
+    await session.delete(cuenta)
     await session.flush()
     return True
 

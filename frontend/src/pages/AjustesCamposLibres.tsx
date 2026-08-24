@@ -9,6 +9,7 @@ import { useToast } from '../toast'
 
 const ETIQUETA_ENTIDAD: Record<EntidadCampoLibre, string> = {
   tercero: 'Terceros',
+  contacto: 'Contactos',
   concepto: 'Banco de precios',
   obra: 'Obras',
   presupuesto: 'Presupuestos',

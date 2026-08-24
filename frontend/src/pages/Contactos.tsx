@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Outlet, useOutletContext } from 'react-router-dom'
+import { Pencil, Trash2 } from 'lucide-react'
 
-import { EmptyState, ErrorNotice } from '../components/ui'
+import { EmptyState, ErrorNotice, Tooltip } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { api } from '../lib/api'
@@ -11,6 +12,15 @@ import type { Contacto } from '../lib/api'
 // filtra en el navegador sobre este lote — 500 es el máximo que admite el
 // endpoint (`le=500`).
 const LIMITE = 500
+
+export type ContextoContactos = { onCambio: () => void }
+
+/** Contexto que la ruta hija (`:id`, montada vía `<Outlet/>`) usa para
+ *  avisar al listado de que refresque tras editar/borrar — mismo patrón que
+ *  `useContextoTerceros` en `Terceros.tsx`. */
+export function useContextoContactos() {
+  return useOutletContext<ContextoContactos>()
+}
 
 export function Contactos() {
   const [items, setItems] = useState<Contacto[]>([])
@@ -34,6 +44,16 @@ export function Contactos() {
     void cargar()
   }, [cargar])
 
+  async function eliminar(contacto: Contacto) {
+    if (!window.confirm(`¿Eliminar el contacto «${contacto.nombre}»? No se puede deshacer.`)) return
+    try {
+      await api.contactos.remove(contacto.id)
+      await cargar()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }
+
   const columnas = useMemo<ColumnaTabla<Contacto>[]>(
     () => [
       {
@@ -42,7 +62,9 @@ export function Contactos() {
         accessor: (c) => `${c.nombre} ${c.apellidos ?? ''}`,
         render: (c) => (
           <>
-            {c.nombre} {c.apellidos ?? ''}
+            <Link className="table__link" to={c.id}>
+              {c.nombre} {c.apellidos ?? ''}
+            </Link>
             {c.es_principal && <span className="chip chip--cliente"> principal</span>}
           </>
         ),
@@ -54,18 +76,40 @@ export function Contactos() {
       {
         id: 'empresa',
         encabezado: 'Empresa',
-        accessor: () => '',
+        accessor: (c) => c.tercero_razon_social ?? '',
         render: (c) =>
           c.tercero_id ? (
             <Link className="table__link" to={`/terceros/${c.tercero_id}`}>
-              Ver ficha
+              {c.tercero_razon_social}
             </Link>
           ) : (
             <span className="muted">Sin empresa</span>
           ),
+        anchoInicial: 180,
+      },
+      {
+        id: 'acciones',
+        encabezado: '',
+        accessor: () => '',
+        render: (c) => (
+          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <Tooltip texto="Editar">
+              <Link className="btn btn--sm" to={c.id}>
+                <Pencil size={14} aria-hidden="true" />
+                Editar
+              </Link>
+            </Tooltip>
+            <Tooltip texto="Eliminar">
+              <button className="btn btn--sm btn--danger" onClick={() => void eliminar(c)}>
+                <Trash2 size={14} aria-hidden="true" />
+                Eliminar
+              </button>
+            </Tooltip>
+          </div>
+        ),
         ordenable: false,
         filtrable: false,
-        anchoInicial: 120,
+        anchoInicial: 160,
       },
     ],
     [],
@@ -92,6 +136,8 @@ export function Contactos() {
           vacio="Sin resultados con estos filtros"
         />
       )}
+
+      <Outlet context={{ onCambio: cargar } satisfies ContextoContactos} />
     </>
   )
 }

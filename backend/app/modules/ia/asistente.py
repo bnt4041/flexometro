@@ -13,6 +13,7 @@ import json
 import uuid
 from dataclasses import dataclass
 
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,13 +21,19 @@ from app.core.auth import Principal
 from app.core.tenancy import require_organization_id
 from app.modules.ia import deepseek
 from app.modules.ia.schemas import (
+    CapituloBancoPropuestoOut,
     CapituloPropuestoOut,
     ComponentePropuestoOut,
     ContextoAyudaLinea,
+    FichaEnCapituloBancoOut,
+    LineaMedicionSugeridaOut,
+    LineaSugeridaLLM,
     MensajeConversacionIn,
     PartidaConComponentesOut,
     PropuestaAccionOut,
 )
+from app.modules.presupuestos import banco_service as capitulos_banco_service
+from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import service as banco_service
 from app.modules.presupuestos.models import Concepto
 from app.modules.presupuestos.models_presupuesto import Capitulo, Partida, Presupuesto
@@ -38,6 +45,13 @@ LIMITE_RESULTADOS = 10
 # por presupuesto_id) es un caso ya bien delimitado — no la búsqueda abierta
 # sobre toda la cuenta, que sí necesita un tope bajo.
 LIMITE_RESULTADOS_PRESUPUESTO = 200
+# El banco de precios puede tener miles de fichas (Fase 50): 10 por búsqueda
+# de texto se queda corto para "organízalo todo", pero subir el límite
+# general de golpe también engordaría las búsquedas de presupuestos/partidas,
+# que no lo necesitan. Con esto sigue sin poder "verlas todas" a pulso de
+# texto — para eso está `naturaleza` en `proponer_capitulos_banco`, que no
+# depende de ningún límite de búsqueda porque no busca por texto.
+LIMITE_RESULTADOS_BANCO = 40
 
 
 @dataclass(frozen=True)
@@ -287,6 +301,10 @@ _HERRAMIENTAS = [
                                                 "description": "Componentes del descompuesto de la partida nueva (solo si no hay partida_id)",
                                                 "items": _ESQUEMA_COMPONENTE,
                                             },
+                                            "texto": {
+                                                "type": "string",
+                                                "description": "Descripción ampliada de la partida nueva, si hace falta explicar de qué trata más allá del resumen (solo si no hay partida_id)",
+                                            },
                                         },
                                     },
                                 },
@@ -303,10 +321,170 @@ _HERRAMIENTAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "proponer_componentes_ficha",
+            "description": (
+                "Propón añadir uno o varios componentes al descompuesto de LA "
+                "FICHA sobre la que se abrió esta conversación (no es una "
+                "partida de presupuesto, es una ficha del banco de precios). "
+                "Cada componente puede ser del banco (búscalo antes con "
+                "`buscar_conceptos_banco` para tener su id exacto) o "
+                "personalizado, si el usuario ha dado un precio de palabra "
+                "para algo que no está en el banco — en ese caso no hace "
+                "falta concepto_id, se da de alta como concepto nuevo al "
+                "confirmar. No añade nada todavía: solo deja lista la "
+                "propuesta para que se confirme."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "componentes": {
+                        "type": "array",
+                        "description": "Componentes a añadir al descompuesto de esta ficha",
+                        "items": _ESQUEMA_COMPONENTE,
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Frase corta resumiendo qué componentes se añaden y por qué",
+                    },
+                },
+                "required": ["componentes", "descripcion"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "proponer_capitulos_banco",
+            "description": (
+                "Propón organizar el BANCO DE PRECIOS en uno o VARIOS "
+                "capítulos nuevos de una vez, moviendo a cada uno las fichas "
+                "que ya existen. Cada capítulo se rellena de una de DOS "
+                "formas — usa la que corresponda, no mezcles las dos en el "
+                "mismo capítulo: (a) `naturaleza` — TODAS las fichas de ese "
+                "tipo (mano_obra/material/maquinaria/servicio/otro/"
+                "sin_clasificar), sin que tengas que buscarlas ni "
+                "enumerarlas: el servidor las localiza todas y no depende "
+                "de ningún límite de búsqueda, así que úsala siempre que el "
+                "usuario pida organizar POR NATURALEZA o pida cubrir TODAS "
+                "las fichas de un tipo; (b) `concepto_ids` — una lista "
+                "concreta de fichas (de `buscar_conceptos_banco`, con su id "
+                "exacto), para cualquier otro criterio (fase de obra, un "
+                "tema concreto...) donde no hay un campo estructurado que "
+                "lo resuelva y hace falta buscar por texto — en ese caso, "
+                "si el banco es grande, dilo: puede que no hayas encontrado "
+                "todas. Pon TODOS los capítulos que hagan falta en la misma "
+                "llamada (un array), no uno por mensaje. A diferencia de una "
+                "partida de presupuesto, una ficha del banco no se inventa "
+                "de nuevo. No mueve nada todavía: solo deja lista la "
+                "propuesta para que se confirme."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "capitulos": {
+                        "type": "array",
+                        "description": "Todos los capítulos a proponer",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "capitulo_resumen": {
+                                    "type": "string",
+                                    "description": "Nombre del capítulo (la fase o la naturaleza)",
+                                },
+                                "naturaleza": {
+                                    "type": "string",
+                                    "enum": [
+                                        "mano_obra",
+                                        "material",
+                                        "maquinaria",
+                                        "servicio",
+                                        "otro",
+                                        "sin_clasificar",
+                                    ],
+                                    "description": "TODAS las fichas de esta naturaleza, resueltas por el servidor — omite concepto_ids si usas esto",
+                                },
+                                "concepto_ids": {
+                                    "type": "array",
+                                    "description": "ids de fichas concretas YA EXISTENTES a mover (de buscar_conceptos_banco) — omite si usas naturaleza",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": ["capitulo_resumen"],
+                        },
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Frase corta resumiendo el plan: cuántos capítulos y qué llevan",
+                    },
+                },
+                "required": ["capitulos", "descripcion"],
+            },
+        },
+    },
 ]
+
+# Qué herramientas tiene sentido ofrecer según el contexto: sobre una ficha
+# del banco no hay presupuestos ni partidas que buscar o copiar, y sobre una
+# línea de presupuesto no existe "el descompuesto de la ficha actual" (esa
+# ficha es el banco, la línea de presupuesto es otra cosa). Ofrecer las que
+# no aplican solo invitaría al modelo a intentar usarlas y fallar.
+_HERRAMIENTAS_FICHA = (
+    "buscar_conceptos_banco",
+    "proponer_componentes_ficha",
+    "proponer_capitulos_banco",
+)
+_HERRAMIENTAS_POR_TIPO = {
+    "ficha": [h for h in _HERRAMIENTAS if h["function"]["name"] in _HERRAMIENTAS_FICHA],
+    "capitulo": [h for h in _HERRAMIENTAS if h["function"]["name"] not in _HERRAMIENTAS_FICHA],
+    "partida": [h for h in _HERRAMIENTAS if h["function"]["name"] not in _HERRAMIENTAS_FICHA],
+}
 
 
 def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
+    if contexto.tipo == "ficha":
+        return (
+            "Eres un asistente de presupuestación de construcción en España, "
+            "dentro del BANCO DE PRECIOS, sobre la ficha «"
+            f"{contexto.resumen}» (id {contexto.concepto_id}, código "
+            f"{contexto.codigo or 'sin asignar'}, unidad {contexto.unidad or '?'}). "
+            "Puedes buscar conceptos del banco de precios de toda la cuenta "
+            "con `buscar_conceptos_banco` — es de solo lectura, úsala con "
+            "libertad. Si el usuario pide montar o completar el descompuesto "
+            "de esta ficha (\"esto lleva tanto cemento y tanta arena\", "
+            "\"añádele la mano de obra\"...), busca cada componente antes con "
+            "`buscar_conceptos_banco` para tener su id exacto y termina "
+            "llamando a `proponer_componentes_ficha` — no inventes un "
+            "`concepto_id`, si no lo encuentras dilo en vez de suponerlo. Si "
+            "el usuario da un precio de palabra para algo que no está en el "
+            "banco, no hace falta que exista un concepto para eso: usa ese "
+            "componente como personalizado (marca `personalizado: true` y "
+            "rellena resumen/unidad/precio/naturaleza con lo que ha dicho el "
+            "usuario) — se da de alta como concepto nuevo al confirmar. Si "
+            "en vez de esto el usuario pide ORGANIZAR el banco de precios "
+            "(\"crea capítulos por fases\", \"agrúpalo por naturaleza\", "
+            "\"reordena esto\"...), eso no es un componente de esta ficha: "
+            "termina llamando a `proponer_capitulos_banco` con TODOS los "
+            "capítulos que hagan falta en la misma llamada. Si el usuario "
+            "pide organizar POR NATURALEZA (mano de obra, material, "
+            "maquinaria...) o pide cubrir TODAS las fichas de un tipo, usa "
+            "el campo `naturaleza` de cada capítulo — el servidor localiza "
+            "TODAS las fichas de esa naturaleza él solo, sin que tengas que "
+            "buscarlas ni enumerarlas, así que esto SÍ cubre el banco "
+            "entero por completo. Solo recurre a buscar fichas por texto "
+            "con `buscar_conceptos_banco` (y dar `concepto_ids` en vez de "
+            "`naturaleza`) cuando el criterio que pide el usuario NO sea la "
+            "naturaleza (una fase de obra, un tema, una palabra concreta) — "
+            "en ese caso, si el banco es grande, dilo: la búsqueda por "
+            "texto tiene un límite y puede que no hayas encontrado todas. "
+            "Nunca inventes un concepto_id, una ficha del banco no se crea "
+            "de nuevo al organizar, solo se mueve. Nunca digas que ya se ha "
+            "añadido o movido, porque no es así — solo lo propones, y quien "
+            "pregunta decide si confirma. Responde siempre en español, "
+            "breve y directo. No inventes precios que nadie te haya dado."
+        )
     return (
         "Eres un asistente de presupuestación de construcción en España, "
         "dentro de la ficha del presupuesto «"
@@ -430,9 +608,9 @@ async def _buscar_partidas(
     ]
 
 
-async def _buscar_conceptos_banco(session: AsyncSession, texto: str) -> list[dict]:
+async def buscar_conceptos_banco(session: AsyncSession, texto: str) -> list[dict]:
     conceptos, _total = await banco_service.listar_conceptos(
-        session, q=texto, activo=True, limit=LIMITE_RESULTADOS
+        session, q=texto, activo=True, limit=LIMITE_RESULTADOS_BANCO
     )
     return [
         {
@@ -447,7 +625,7 @@ async def _buscar_conceptos_banco(session: AsyncSession, texto: str) -> list[dic
     ]
 
 
-async def _resolver_componentes(
+async def resolver_componentes(
     session: AsyncSession, org_id: uuid.UUID, brutos: list[dict]
 ) -> tuple[list[ComponentePropuestoOut], list[str]]:
     """Componentes del descompuesto de una partida propuesta, del banco
@@ -505,7 +683,7 @@ async def _resolver_componentes(
     return componentes, no_encontrados
 
 
-async def _resolver_partida_item(
+async def resolver_partida_item(
     session: AsyncSession, org_id: uuid.UUID, bruto_partida: dict
 ) -> tuple[PartidaConComponentesOut | None, str | None]:
     """Una entrada de `partidas` dentro de un capítulo propuesto: movida
@@ -535,10 +713,37 @@ async def _resolver_partida_item(
     brutos_comp = bruto_partida.get("componentes") or []
     if not resumen_p or not unidad_p or not brutos_comp:
         return None, f"partida incompleta: {bruto_partida}"
-    comp_ok, comp_no_encontrados = await _resolver_componentes(session, org_id, brutos_comp)
+    comp_ok, comp_no_encontrados = await resolver_componentes(session, org_id, brutos_comp)
     if not comp_ok:
         return None, f"«{resumen_p}»: ningún componente válido ({comp_no_encontrados})"
-    return PartidaConComponentesOut(resumen=resumen_p, unidad=unidad_p, componentes=comp_ok), None
+
+    mediciones_ok: list[LineaMedicionSugeridaOut] = []
+    for bruto_linea in bruto_partida.get("mediciones") or []:
+        try:
+            linea = LineaSugeridaLLM.model_validate(bruto_linea)
+        except ValidationError:
+            continue
+        mediciones_ok.append(
+            LineaMedicionSugeridaOut(
+                comentario=linea.comentario,
+                uds=linea.uds,
+                longitud=linea.longitud,
+                anchura=linea.anchura,
+                altura=linea.altura,
+                parcial=calc.parcial_de(linea.uds, linea.longitud, linea.anchura, linea.altura),
+            )
+        )
+
+    return (
+        PartidaConComponentesOut(
+            resumen=resumen_p,
+            unidad=unidad_p,
+            componentes=comp_ok,
+            texto=bruto_partida.get("texto"),
+            mediciones=mediciones_ok,
+        ),
+        None,
+    )
 
 
 async def conversar(
@@ -559,7 +764,9 @@ async def conversar(
         # En el último turno permitido no se ofrecen herramientas: si para
         # entonces no ha contestado en texto, se le obliga a cerrar en vez de
         # dejarlo pedir una búsqueda más y devolver un turno vacío.
-        herramientas = _HERRAMIENTAS if turno < MAX_TURNOS_HERRAMIENTAS - 1 else []
+        herramientas = (
+            _HERRAMIENTAS_POR_TIPO[contexto.tipo] if turno < MAX_TURNOS_HERRAMIENTAS - 1 else []
+        )
         contenido, tool_calls, uso = await deepseek.chat_con_herramientas(
             session, historial, herramientas
         )
@@ -619,7 +826,7 @@ async def conversar(
                 if not texto:
                     resultado = {"error": "Hace falta un texto para buscar"}
                 else:
-                    resultado = await _buscar_conceptos_banco(session, texto)
+                    resultado = await buscar_conceptos_banco(session, texto)
             elif nombre == "proponer_crear_partida":
                 resumen_nuevo = argumentos.get("resumen")
                 unidad_nueva = argumentos.get("unidad")
@@ -629,7 +836,7 @@ async def conversar(
                         "error": "Faltan datos: hacen falta resumen, unidad y al menos un componente"
                     }
                 else:
-                    componentes, ids_no_encontrados = await _resolver_componentes(
+                    componentes, ids_no_encontrados = await resolver_componentes(
                         session, org_id, brutos
                     )
                     if not componentes:
@@ -665,7 +872,7 @@ async def conversar(
                         partidas_ok: list[PartidaConComponentesOut] = []
                         partidas_con_error: list[str] = []
                         for bruto_partida in brutos_partidas:
-                            item, error = await _resolver_partida_item(session, org_id, bruto_partida)
+                            item, error = await resolver_partida_item(session, org_id, bruto_partida)
                             if item is not None:
                                 partidas_ok.append(item)
                             else:
@@ -698,6 +905,118 @@ async def conversar(
                         resultado = {
                             "ok": True,
                             "capitulos_con_error": capitulos_con_error or None,
+                        }
+            elif nombre == "proponer_componentes_ficha":
+                brutos = argumentos.get("componentes") or []
+                if not brutos:
+                    resultado = {"error": "Falta al menos un componente en 'componentes'"}
+                else:
+                    componentes, ids_no_encontrados = await resolver_componentes(
+                        session, org_id, brutos
+                    )
+                    if not componentes:
+                        resultado = {"error": "Ninguno de los componentes indicados es válido"}
+                    else:
+                        propuesta = PropuestaAccionOut(
+                            tipo="anadir_componentes_ficha",
+                            componentes=componentes,
+                            descripcion=argumentos.get("descripcion")
+                            or f"Añadir {len(componentes)} componente(s) al descompuesto",
+                        )
+                        resultado = {
+                            "ok": True,
+                            "componentes_no_encontrados": ids_no_encontrados or None,
+                        }
+            elif nombre == "proponer_capitulos_banco":
+                brutos_capitulos = argumentos.get("capitulos") or []
+                if not brutos_capitulos:
+                    resultado = {"error": "Falta al menos un capítulo en 'capitulos'"}
+                else:
+                    capitulos_banco_ok: list[CapituloBancoPropuestoOut] = []
+                    capitulos_banco_con_error: list[str] = []
+                    for bruto_capitulo in brutos_capitulos:
+                        resumen_capitulo = bruto_capitulo.get("capitulo_resumen")
+                        naturaleza_bruta = bruto_capitulo.get("naturaleza")
+                        ids_brutos = bruto_capitulo.get("concepto_ids") or []
+                        if not resumen_capitulo or (not naturaleza_bruta and not ids_brutos):
+                            capitulos_banco_con_error.append(f"capítulo incompleto: {bruto_capitulo}")
+                            continue
+
+                        if naturaleza_bruta:
+                            # Campo estructurado, no búsqueda: se resuelve
+                            # entero contra la base, sin límite ni ids que
+                            # enumerar — puede ser media plantilla del banco.
+                            total, muestra = await capitulos_banco_service.previsualizar_por_naturaleza(
+                                session, naturaleza_bruta
+                            )
+                            if total == 0:
+                                capitulos_banco_con_error.append(
+                                    f"«{resumen_capitulo}»: ninguna ficha de naturaleza {naturaleza_bruta}"
+                                )
+                                continue
+                            capitulos_banco_ok.append(
+                                CapituloBancoPropuestoOut(
+                                    resumen=resumen_capitulo,
+                                    fichas=[
+                                        FichaEnCapituloBancoOut(
+                                            concepto_id=c.id, codigo=c.codigo, resumen=c.resumen
+                                        )
+                                        for c in muestra
+                                    ],
+                                    naturaleza=naturaleza_bruta,
+                                    total_fichas=total,
+                                )
+                            )
+                            continue
+
+                        fichas_ok: list[FichaEnCapituloBancoOut] = []
+                        ids_no_encontrados: list[str] = []
+                        for id_bruto in ids_brutos:
+                            concepto = None
+                            try:
+                                concepto = await session.get(Concepto, uuid.UUID(id_bruto))
+                            except ValueError:
+                                pass
+                            if concepto is None or concepto.organization_id != org_id:
+                                ids_no_encontrados.append(str(id_bruto))
+                                continue
+                            fichas_ok.append(
+                                FichaEnCapituloBancoOut(
+                                    concepto_id=concepto.id,
+                                    codigo=concepto.codigo,
+                                    resumen=concepto.resumen,
+                                )
+                            )
+                        if not fichas_ok:
+                            capitulos_banco_con_error.append(
+                                f"«{resumen_capitulo}»: ninguna ficha válida ({ids_no_encontrados})"
+                            )
+                            continue
+                        capitulos_banco_ok.append(
+                            CapituloBancoPropuestoOut(
+                                resumen=resumen_capitulo, fichas=fichas_ok, total_fichas=len(fichas_ok)
+                            )
+                        )
+                    if not capitulos_banco_ok:
+                        resultado = {
+                            "error": "Ninguno de los capítulos indicados es válido",
+                            "detalle": capitulos_banco_con_error,
+                        }
+                    else:
+                        total_fichas = sum(c.total_fichas for c in capitulos_banco_ok)
+                        propuesta = PropuestaAccionOut(
+                            tipo="organizar_capitulos_banco",
+                            capitulos_banco_propuestos=capitulos_banco_ok,
+                            descripcion=argumentos.get("descripcion")
+                            or (
+                                f"Crear {len(capitulos_banco_ok)} capítulo"
+                                f"{'s' if len(capitulos_banco_ok) != 1 else ''} con "
+                                f"{total_fichas} fichas en total"
+                            ),
+                        )
+                        resultado = {
+                            "ok": True,
+                            "capitulos_con_error": capitulos_banco_con_error or None,
                         }
             else:
                 resultado = {"error": f"Herramienta desconocida: {nombre}"}

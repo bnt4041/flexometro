@@ -12,9 +12,14 @@ from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.presupuestos import calculo, service
+from app.modules.presupuestos import banco_service, calculo, service
 from app.modules.presupuestos.models import Concepto, TipoConcepto
 from app.modules.presupuestos.schemas import (
+    ArbolBanco,
+    AsignarFamiliaIn,
+    CapituloBancoCreate,
+    CapituloBancoOut,
+    CapituloBancoUpdate,
     ConceptoCreate,
     ConceptoDetalle,
     ConceptoOut,
@@ -26,7 +31,10 @@ from app.modules.presupuestos.schemas import (
     LineaCreate,
     LineaOut,
     LineaUpdate,
+    MoverAlCapituloIn,
+    MoverPorNaturalezaIn,
     NodoArbol,
+    PaginaFichas,
     PrecioSuministroCreate,
     PrecioSuministroOut,
     PrecioSuministroUpdate,
@@ -41,6 +49,7 @@ lineas_router = APIRouter(
     prefix="/api/descomposicion", tags=["presupuestos"], dependencies=[guard]
 )
 familias_router = APIRouter(prefix="/api/familias", tags=["presupuestos"], dependencies=[guard])
+banco_router = APIRouter(prefix="/api/banco", tags=["presupuestos"], dependencies=[guard])
 suministros_router = APIRouter(
     prefix="/api/suministros", tags=["presupuestos"], dependencies=[guard]
 )
@@ -420,10 +429,151 @@ async def eliminar_suministro(
     await service.eliminar_suministro(session, suministro_id)
 
 
+# --- El banco de precios como árbol (Fase 50) ---
+#
+# `capitulo_id` = dónde está la ficha (estructura, se arrastra);
+# `familia_id` = qué es la ficha (clasificación, se asigna en masa). Ver el
+# docstring de `banco_service`.
+
+
+@banco_router.get("/arbol", response_model=ArbolBanco)
+async def arbol_banco(
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> ArbolBanco:
+    """Capítulos y fichas de una vez: la rejilla necesita el banco entero
+    para poder plegar, filtrar y arrastrar sin ir pidiendo ramas sueltas."""
+    return await banco_service.arbol(session)
+
+
+@banco_router.get("/fichas", response_model=PaginaFichas)
+async def fichas_banco(
+    capitulo_id: uuid.UUID | None = None,
+    sin_capitulo: bool = False,
+    q: str | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "ver")),
+) -> PaginaFichas:
+    """Las fichas de un capítulo, paginadas. Nunca se devuelve el banco
+    entero: uno importado de verdad pasa de las 12.000 fichas."""
+    return await banco_service.fichas(
+        session,
+        capitulo_id=capitulo_id,
+        sin_capitulo=sin_capitulo,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@banco_router.post(
+    "/capitulos", response_model=CapituloBancoOut, status_code=status.HTTP_201_CREATED
+)
+async def crear_capitulo_banco(
+    datos: CapituloBancoCreate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> CapituloBancoOut:
+    try:
+        capitulo = await banco_service.crear_capitulo(session, datos)
+    except banco_service.CodigoDuplicado as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    return CapituloBancoOut.model_validate(capitulo)
+
+
+@banco_router.patch("/capitulos/{capitulo_id}", response_model=CapituloBancoOut)
+async def actualizar_capitulo_banco(
+    capitulo_id: uuid.UUID,
+    datos: CapituloBancoUpdate,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> CapituloBancoOut:
+    try:
+        capitulo = await banco_service.actualizar_capitulo(session, capitulo_id, datos)
+    except banco_service.CicloDeCapitulos as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    if capitulo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capítulo no encontrado")
+    await session.commit()
+    return CapituloBancoOut.model_validate(capitulo)
+
+
+@banco_router.delete("/capitulos/{capitulo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_capitulo_banco(
+    capitulo_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> None:
+    try:
+        encontrado = await banco_service.eliminar_capitulo(session, capitulo_id)
+    except banco_service.CapituloConContenido as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not encontrado:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capítulo no encontrado")
+    await session.commit()
+
+
+@banco_router.post("/asignar-familia", response_model=dict)
+async def asignar_familia(
+    datos: AsignarFamiliaIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict:
+    """Clasificar fichas, una o muchas — la rejilla manda siempre lista."""
+    tocadas = await banco_service.asignar_familia(session, datos.concepto_ids, datos.familia_id)
+    await session.commit()
+    return {"actualizados": tocadas}
+
+
+@banco_router.post("/mover", response_model=dict)
+async def mover_al_capitulo(
+    datos: MoverAlCapituloIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict:
+    try:
+        tocadas = await banco_service.mover_al_capitulo(
+            session, datos.concepto_ids, datos.capitulo_id
+        )
+    except banco_service.CapituloConContenido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return {"actualizados": tocadas}
+
+
+@banco_router.post("/mover-por-naturaleza", response_model=dict)
+async def mover_por_naturaleza(
+    datos: MoverPorNaturalezaIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> dict:
+    """Mueve TODAS las fichas de una naturaleza de una vez — la usa la
+    confirmación de "Ayuda con IA" cuando organiza el banco por naturaleza
+    (Fase 50), sin depender de una lista de ids."""
+    try:
+        tocadas = await banco_service.mover_por_naturaleza(
+            session, datos.naturaleza.value, datos.capitulo_id
+        )
+    except banco_service.CapituloConContenido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return {"actualizados": tocadas}
+
+
 router = APIRouter()
 router.include_router(conceptos_router)
 router.include_router(lineas_router)
 router.include_router(familias_router)
+router.include_router(banco_router)
 router.include_router(suministros_router)
 
 # El presupuesto vive en su propio fichero: comparte módulo con el banco de

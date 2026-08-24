@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowLeftRight,
   Boxes,
   ChevronDown,
   ChevronRight,
@@ -21,6 +22,7 @@ import {
 
 import { AyudaIAModal } from './AyudaIAModal'
 import { BotonAtajos } from './AtajosTeclado'
+import { BuscadorSustitutoModal } from './BuscadorSustitutoModal'
 import { DocumentoIAModal } from './DocumentoIAModal'
 import { ImportarBC3EnCapituloModal } from './ImportarBC3EnCapituloModal'
 import { PegarModal } from './PegarModal'
@@ -189,6 +191,10 @@ export function RejillaPresupuesto({
     destino: string | null
   } | null>(null)
   const [ayudaIA, setAyudaIA] = useState<FilaPresupuesto | null>(null)
+  // «Cambiar por banco de precios» (Fase 52): solo tiene sentido sobre una
+  // partida (no un capítulo) — un capítulo no tiene ni resumen ni precio
+  // propio con qué buscar un sustituto.
+  const [sustituyendo, setSustituyendo] = useState<FilaPresupuesto | null>(null)
   // "Arrastrar al presupuesto": BC3 se cuelga de un capítulo, o de la raíz
   // del presupuesto (`capituloId: null`) como capítulos de primer nivel;
   // PDF/imagen abre la conversación con la IA. `filaParaSubir` es del botón
@@ -199,7 +205,13 @@ export function RejillaPresupuesto({
     capituloId: string | null
     capituloResumen: string
   } | null>(null)
-  const [documentoIA, setDocumentoIA] = useState<File[] | null>(null)
+  const [documentoIA, setDocumentoIA] = useState<{
+    ficheros: File[]
+    // Si se soltó/pidió sobre una partida existente, la IA además puede
+    // proponerle mediciones directamente (Fase 51c) en vez de solo crear
+    // capítulos nuevos.
+    partidaId: string | null
+  } | null>(null)
   const inputFicheroRef = useRef<HTMLInputElement>(null)
   const filaParaSubir = useRef<FilaPresupuesto | null>(null)
   const cambios = useRef<Map<string, CambioLinea>>(new Map())
@@ -401,6 +413,13 @@ export function RejillaPresupuesto({
           resumen: concepto.resumen,
           unidad: concepto.unidad,
           precio: concepto.precio,
+          // La descripción ampliada no viaja sola como el descompuesto (que
+          // se hereda en vivo del banco hasta que se independiza, ver
+          // `descomposicion_de_partida`): `texto` es un campo propio de la
+          // partida sin ese enlace, así que si no se copia aquí, al elegir
+          // un concepto la partida se queda con la descripción vacía —
+          // igual que ya se copian código/resumen/unidad/precio.
+          texto: concepto.texto,
         })
         onCambio()
       } catch (err) {
@@ -759,7 +778,9 @@ export function RejillaPresupuesto({
       const capitulo = capituloId ? (fila.tipo === 'capitulo' ? fila : porId.get(capituloId)) : null
       setImportandoBc3({ ficheros: bc3, capituloId, capituloResumen: capitulo?.resumen ?? '' })
     }
-    if (docs.length > 0) setDocumentoIA(docs)
+    if (docs.length > 0) {
+      setDocumentoIA({ ficheros: docs, partidaId: fila.tipo === 'partida' ? fila.id : null })
+    }
     if (rechazados.length > 0) {
       notificar(
         `No se puede soltar aquí: ${rechazados.join(', ')} (solo BC3, PDF, imagen o Excel)`,
@@ -797,6 +818,14 @@ export function RejillaPresupuesto({
         etiqueta: 'Abrir en banco de precios',
         icono: <ExternalLink size={14} aria-hidden="true" />,
         onClick: () => window.open(`/banco-precios/${f.conceptoId}`, '_blank'),
+      })
+    }
+    if (f.tipo === 'partida') {
+      items.push({
+        id: 'sustituir',
+        etiqueta: 'Cambiar por banco de precios…',
+        icono: <ArrowLeftRight size={14} aria-hidden="true" />,
+        onClick: () => setSustituyendo(f),
       })
     }
     if (iaActiva) {
@@ -1265,15 +1294,36 @@ export function RejillaPresupuesto({
 
       {documentoIA && (
         <DocumentoIAModal
-          ficheros={documentoIA}
+          ficheros={documentoIA.ficheros}
           entidad="presupuesto"
           entidadId={presupuesto.id}
           presupuestoId={presupuesto.id}
+          partidaId={documentoIA.partidaId}
           onClose={() => setDocumentoIA(null)}
           onCambio={() => {
             cambios.current.clear()
             onCambio()
           }}
+        />
+      )}
+      {sustituyendo && (
+        <BuscadorSustitutoModal
+          resumenActual={sustituyendo.resumen}
+          unidadActual={sustituyendo.unidad}
+          modo="partida"
+          excluirPartidaId={sustituyendo.id}
+          onAplicar={async (candidato, copiarDescompuesto) => {
+            await api.partidas.sustituir(sustituyendo.id, {
+              origen: candidato.origen,
+              concepto_id: candidato.concepto_id,
+              partida_origen_id: candidato.partida_id,
+              copiar_descompuesto: copiarDescompuesto,
+            })
+            cambios.current.clear()
+            onCambio()
+            notificar(`«${sustituyendo.resumen}» sustituida por «${candidato.resumen}»`)
+          }}
+          onClose={() => setSustituyendo(null)}
         />
       )}
     </>

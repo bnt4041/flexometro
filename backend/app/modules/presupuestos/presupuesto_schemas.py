@@ -408,7 +408,25 @@ class ComponentePropuestoIA(BaseModel):
     resumen: str | None = Field(default=None, max_length=250)
     unidad: str | None = Field(default=None, max_length=10)
     precio: Decimal | None = Field(default=None, ge=0)
-    naturaleza: NaturalezaConcepto = NaturalezaConcepto.SIN_CLASIFICAR
+    # Nulo, no solo "ausente": un componente resuelto contra el banco
+    # (`concepto_id`) no lleva naturaleza propia —es la del concepto, no se
+    # inventa una aquí— y el frontend manda el objeto de la propuesta
+    # entero, con ese campo explícitamente a `null`. Solo importa cuando
+    # `personalizado` es true, donde el router lo usa (con su propio
+    # `or SIN_CLASIFICAR`) para dar de alta el concepto nuevo.
+    naturaleza: NaturalezaConcepto | None = None
+
+
+class LineaMedicionPropuestaIA(BaseModel):
+    """Una línea de medición para una partida nueva propuesta por la IA —
+    mismo modelo que `ia.schemas.LineaSugeridaLLM`, mirror aquí porque este
+    módulo no importa de `ia` (ver esa clase para el porqué)."""
+
+    comentario: str | None = Field(default=None, max_length=250)
+    uds: Decimal | None = None
+    longitud: Decimal | None = None
+    anchura: Decimal | None = None
+    altura: Decimal | None = None
 
 
 class PartidaConComponentesIA(BaseModel):
@@ -419,6 +437,14 @@ class PartidaConComponentesIA(BaseModel):
     resumen: str | None = Field(default=None, max_length=250)
     unidad: str | None = Field(default=None, max_length=10)
     componentes: list[ComponentePropuestoIA] = Field(default_factory=list)
+    # Descripción ampliada (Fase 51): solo se aplica al crear, nunca al mover
+    # una partida ya existente — esa conserva la suya propia.
+    texto: str | None = None
+    # Mediciones (Fase 51d): solo se aplica al crear — cuando la IA ha
+    # calculado cantidades a partir de un plano (cotas, recuentos...), en
+    # vez de dejar la partida con medición 0 hasta que el usuario las meta
+    # a mano.
+    mediciones: list[LineaMedicionPropuestaIA] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _mover_xor_crear(self) -> "PartidaConComponentesIA":
@@ -700,3 +726,62 @@ class ComparacionOut(BaseModel):
     bajas: list[CambioOut] = Field(default_factory=list)
     cambios: list[CambioOut] = Field(default_factory=list)
     sin_cambios: int = 0
+
+
+# --- "Cambiar por banco de precios" (Fase 52): buscador de sustitutos para
+# una partida o un componente, con tres fuentes posibles y sugerencia de la
+# IA — el usuario siempre elige, la IA solo ordena candidatos. ---
+
+
+class SustitutoCandidatoOut(BaseModel):
+    """Un candidato para sustituir una partida o un componente: del banco de
+    precios propio, de una partida de otro presupuesto de la cuenta, o de
+    una línea ya certificada (mismo precio con el que se cobró de verdad)."""
+
+    origen: Literal["banco", "presupuesto", "certificacion"]
+    # banco: id del Concepto a enlazar (descompuesto sigue por herencia).
+    # presupuesto/certificacion: id de la PARTIDA origen, para poder copiar
+    # su descompuesto si el usuario lo pide — en certificación es la
+    # partida que se certificó en su día, no la línea de certificación.
+    concepto_id: uuid.UUID | None = None
+    partida_id: uuid.UUID | None = None
+    codigo: str | None = None
+    resumen: str
+    unidad: str
+    precio: Decimal
+    tiene_descompuesto: bool
+    origen_detalle: str
+    sugerido: bool = False
+    razon_sugerencia: str | None = None
+
+
+class BuscarSustitutosIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    texto: str | None = None
+    resumen_actual: str = Field(min_length=1, max_length=250)
+    unidad_actual: str = Field(default="", max_length=10)
+    modo: Literal["partida", "componente"]
+    excluir_partida_id: uuid.UUID | None = None
+    con_ia: bool = False
+
+
+class SustituirPartidaIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    origen: Literal["banco", "presupuesto", "certificacion"]
+    concepto_id: uuid.UUID | None = None
+    partida_origen_id: uuid.UUID | None = None
+    # Solo aplica cuando origen no es "banco": ahí el descompuesto siempre
+    # sigue al concepto enlazado, no hay nada que decidir.
+    copiar_descompuesto: bool = True
+
+    @model_validator(mode="after")
+    def _origen_coherente(self) -> "SustituirPartidaIn":
+        if self.origen == "banco" and self.concepto_id is None:
+            raise ValueError("Hace falta concepto_id para sustituir desde el banco de precios")
+        if self.origen != "banco" and self.partida_origen_id is None:
+            raise ValueError(
+                "Hace falta partida_origen_id para sustituir desde un presupuesto o certificación"
+            )
+        return self

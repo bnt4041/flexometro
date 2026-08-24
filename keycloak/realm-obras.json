@@ -7,7 +7,8 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "accessTokenLifespan": 1800,
-  "ssoSessionIdleTimeout": 28800,
+  "ssoSessionIdleTimeout": 10800,
+  "ssoSessionMaxLifespan": 10800,
   "roles": {
     "realm": [
       { "name": "admin", "description": "Administra la organización" },

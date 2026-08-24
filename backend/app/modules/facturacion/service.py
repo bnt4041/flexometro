@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.enums import TIPO_IVA_PORCENTAJE
-from app.core.numeracion import siguiente_referencia
+from app.core.numeracion import siguiente_referencia, siguiente_referencia_libre
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
 from app.modules.facturacion.models import (
@@ -80,9 +80,35 @@ async def siguiente_codigo_factura(session: AsyncSession) -> str:
     """Fase 16: patrón configurable por cuenta (Administración → ficha de
     cuenta → Numeración), en vez del prefijo "FAC" fijo de antes. Es el
     `codigo` interno de la factura, NUNCA `serie`/`numero` (la numeración
-    fiscal, ver el docstring de `Factura` en `models.py`)."""
+    fiscal, ver el docstring de `Factura` en `models.py`).
+
+    Solo de PREVISUALIZACIÓN: no reserva el número. Para crear de verdad usar
+    `siguiente_codigo_factura_libre`."""
     org_id = require_organization_id()
     return await siguiente_referencia(session, organization_id=org_id, tipo_documento="factura")
+
+
+async def siguiente_codigo_factura_libre(session: AsyncSession) -> str:
+    """El código a usar al crear de verdad — salta al siguiente libre si el
+    contador va por detrás de la realidad (Fase 51, ver docstring de
+    `siguiente_referencia_libre`). A diferencia de Presupuesto/Albarán,
+    Factura no tenía ninguna comprobación de duplicado antes de esto: un
+    contador desincronizado no daba un `CodigoDuplicado` limpio, reventaba
+    en el `INSERT` con el `UniqueConstraint` de la base."""
+    org_id = require_organization_id()
+
+    async def _existe(codigo: str) -> bool:
+        return (
+            await session.scalar(
+                select(Factura.id).where(
+                    Factura.organization_id == org_id, Factura.codigo == codigo
+                )
+            )
+        ) is not None
+
+    return await siguiente_referencia_libre(
+        session, organization_id=org_id, tipo_documento="factura", existe=_existe
+    )
 
 
 # --- Certificaciones ---
@@ -321,7 +347,7 @@ async def crear_factura_suelta(session: AsyncSession, datos: FacturaSuelta) -> F
     cuota_iva = _calcular_iva(datos.base_imponible, datos.tipo_iva, datos.inversion_sujeto_pasivo)
     factura = Factura(
         organization_id=org_id,
-        codigo=await siguiente_codigo_factura(session),
+        codigo=await siguiente_codigo_factura_libre(session),
         serie=datos.serie or str(date.today().year),
         numero=None,
         obra_id=datos.obra_id,
@@ -368,7 +394,7 @@ async def generar_factura_desde_certificacion(
 
     factura = Factura(
         organization_id=org_id,
-        codigo=await siguiente_codigo_factura(session),
+        codigo=await siguiente_codigo_factura_libre(session),
         serie=datos.serie or str(date.today().year),
         numero=None,
         obra_id=certificacion.obra_id,

@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --- Lo que devuelve DeepSeek, antes de resolverlo contra el catálogo propio ---
 
@@ -165,6 +165,16 @@ class AplicarLecturaPlano(BaseModel):
     lineas: list[LineaSugeridaLLM] = Field(default_factory=list)
 
 
+class AnadirMedicionesDirecto(BaseModel):
+    """Confirmación de una propuesta `anadir_mediciones_partida` salida de
+    `documento.conversar` — no hay `LecturaPlano` de por medio (esa es solo
+    para el flujo del botón «Leer plano»), así que aquí se manda la partida
+    de destino explícita."""
+
+    partida_id: uuid.UUID
+    lineas: list[LineaSugeridaLLM] = Field(default_factory=list)
+
+
 # --- Ayuda con IA sobre una línea del presupuesto: conversación con acceso
 # de solo lectura a toda la cuenta (buscar en otros presupuestos, otras
 # partidas) y una propuesta de acción que el usuario tiene que confirmar
@@ -172,13 +182,26 @@ class AplicarLecturaPlano(BaseModel):
 
 
 class ContextoAyudaLinea(BaseModel):
-    tipo: Literal["capitulo", "partida"]
+    # "ficha" (Fase 50): la conversación es sobre una ficha del banco de
+    # precios, no una línea de presupuesto — no hay presupuesto detrás, solo
+    # `concepto_id`, y el único destino posible es el descompuesto de esa
+    # misma ficha.
+    tipo: Literal["capitulo", "partida", "ficha"]
     codigo: str | None = None
     resumen: str = Field(min_length=1, max_length=250)
     unidad: str | None = None
     precio: Decimal | None = None
-    presupuesto_id: uuid.UUID
-    presupuesto_nombre: str
+    presupuesto_id: uuid.UUID | None = None
+    presupuesto_nombre: str | None = None
+    concepto_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _contexto_completo(self) -> "ContextoAyudaLinea":
+        if self.tipo == "ficha" and self.concepto_id is None:
+            raise ValueError("El contexto de tipo 'ficha' necesita concepto_id")
+        if self.tipo != "ficha" and (self.presupuesto_id is None or not self.presupuesto_nombre):
+            raise ValueError("El contexto de presupuesto necesita presupuesto_id y presupuesto_nombre")
+        return self
 
 
 class MensajeConversacionIn(BaseModel):
@@ -243,6 +266,14 @@ class PartidaConComponentesOut(BaseModel):
     resumen: str | None = None
     unidad: str | None = None
     componentes: list[ComponentePropuestoOut] = Field(default_factory=list)
+    # Descripción ampliada (Fase 51) — la explicación técnica de la partida
+    # (de qué trata, con qué criterio se ha medido/valorado), no un dato del
+    # descompuesto. Nula si no hay nada que añadir a lo que ya dice `resumen`.
+    texto: str | None = None
+    # Mediciones (Fase 51d): cuando la IA ha calculado cantidades a partir
+    # de un plano (cotas, recuentos de zapatas...) en vez de dejar la
+    # partida en medición 0 hasta que el usuario las meta a mano.
+    mediciones: list[LineaMedicionSugeridaOut] = Field(default_factory=list)
 
 
 class CapituloPropuestoOut(BaseModel):
@@ -256,10 +287,50 @@ class CapituloPropuestoOut(BaseModel):
     partidas: list[PartidaConComponentesOut] = Field(default_factory=list)
 
 
+class FichaEnCapituloBancoOut(BaseModel):
+    """Una ficha YA EXISTENTE en el banco, movida a un capítulo propuesto —
+    a diferencia de una partida de presupuesto, una ficha del banco no se
+    "crea de nuevo" al organizar (ya tiene su precio y su descompuesto);
+    organizar el banco es siempre mover lo que ya hay, nunca inventar
+    contenido."""
+
+    concepto_id: uuid.UUID
+    codigo: str
+    resumen: str
+
+
+class CapituloBancoPropuestoOut(BaseModel):
+    """Un capítulo del banco de precios propuesto, uno de varios a la vez
+    (Fase 50) — mismo motivo que `CapituloPropuestoOut`: el usuario confirma
+    el plan entero (todos los capítulos con sus fichas) en un solo paso.
+
+    Dos formas de decir qué fichas lleva: `fichas` (ids concretos, de
+    `buscar_conceptos_banco` — puede ser una lista parcial si `naturaleza`
+    también viene, ver abajo) o `naturaleza` (TODAS las fichas de ese tipo,
+    resueltas por el servidor sin que la IA tenga que enumerarlas ni
+    depender de ningún límite de búsqueda de texto). `total_fichas` es el
+    recuento real que se moverá al confirmar, que puede ser mayor que
+    `len(fichas)` cuando `fichas` es solo una muestra para mostrar."""
+
+    resumen: str
+    fichas: list[FichaEnCapituloBancoOut] = Field(default_factory=list)
+    naturaleza: str | None = None
+    total_fichas: int = 0
+
+
 class PropuestaAccionOut(BaseModel):
-    tipo: Literal["copiar_partida", "crear_partida", "importar_capitulo", "crear_capitulos"]
+    tipo: Literal[
+        "copiar_partida",
+        "crear_partida",
+        "importar_capitulo",
+        "crear_capitulos",
+        "anadir_componentes_ficha",
+        "organizar_capitulos_banco",
+        "anadir_mediciones_partida",
+    ]
     descripcion: str
-    # copiar_partida:
+    # copiar_partida: partida origen. anadir_mediciones_partida: partida
+    # destino (ya existente) a la que se le añaden las líneas.
     partida_id: uuid.UUID | None = None
     # crear_partida: una partida nueva (alzada), con estos componentes ya
     # resueltos contra el banco de precios propio.
@@ -277,6 +348,15 @@ class PropuestaAccionOut(BaseModel):
     # movida si ya existía (no alzada como `importar_capitulo`, que viene
     # de un documento externo).
     capitulos_propuestos: list[CapituloPropuestoOut] = Field(default_factory=list)
+    # organizar_capitulos_banco (Fase 50): uno o varios capítulos del BANCO
+    # (no del presupuesto), cada uno con las fichas ya existentes que se le
+    # mueven — por fase de obra, por naturaleza, o el criterio que pida el
+    # usuario.
+    capitulos_banco_propuestos: list[CapituloBancoPropuestoOut] = Field(default_factory=list)
+    # anadir_mediciones_partida: líneas de medición para la partida ya
+    # existente indicada en `partida_id` — no crea nada más, solo añade
+    # líneas a su estado de mediciones.
+    mediciones_propuestas: list[LineaMedicionSugeridaOut] = Field(default_factory=list)
 
 
 class RespuestaAyudaLinea(BaseModel):

@@ -10,12 +10,17 @@ from app.modules.documentos.models import Documento, EntidadDocumento
 # Tabla donde vive el `codigo` legible de cada tipo de ficha — sin FK real
 # (mismo criterio que el resto de `entidad`/`entidad_id` de este módulo), así
 # que resolver la etiqueta es una consulta aparte por tipo, no un join.
-_TABLA_POR_ENTIDAD: dict[EntidadDocumento, str] = {
-    EntidadDocumento.TERCERO: "terceros.tercero",
-    EntidadDocumento.PRESUPUESTO: "presupuestos.presupuesto",
-    EntidadDocumento.OBRA: "obras.obra",
-    EntidadDocumento.CERTIFICACION: "facturacion.certificacion",
-    EntidadDocumento.FACTURA: "facturacion.factura",
+# (tabla, columna que sirve de "código" en el buscador) — casi todas usan
+# `codigo`, pero `contacto` no tiene esa columna (es una persona, no un
+# documento numerado), así que se identifica por su nombre.
+_TABLA_POR_ENTIDAD: dict[EntidadDocumento, tuple[str, str]] = {
+    EntidadDocumento.TERCERO: ("terceros.tercero", "codigo"),
+    EntidadDocumento.PRESUPUESTO: ("presupuestos.presupuesto", "codigo"),
+    EntidadDocumento.OBRA: ("obras.obra", "codigo"),
+    EntidadDocumento.CERTIFICACION: ("facturacion.certificacion", "codigo"),
+    EntidadDocumento.FACTURA: ("facturacion.factura", "codigo"),
+    EntidadDocumento.CONTACTO: ("terceros.contacto", "nombre"),
+    EntidadDocumento.CONCEPTO: ("presupuestos.concepto", "codigo"),
 }
 
 
@@ -103,11 +108,12 @@ async def buscar_documentos(
 
     codigos: dict[tuple[EntidadDocumento, uuid.UUID], str] = {}
     for entidad, ids in ids_por_entidad.items():
-        # `tabla` sale del diccionario fijo de arriba, nunca de `q` ni de
-        # ningún dato de entrada: no hay inyección posible al interpolarla.
-        tabla = _TABLA_POR_ENTIDAD[entidad]
+        # `tabla`/`columna` salen del diccionario fijo de arriba, nunca de
+        # `q` ni de ningún dato de entrada: no hay inyección posible al
+        # interpolarlos.
+        tabla, columna = _TABLA_POR_ENTIDAD[entidad]
         filas_codigo = await session.execute(
-            text(f"SELECT id, codigo FROM {tabla} WHERE id = ANY(:ids) AND organization_id = :org_id"),
+            text(f"SELECT id, {columna} FROM {tabla} WHERE id = ANY(:ids) AND organization_id = :org_id"),
             {"ids": list(ids), "org_id": org_id},
         )
         for entidad_id, codigo in filas_codigo:
