@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeftRight, Plus, Save, Trash2, Unlink, X } from 'lucide-react'
+import { ArrowLeftRight, Plus, Save, Send, Trash2, Unlink, X } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
 import { BuscadorSustitutoModal } from './BuscadorSustitutoModal'
 import { PegarModal } from './PegarModal'
+import { SolicitarPreciosModal } from './SolicitarPreciosModal'
 import type { ColumnaRejilla, ItemMenuContextual, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Modal, Tooltip, formatoImporte } from './ui'
@@ -59,9 +60,11 @@ const OPCIONES_NATURALEZA_EXISTENTE: OpcionCelda[] = [
  *  independizan del banco — el banco no se toca nunca desde aquí. */
 export function DescompuestoPartida({
   partida,
+  presupuestoId,
   onCambio,
 }: {
   partida: Partida
+  presupuestoId: string
   onCambio: () => void
 }) {
   const { notificar } = useToast()
@@ -84,6 +87,12 @@ export function DescompuestoPartida({
   const [anadiendo, setAnadiendo] = useState(false)
   const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
   const [filtros, setFiltros] = useState<Record<string, string>>({})
+  // «Solicitar precios…» sobre componentes sueltos: pedir solo el material,
+  // solo la mano de obra, o un elemento concreto. Con la marca múltiple de la
+  // rejilla (y sus filtros por tipo de línea) sale casi solo: filtrar por
+  // "Mano de obra", marcar, botón derecho.
+  const [marcadas, setMarcadas] = useState<string[]>([])
+  const [solicitando, setSolicitando] = useState<LineaDescomposicion[] | null>(null)
   const unidadesMedida = useDiccionario('unidad_medida')
 
   const cargar = useCallback(async () => {
@@ -566,18 +575,34 @@ export function DescompuestoPartida({
         onPegar={pegar}
         onSoltarEn={() => pegar()}
         puedeArrastrar={(l) => l.id !== ID_BORRADOR}
-        menuContextual={(l): ItemMenuContextual[] | null =>
-          l.id === ID_BORRADOR || l.hijo_id === null
-            ? null
-            : [
-                {
-                  id: 'sustituir',
-                  etiqueta: 'Cambiar por banco de precios…',
-                  icono: <ArrowLeftRight size={14} aria-hidden="true" />,
-                  onClick: () => setSustituyendoLinea(l),
-                },
-              ]
-        }
+        onMarcarVarias={setMarcadas}
+        menuContextual={(l): ItemMenuContextual[] | null => {
+          // Sin `hijo_id` la línea no apunta a ningún concepto del banco (se
+          // borró): ni se puede sustituir ni se le puede pedir precio, porque
+          // no hay nada estable a lo que referirse.
+          if (l.id === ID_BORRADOR || l.hijo_id === null) return null
+
+          const objetivo = marcadas.length > 1 && marcadas.includes(l.id) ? marcadas : [l.id]
+          const lineas = (datos?.lineas ?? []).filter(
+            (linea) => objetivo.includes(linea.id) && linea.hijo_id !== null,
+          )
+          const sufijo = lineas.length > 1 ? ` (${lineas.length})` : ''
+
+          return [
+            {
+              id: 'sustituir',
+              etiqueta: 'Cambiar por banco de precios…',
+              icono: <ArrowLeftRight size={14} aria-hidden="true" />,
+              onClick: () => setSustituyendoLinea(l),
+            },
+            {
+              id: 'solicitar-precios',
+              etiqueta: `Solicitar precios…${sufijo}`,
+              icono: <Send size={14} aria-hidden="true" />,
+              onClick: () => setSolicitando(lineas),
+            },
+          ]
+        }}
         filtros={filtros}
         onFiltrar={(columnaId, valor) => setFiltros((f) => ({ ...f, [columnaId]: valor }))}
         filaAEditarId={anadiendo ? ID_BORRADOR : null}
@@ -726,6 +751,26 @@ export function DescompuestoPartida({
             notificar(`«${sustituyendoLinea.resumen}» sustituido por «${candidato.resumen}»`)
           }}
           onClose={() => setSustituyendoLinea(null)}
+        />
+      )}
+      {solicitando && (
+        <SolicitarPreciosModal
+          presupuestoId={presupuestoId}
+          items={solicitando.map((l) => ({
+            clave: l.id,
+            // La medición que verá el proveedor es la de verdad (rendimiento
+            // × medición de la partida), y la calcula el backend al congelar
+            // la línea; aquí basta con identificar qué se le pide.
+            resumen: l.resumen,
+            unidad: l.unidad,
+          }))}
+          seleccion={{
+            componentes: solicitando
+              .filter((l) => l.hijo_id !== null)
+              .map((l) => ({ partida_id: partida.id, concepto_id: l.hijo_id as string })),
+          }}
+          onClose={() => setSolicitando(null)}
+          onCreada={() => setSolicitando(null)}
         />
       )}
     </>

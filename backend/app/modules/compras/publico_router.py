@@ -25,9 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.core.database import get_session
 from app.modules.compras import oferta_service
-from app.modules.compras.models import SolicitudLinea
+from app.modules.compras.models import OfertaLinea, SolicitudLinea
 from app.modules.compras.publico_acceso import ContextoProveedor, acceso_proveedor
 from app.modules.documentos.models import Documento, EntidadDocumento
+from app.modules.presupuestos.models_presupuesto import Presupuesto
 
 router = APIRouter(prefix="/api/publico/oferta", tags=["publico"])
 
@@ -52,14 +53,22 @@ class DocumentoSeparataOut(BaseModel):
 
 class SeparataOut(BaseModel):
     """Lo que ve el proveedor. Deliberadamente NO lleva ningún precio del
-    emisor: solo qué trabajo es y cuánto hay."""
+    emisor: solo qué trabajo es, cuánto hay, y para qué obra — sin eso no
+    puede cotizar (no sabe ni dónde tiene que ir)."""
 
     codigo: str
+    titulo: str
     estado: str
     fecha_limite: str | None
     notas: str | None
     emisor: str
     proveedor: str
+    # Contexto de la obra. `cliente` es una decisión comercial del emisor:
+    # le está diciendo al proveedor para quién trabaja.
+    obra: str
+    emplazamiento: str | None
+    tipo_obra: str | None
+    cliente: str | None
     lineas: list[LineaSeparataOut]
     documentos: list[DocumentoSeparataOut]
 
@@ -80,6 +89,9 @@ class EnviarOfertaOut(BaseModel):
 
 
 async def _lineas(session: AsyncSession, ctx: ContextoProveedor) -> list[LineaSeparataOut]:
+    """Las líneas del paquete cruzadas con lo que ESTE proveedor lleva
+    ofertado. LEFT JOIN acotado a su destinatario: sin él vería (o pisaría)
+    los precios de otro proveedor del mismo paquete."""
     filas = (
         await session.execute(
             select(
@@ -90,8 +102,14 @@ async def _lineas(session: AsyncSession, ctx: ContextoProveedor) -> list[LineaSe
                 SolicitudLinea.texto,
                 SolicitudLinea.unidad,
                 SolicitudLinea.medicion,
-                SolicitudLinea.precio_ofertado,
-                SolicitudLinea.observaciones_proveedor,
+                OfertaLinea.precio_ofertado,
+                OfertaLinea.observaciones_proveedor,
+            )
+            .join(
+                OfertaLinea,
+                (OfertaLinea.linea_id == SolicitudLinea.id)
+                & (OfertaLinea.destinatario_id == ctx.destinatario.id),
+                isouter=True,
             )
             .where(SolicitudLinea.solicitud_id == ctx.solicitud.id)
             .order_by(SolicitudLinea.orden)
@@ -139,11 +157,37 @@ async def _separata(session: AsyncSession, ctx: ContextoProveedor) -> SeparataOu
     )
     proveedor = await session.scalar(
         text("SELECT razon_social FROM terceros.tercero WHERE id = :id"),
-        {"id": str(ctx.solicitud.proveedor_id)},
+        {"id": str(ctx.destinatario.proveedor_id)},
     )
+    # Proyección explícita, nunca el ORM: serializar el `Presupuesto` traería
+    # sus precios y sus márgenes, que son del emisor (ver cabecera).
+    obra = (
+        await session.execute(
+            select(
+                Presupuesto.nombre,
+                Presupuesto.emplazamiento,
+                Presupuesto.tipo_obra,
+                Presupuesto.cliente_id,
+            ).where(Presupuesto.id == ctx.solicitud.presupuesto_id)
+        )
+    ).first()
+    cliente = None
+    if obra is not None and obra.cliente_id is not None:
+        cliente = await session.scalar(
+            text("SELECT razon_social FROM terceros.tercero WHERE id = :id"),
+            {"id": str(obra.cliente_id)},
+        )
+
     return SeparataOut(
+        obra=obra.nombre if obra else "",
+        emplazamiento=obra.emplazamiento if obra else None,
+        tipo_obra=obra.tipo_obra if obra else None,
+        cliente=cliente,
         codigo=ctx.solicitud.codigo,
-        estado=str(ctx.solicitud.estado),
+        titulo=ctx.solicitud.titulo,
+        # El estado que le importa al proveedor es el SUYO, no el del paquete:
+        # otro puede haber contestado ya sin que eso cierre lo suyo.
+        estado=str(ctx.destinatario.estado),
         fecha_limite=ctx.solicitud.fecha_limite.isoformat() if ctx.solicitud.fecha_limite else None,
         notas=ctx.solicitud.notas,
         emisor=emisor or "",
@@ -222,7 +266,7 @@ async def guardar_precios(
     if not datos.lineas:
         return await _separata(session, ctx)
 
-    # Las líneas se releen acotadas a ESTA solicitud: los ids llegan del
+    # Las líneas se releen acotadas a ESTE paquete: los ids llegan del
     # cliente y no valen por sí solos, aunque el RLS ya acote la organización.
     por_id = {
         str(linea.id): linea
@@ -240,10 +284,32 @@ async def guardar_precios(
             detail="Hay líneas que no pertenecen a esta solicitud.",
         )
 
+    # Las ofertas de ESTE destinatario, no las del paquete: escribir sin este
+    # filtro pisaría lo que haya ofertado otro proveedor.
+    ofertas = {
+        oferta.linea_id: oferta
+        for oferta in (
+            await session.execute(
+                select(OfertaLinea).where(OfertaLinea.destinatario_id == ctx.destinatario.id)
+            )
+        ).scalars()
+    }
+
     for entrada in datos.lineas:
         linea = por_id[entrada.id]
-        linea.precio_ofertado = entrada.precio_ofertado
-        linea.observaciones_proveedor = entrada.observaciones_proveedor
+        oferta = ofertas.get(linea.id)
+        if oferta is None:
+            # Se crea al escribir, no antes: la ausencia de fila es "no lo ha
+            # cotizado", que es el hueco que se enseña en el comparativo.
+            oferta = OfertaLinea(
+                organization_id=ctx.organization_id,
+                destinatario_id=ctx.destinatario.id,
+                linea_id=linea.id,
+            )
+            session.add(oferta)
+            ofertas[linea.id] = oferta
+        oferta.precio_ofertado = entrada.precio_ofertado
+        oferta.observaciones_proveedor = entrada.observaciones_proveedor
 
     # La sesión va con `autoflush=False`, y la respuesta se construye con
     # proyecciones de columnas (no desde los objetos que acabamos de tocar):
@@ -258,21 +324,22 @@ async def enviar_oferta(
     ctx: ContextoProveedor = Depends(acceso_proveedor),
     session: AsyncSession = Depends(get_session),
 ) -> EnviarOfertaOut:
-    """Cierra la respuesta: genera el presupuesto-oferta a partir de lo que
-    el proveedor ha rellenado. Idempotente — reenviar el formulario no
-    duplica nada, `oferta_service.cerrar_solicitud` devuelve lo ya creado."""
+    """Cierra la respuesta de ESTE proveedor: genera su presupuesto-oferta a
+    partir de lo que ha rellenado. Idempotente — reenviar el formulario no
+    duplica nada, `oferta_service.cerrar_oferta` devuelve lo ya creado. Los
+    demás destinatarios del paquete siguen a lo suyo."""
     from sqlalchemy import text
 
     proveedor_nombre = (
         await session.scalar(
             text("SELECT razon_social FROM terceros.tercero WHERE id = :id"),
-            {"id": str(ctx.solicitud.proveedor_id)},
+            {"id": str(ctx.destinatario.proveedor_id)},
         )
         or "proveedor"
     )
     try:
-        await oferta_service.cerrar_solicitud(
-            session, ctx.solicitud, proveedor_nombre=proveedor_nombre
+        await oferta_service.cerrar_oferta(
+            session, ctx.solicitud, ctx.destinatario, proveedor_nombre=proveedor_nombre
         )
     except oferta_service.SinLineasConPrecio as exc:
         raise HTTPException(

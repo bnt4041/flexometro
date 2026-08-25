@@ -1151,33 +1151,71 @@ export type EstadoSolicitudPrecios =
   | 'descartada'
   | 'caducada'
 
+/** Un componente del descompuesto de una partida (solo la mano de obra, solo
+ *  el material, un elemento concreto). La pareja partida+concepto es la
+ *  identidad: mientras la partida hereda el descompuesto del banco, el id de
+ *  esas filas es del concepto padre y cambia al independizarla. */
+export interface ComponentePedido {
+  partida_id: string
+  concepto_id: string
+}
+
+/** Una línea de lo que se pide. Común a todos los proveedores del paquete:
+ *  lo que oferta cada uno vive en `OfertaLinea`. */
 export interface SolicitudLinea {
   id: string
   partida_id: string | null
+  /** Relleno = la línea pide un componente del descompuesto, no la partida. */
+  concepto_id: string | null
   capitulo_resumen: string | null
   codigo: string | null
   resumen: string
   unidad: string
   medicion: string
+  /** A qué destinatario se le adjudicó, si ya se decidió. */
+  adjudicada_a_id: string | null
+}
+
+/** Lo que UN proveedor ha puesto en UNA línea. Que no exista significa que no
+ *  la ha cotizado — el hueco del comparativo. */
+export interface OfertaLinea {
+  id: string
+  linea_id: string
   precio_ofertado: string | null
   observaciones_proveedor: string | null
   aprobada: boolean
 }
 
-export interface SolicitudPrecios {
+export type EstadoDestinatario = 'borrador' | 'enviada' | 'respondida' | 'descartada'
+
+/** A quién se le pide el paquete. Uno por proveedor, con su propio enlace,
+ *  su estado y su presupuesto-oferta. */
+export interface SolicitudDestinatario {
   id: string
-  codigo: string
-  presupuesto_id: string
   proveedor_id: string
   proveedor_razon_social: string
   proveedor_email: string | null
-  estado: EstadoSolicitudPrecios
-  fecha_limite: string | null
+  /** A qué correo se le manda, si no es el de la ficha del proveedor. */
+  email_destino: string | null
+  estado: EstadoDestinatario
   enviada_en: string | null
   respondida_en: string | null
-  notas: string | null
   oferta_presupuesto_id: string | null
+  ofertas: OfertaLinea[]
+}
+
+/** Un paquete de trabajo con nombre ("Yeserías") sobre el que se pide precio
+ *  a uno o varios proveedores. */
+export interface SolicitudPrecios {
+  id: string
+  codigo: string
+  titulo: string
+  presupuesto_id: string
+  estado: EstadoSolicitudPrecios
+  fecha_limite: string | null
+  notas: string | null
   lineas: SolicitudLinea[]
+  destinatarios: SolicitudDestinatario[]
 }
 
 export interface CosteCapitulo {
@@ -2820,36 +2858,70 @@ export const api = {
   },
 
   solicitudesPrecios: {
+    /** Crea el paquete en borrador. No manda nada: enviar es un paso aparte
+     *  y por proveedor. */
     create: (datos: {
       presupuesto_id: string
-      proveedor_id: string
-      partida_ids: string[]
+      titulo: string
+      /** A quién se le pide. Se pueden añadir más después. */
+      proveedor_ids?: string[]
+      /** Partidas enteras. Vacío si solo se piden componentes. */
+      partida_ids?: string[]
+      /** Componentes sueltos del descompuesto de una partida. */
+      componentes?: ComponentePedido[]
       fecha_limite?: string | null
       notas?: string | null
     }) => post<SolicitudPrecios>('/api/solicitudes-precios', datos),
     listarPorPresupuesto: (presupuestoId: string) =>
       request<SolicitudPrecios[]>(`/api/solicitudes-precios/por-presupuesto/${presupuestoId}`),
-    aprobarLinea: (solicitudId: string, lineaId: string) =>
+    update: (
+      id: string,
+      datos: { titulo?: string; notas?: string | null; fecha_limite?: string | null },
+    ) => patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}`, datos),
+    /** Editable siempre, también con el paquete ya enviado. */
+    actualizarLineas: (
+      id: string,
+      seleccion: { partida_ids?: string[]; componentes?: ComponentePedido[] },
+    ) => patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}/lineas`, seleccion),
+    remove: (id: string) => del(`/api/solicitudes-precios/${id}`),
+
+    /** Adjudica una línea a un proveedor: aplica su precio sobre la partida
+     *  original del presupuesto. Una línea solo se adjudica una vez. */
+    aprobarOferta: (ofertaId: string) =>
       post<{ partida_id: string; precio: string }>(
-        `/api/solicitudes-precios/${solicitudId}/lineas/${lineaId}/aprobar`,
+        `/api/solicitudes-precios/ofertas-linea/${ofertaId}/aprobar`,
         {},
       ),
-    /** Solo mientras `estado === 'borrador'` — el backend rechaza el resto
-     *  con un 422. */
-    update: (id: string, datos: { notas?: string | null; fecha_limite?: string | null }) =>
-      patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}`, datos),
-    actualizarLineas: (id: string, partidaIds: string[]) =>
-      patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}/lineas`, { partida_ids: partidaIds }),
-    /** Devuelve el enlace del proveedor además de la solicitud: es la única
-     *  vez que viaja en claro (en base de datos solo queda su hash), así que
-     *  si se quiere copiar hay que hacerlo con esta respuesta. */
-    enviar: (id: string) =>
-      post<SolicitudPrecios & { enlace: string }>(`/api/solicitudes-precios/${id}/enviar`, {}),
-    /** Emite un enlace NUEVO e invalida el anterior — para pasárselo al
-     *  proveedor por otro medio en vez de mandarlo por correo. */
-    generarEnlace: (id: string) =>
-      post<{ enlace: string }>(`/api/solicitudes-precios/${id}/enlace`, {}),
-    remove: (id: string) => del(`/api/solicitudes-precios/${id}`),
+
+    destinatarios: {
+      add: (solicitudId: string, datos: { proveedor_id: string; email_destino?: string | null }) =>
+        post<SolicitudPrecios>(`/api/solicitudes-precios/${solicitudId}/destinatarios`, datos),
+      update: (solicitudId: string, destinatarioId: string, datos: { email_destino: string | null }) =>
+        patch<SolicitudPrecios>(
+          `/api/solicitudes-precios/${solicitudId}/destinatarios/${destinatarioId}`,
+          datos,
+        ),
+      remove: (solicitudId: string, destinatarioId: string) =>
+        del<SolicitudPrecios>(
+          `/api/solicitudes-precios/${solicitudId}/destinatarios/${destinatarioId}`,
+        ),
+      /** Manda el paquete a este proveedor. Sirve igual para el primer envío
+       *  y para reenviar: emite un enlace nuevo (el anterior muere) y lo que
+       *  ya hubiera rellenado se conserva. Devuelve el enlace, que es la
+       *  única vez que viaja en claro. */
+      enviar: (solicitudId: string, destinatarioId: string) =>
+        post<{ enlace: string }>(
+          `/api/solicitudes-precios/${solicitudId}/destinatarios/${destinatarioId}/enviar`,
+          {},
+        ),
+      /** Emite un enlace NUEVO e invalida el anterior — para pasárselo al
+       *  proveedor por otro medio en vez de mandarlo por correo. */
+      generarEnlace: (solicitudId: string, destinatarioId: string) =>
+        post<{ enlace: string }>(
+          `/api/solicitudes-precios/${solicitudId}/destinatarios/${destinatarioId}/enlace`,
+          {},
+        ),
+    },
   },
 
   certificaciones: {
@@ -3116,11 +3188,18 @@ export interface DocumentoSeparata {
 
 export interface Separata {
   codigo: string
+  /** Cómo llama el emisor a este paquete de trabajo ("Yeserías"). */
+  titulo: string
   estado: string
   fecha_limite: string | null
   notas: string | null
   emisor: string
   proveedor: string
+  /** Contexto de la obra: sin esto el proveedor no puede cotizar. */
+  obra: string
+  emplazamiento: string | null
+  tipo_obra: string | null
+  cliente: string | null
   lineas: LineaSeparata[]
   documentos: DocumentoSeparata[]
 }

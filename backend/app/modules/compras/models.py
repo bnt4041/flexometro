@@ -136,31 +136,39 @@ class EstadoSolicitud(StrEnum):
 
 
 class SolicitudPrecios(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
-    """Petición de oferta a UN proveedor sobre una selección de partidas.
+    """Un paquete de trabajo con nombre ("Yeserías") sobre el que se pide
+    precio: QUÉ se pide, una sola vez y común a todos.
 
-    Para comparar varias ofertas se hacen varias solicitudes sobre la misma
-    selección; el comparativo del presupuesto las junta después.
+    A quién se le pide vive en `SolicitudDestinatario` (uno por proveedor) y
+    lo que cada uno oferta, en `OfertaLinea`. El desdoblamiento es lo que
+    permite comparar de verdad: todos los proveedores cotizan exactamente la
+    misma lista, en vez de N solicitudes paralelas que coinciden por
+    casualidad.
+
+    Las líneas son editables SIEMPRE, también después de enviar (decisión
+    explícita del usuario): quien envía decide si reenvía a los proveedores
+    anteriores, y se acepta que el comparativo tenga huecos donde alguien no
+    haya cotizado algo.
     """
 
     __tablename__ = "solicitud_precios"
     __table_args__ = (
         UniqueConstraint("organization_id", "codigo", name="solicitud_precios_codigo_unique"),
         Index("ix_compras_solicitud_precios_presupuesto", "presupuesto_id"),
-        Index("ix_compras_solicitud_precios_proveedor", "proveedor_id"),
         {"schema": SCHEMA},
     )
 
     codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Cómo lo llama el usuario: "Yeserías", "Instalación eléctrica"…
+    titulo: Mapped[str] = mapped_column(String(200), nullable=False)
     presupuesto_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("presupuestos.presupuesto.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    proveedor_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    # Del paquete: `borrador` mientras no haya salido a nadie, `enviada` en
+    # cuanto sale al primero. El estado que de verdad manda es el de cada
+    # destinatario, que va a su ritmo.
     estado: Mapped[EstadoSolicitud] = mapped_column(
         enum_column(EstadoSolicitud, "estado_solicitud"),
         nullable=False,
@@ -168,11 +176,75 @@ class SolicitudPrecios(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, A
     )
 
     fecha_limite: Mapped[date | None] = mapped_column(Date, nullable=True)
-    enviada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    respondida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # El presupuesto-oferta que se genera cuando el proveedor cierra su
+    # Quién lo creó. No basta con `creado_por_subject` de AutoriaMixin: es a
+    # esta persona a quien hay que atribuir los presupuestos-oferta que
+    # lleguen, porque atribuírselos al proveedor los dejaría invisibles para
+    # quien tiene el permiso "solo los míos".
+    emisor_subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    emisor_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    lineas: Mapped[list["SolicitudLinea"]] = relationship(
+        back_populates="solicitud",
+        cascade="all, delete-orphan",
+        order_by="SolicitudLinea.orden",
+    )
+    destinatarios: Mapped[list["SolicitudDestinatario"]] = relationship(
+        back_populates="solicitud",
+        cascade="all, delete-orphan",
+    )
+
+
+class EstadoDestinatario(StrEnum):
+    BORRADOR = "borrador"
+    ENVIADA = "enviada"
+    RESPONDIDA = "respondida"
+    DESCARTADA = "descartada"
+
+
+class SolicitudDestinatario(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """A quién se le pide precio de un paquete. Uno por proveedor.
+
+    Cada destinatario tiene su propio enlace, su propio estado y su propio
+    presupuesto-oferta: los proveedores van a ritmos distintos y uno puede
+    contestar mientras otro ni ha abierto el correo.
+    """
+
+    __tablename__ = "solicitud_destinatario"
+    __table_args__ = (
+        UniqueConstraint(
+            "solicitud_id", "proveedor_id", name="solicitud_destinatario_unico"
+        ),
+        Index("ix_compras_solicitud_destinatario_solicitud", "solicitud_id"),
+        Index("ix_compras_solicitud_destinatario_proveedor", "proveedor_id"),
+        {"schema": SCHEMA},
+    )
+
+    solicitud_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.solicitud_precios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    proveedor_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # A qué correo se le manda, si no es el de la ficha del proveedor: el
+    # comercial que lleva la cuenta, la dirección de ofertas… No se copia a la
+    # ficha del tercero, que es su dato "oficial".
+    email_destino: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    estado: Mapped[EstadoDestinatario] = mapped_column(
+        enum_column(EstadoDestinatario, "estado_destinatario"),
+        nullable=False,
+        default=EstadoDestinatario.BORRADOR,
+    )
+    enviada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    respondida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # El presupuesto-oferta que se genera cuando este proveedor cierra su
     # respuesta. La FK va en este sentido (compras -> presupuestos) a
     # propósito: es la dirección que ya tiene el grafo de dependencias entre
     # módulos, y ponerla al revés obligaría a invertirlo.
@@ -182,32 +254,22 @@ class SolicitudPrecios(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, A
         nullable=True,
     )
 
-    # Quién la envió. No basta con `creado_por_subject` de AutoriaMixin: es a
-    # esta persona a quien hay que atribuir el presupuesto-oferta que llegue
-    # (ver `publico_service`), porque atribuírselo al proveedor lo dejaría
-    # invisible para quien tiene el permiso "solo los míos".
-    emisor_subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    emisor_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
-
-    lineas: Mapped[list["SolicitudLinea"]] = relationship(
-        back_populates="solicitud",
-        cascade="all, delete-orphan",
-        order_by="SolicitudLinea.orden",
+    solicitud: Mapped["SolicitudPrecios"] = relationship(back_populates="destinatarios")
+    ofertas: Mapped[list["OfertaLinea"]] = relationship(
+        back_populates="destinatario", cascade="all, delete-orphan"
     )
 
 
 class SolicitudLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
-    """Una partida de la separata: copia CONGELADA de la partida en el momento
-    del envío, más lo que aporta el proveedor.
+    """Una línea del paquete: QUÉ se pide. Común a todos los destinatarios.
 
-    La copia es deliberada: si el presupuesto se edita después de mandar la
-    separata, lo que el proveedor está cotizando no puede cambiarle bajo los
-    pies. `partida_id` queda solo como rastro para poder volcar la oferta.
+    Es una copia congelada de la partida (o de un componente de su
+    descompuesto) en el momento de añadirla: si el presupuesto se edita
+    después, lo que los proveedores están cotizando no cambia bajo sus pies.
+    `partida_id`/`concepto_id` quedan como rastro para poder volcar la oferta.
 
-    Sin `AutoriaMixin` a propósito: esto lo rellena el proveedor, que no es un
-    usuario del sistema. Como consecuencia el listener de auditoría no mira
-    esta tabla, así que el servicio graba un `AccionAuditoria.EVENTO` sobre la
-    solicitud al guardar precios y al cerrar la respuesta.
+    Lo que oferta cada proveedor NO está aquí, sino en `OfertaLinea`: es un
+    dato por proveedor, no de la línea.
     """
 
     __tablename__ = "solicitud_linea"
@@ -226,8 +288,19 @@ class SolicitudLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Bas
         ForeignKey("presupuestos.partida.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Con `concepto_id` la línea NO pide la partida entera, sino UN componente
+    # de su descompuesto (solo la mano de obra, solo el material, un
+    # telefonillo concreto…). Se identifica por (partida, concepto) y no por la
+    # fila del descompuesto a propósito: mientras la partida hereda el
+    # descompuesto del banco esas filas son del concepto padre y su id cambia
+    # en cuanto se independiza, así que no sirve como referencia estable.
+    concepto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
-    # Copia congelada de la partida.
+    # Copia congelada de la partida (o del componente).
     capitulo_resumen: Mapped[str | None] = mapped_column(String(250), nullable=True)
     codigo: Mapped[str | None] = mapped_column(String(32), nullable=True)
     resumen: Mapped[str] = mapped_column(String(250), nullable=False)
@@ -236,12 +309,59 @@ class SolicitudLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Bas
     medicion: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=Decimal("0.000"))
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # Lo que aporta el proveedor.
+    # A qué destinatario se le adjudicó esta línea, si ya se decidió. Impide
+    # adjudicar dos veces la misma partida a proveedores distintos, que
+    # dejaría el descompuesto reescrito dos veces sin rastro de cuál manda.
+    adjudicada_a_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.solicitud_destinatario.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    solicitud: Mapped[SolicitudPrecios] = relationship(back_populates="lineas")
+    ofertas: Mapped[list["OfertaLinea"]] = relationship(
+        back_populates="linea", cascade="all, delete-orphan"
+    )
+
+
+class OfertaLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Lo que UN proveedor oferta por UNA línea del paquete.
+
+    Sin `AutoriaMixin` a propósito: esto lo rellena el proveedor, que no es un
+    usuario del sistema. Como consecuencia el listener de auditoría no mira
+    esta tabla, así que el servicio graba un `AccionAuditoria.EVENTO` sobre la
+    solicitud al guardar precios y al cerrar la respuesta.
+
+    Las filas se crean SOLO cuando el proveedor escribe algo: la ausencia de
+    fila es "no ha cotizado esta línea", que es justo el hueco que se enseña
+    en el comparativo cuando alguien deja algo sin ofertar.
+    """
+
+    __tablename__ = "oferta_linea"
+    __table_args__ = (
+        UniqueConstraint("destinatario_id", "linea_id", name="oferta_linea_unica"),
+        Index("ix_compras_oferta_linea_destinatario", "destinatario_id"),
+        Index("ix_compras_oferta_linea_linea", "linea_id"),
+        {"schema": SCHEMA},
+    )
+
+    destinatario_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.solicitud_destinatario.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    linea_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.solicitud_linea.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
     precio_ofertado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     observaciones_proveedor: Mapped[str | None] = mapped_column(Text, nullable=True)
     aprobada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    solicitud: Mapped[SolicitudPrecios] = relationship(back_populates="lineas")
+    destinatario: Mapped[SolicitudDestinatario] = relationship(back_populates="ofertas")
+    linea: Mapped[SolicitudLinea] = relationship(back_populates="ofertas")
 
 
 class AccesoToken(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
@@ -272,9 +392,11 @@ class AccesoToken(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
     )
 
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    solicitud_id: Mapped[uuid.UUID] = mapped_column(
+    # Cuelga del DESTINATARIO, no del paquete: cada proveedor tiene su propio
+    # enlace, y el token es lo que dice cuál de ellos está entrando.
+    destinatario_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.solicitud_precios.id", ondelete="CASCADE"),
+        ForeignKey(f"{SCHEMA}.solicitud_destinatario.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -285,13 +407,13 @@ class AccesoEstado(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base)
 
     __tablename__ = "acceso_estado"
     __table_args__ = (
-        UniqueConstraint("solicitud_id", name="acceso_estado_solicitud_unique"),
+        UniqueConstraint("destinatario_id", name="acceso_estado_destinatario_unique"),
         {"schema": SCHEMA},
     )
 
-    solicitud_id: Mapped[uuid.UUID] = mapped_column(
+    destinatario_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.solicitud_precios.id", ondelete="CASCADE"),
+        ForeignKey(f"{SCHEMA}.solicitud_destinatario.id", ondelete="CASCADE"),
         nullable=False,
     )
     expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Send } from 'lucide-react'
 
-import logo from '../assets/logo-sobre-oscuro-recorte.png'
+// La versión para fondo claro: esta página es una tarjeta blanca. El
+// `logo-sobre-oscuro-recorte.png` que había aquí está recortado contra un
+// fondo oscuro y sobre blanco se ve como un garabato.
+import logo from '../assets/logo.png'
 import { ErrorNotice } from '../components/ui'
 import { apiPublico } from '../lib/api'
 import type { LineaSeparata, Separata } from '../lib/api'
@@ -98,11 +101,45 @@ export function OfertaProveedor() {
 
         {!cargando && separata && !mensajeFinal && (
           <>
-            <h1 style={{ marginBottom: 'var(--sp-1)' }}>Solicitud de precios {separata.codigo}</h1>
-            <p className="muted" style={{ marginBottom: 'var(--sp-4)' }}>
-              {separata.emisor} solicita precio a {separata.proveedor}
-              {separata.fecha_limite ? ` — fecha límite: ${separata.fecha_limite}` : ''}
+            <p className="muted" style={{ marginBottom: 0 }}>
+              {separata.emisor} pide precio a {separata.proveedor}
             </p>
+            <h1 style={{ marginBottom: 'var(--sp-1)' }}>{separata.titulo}</h1>
+            <p className="table__code" style={{ marginBottom: 'var(--sp-4)' }}>
+              Solicitud de precios {separata.codigo}
+            </p>
+
+            {/* De qué obra se trata: sin esto el proveedor no puede cotizar
+                (no sabe ni dónde tendría que ir). */}
+            <div className="ficha-datos" style={{ marginBottom: 'var(--sp-4)' }}>
+              <div>
+                <div className="barra-acciones__etiqueta">Obra</div>
+                <div>{separata.obra || <span className="muted">—</span>}</div>
+              </div>
+              <div>
+                <div className="barra-acciones__etiqueta">Emplazamiento</div>
+                <div>{separata.emplazamiento ?? <span className="muted">—</span>}</div>
+              </div>
+              {separata.cliente && (
+                <div>
+                  <div className="barra-acciones__etiqueta">Cliente</div>
+                  <div>{separata.cliente}</div>
+                </div>
+              )}
+              {separata.tipo_obra && (
+                <div>
+                  <div className="barra-acciones__etiqueta">Tipo de obra</div>
+                  <div>{separata.tipo_obra}</div>
+                </div>
+              )}
+              <div>
+                <div className="barra-acciones__etiqueta">Fecha límite</div>
+                <div>
+                  {separata.fecha_limite ?? <span className="muted">sin fecha</span>}
+                </div>
+              </div>
+            </div>
+
             {separata.notas && (
               <p className="notice" style={{ marginBottom: 'var(--sp-4)' }}>
                 {separata.notas}

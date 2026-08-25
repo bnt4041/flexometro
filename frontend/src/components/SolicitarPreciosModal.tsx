@@ -2,37 +2,44 @@ import { useEffect, useState } from 'react'
 import { Save, X } from 'lucide-react'
 
 import { CrearTerceroModal } from './CrearTerceroModal'
-import { ErrorNotice, Field, Modal } from './ui'
+import { Checkbox, ErrorNotice, Field, Modal } from './ui'
 import { api } from '../lib/api'
-import type { Tercero } from '../lib/api'
+import type { ComponentePedido, Tercero } from '../lib/api'
 import { useToast } from '../toast'
 
-const NUEVO_PROVEEDOR = '__nuevo__'
-
-interface FilaSolicitar {
-  id: string
+/** Lo que se le enseña al usuario de la selección que trae, sea de partidas
+ *  enteras o de componentes sueltos de un descompuesto. */
+export interface ItemSolicitado {
+  clave: string
   resumen: string
   unidad: string
 }
 
-/** «Solicitar precios…» (Fase 53, revisado): crea un BORRADOR — no manda
- *  nada todavía. Se completa (partidas, más proveedores, notas, documentos)
- *  y se envía desde su ficha en la pestaña Comparativo (`SolicitudFicha`),
- *  donde vive el resto del ciclo de vida de la solicitud. */
+/** «Solicitar precios…»: crea un PAQUETE de trabajo con nombre ("Yeserías")
+ *  sobre las partidas seleccionadas, y lo deja en borrador.
+ *
+ *  No manda nada todavía: se completa y se envía proveedor a proveedor desde
+ *  su ficha en la pestaña Comparativo, que es donde vive el resto del ciclo
+ *  de vida. */
 export function SolicitarPreciosModal({
   presupuestoId,
-  partidas,
+  items,
+  seleccion,
   onClose,
   onCreada,
 }: {
   presupuestoId: string
-  partidas: FilaSolicitar[]
+  /** Solo para enseñar qué se está pidiendo. */
+  items: ItemSolicitado[]
+  /** Lo que de verdad se manda al backend. */
+  seleccion: { partida_ids?: string[]; componentes?: ComponentePedido[] }
   onClose: () => void
   onCreada: () => void
 }) {
   const { notificar } = useToast()
+  const [titulo, setTitulo] = useState('')
   const [proveedores, setProveedores] = useState<Tercero[]>([])
-  const [proveedorId, setProveedorId] = useState('')
+  const [elegidos, setElegidos] = useState<Set<string>>(new Set())
   const [creandoProveedor, setCreandoProveedor] = useState(false)
   const [fechaLimite, setFechaLimite] = useState('')
   const [notas, setNotas] = useState('')
@@ -45,23 +52,32 @@ export function SolicitarPreciosModal({
       .then((pagina) => setProveedores(pagina.items))
   }, [])
 
+  function alternar(id: string) {
+    setElegidos((actual) => {
+      const nueva = new Set(actual)
+      if (nueva.has(id)) nueva.delete(id)
+      else nueva.add(id)
+      return nueva
+    })
+  }
+
   async function guardar() {
-    if (!proveedorId) return
+    if (!titulo.trim()) {
+      setError('Ponle un nombre al paquete, por ejemplo «Yeserías»')
+      return
+    }
     setGuardando(true)
     setError(null)
     try {
       await api.solicitudesPrecios.create({
         presupuesto_id: presupuestoId,
-        proveedor_id: proveedorId,
-        partida_ids: partidas.map((p) => p.id),
+        titulo: titulo.trim(),
+        proveedor_ids: [...elegidos],
+        ...seleccion,
         fecha_limite: fechaLimite || null,
         notas: notas || null,
       })
-      notificar(
-        partidas.length === 1
-          ? 'Borrador creado — complétalo en la pestaña Comparativo'
-          : `Borrador creado (${partidas.length} partidas) — complétalo en la pestaña Comparativo`,
-      )
+      notificar(`«${titulo.trim()}» creada — complétala en la pestaña Comparativo`)
       onCreada()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
@@ -71,36 +87,43 @@ export function SolicitarPreciosModal({
   }
 
   return (
-    <Modal title="Solicitar precios a proveedor" onClose={onClose}>
+    <Modal title="Nueva solicitud de precios" onClose={onClose}>
       <div className="form-section">
         <p className="form-section__note">
-          Crea un borrador con estas partidas. Desde la pestaña Comparativo se puede ajustar,
-          añadir más proveedores a comparar, adjuntar documentos y, cuando esté listo, enviarlo.
+          Se crea un paquete de trabajo con estas partidas. Puedes mandárselo a varios
+          proveedores y comparar sus ofertas; se envía desde la pestaña Comparativo.
         </p>
 
         <ErrorNotice error={error} />
 
-        <Field label="Proveedor">
-          <select
-            className="select"
-            value={proveedorId}
-            onChange={(e) => {
-              if (e.target.value === NUEVO_PROVEEDOR) {
-                setCreandoProveedor(true)
-                return
-              }
-              setProveedorId(e.target.value)
-            }}
-          >
-            <option value="">Elige un proveedor…</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.razon_social}
-              </option>
-            ))}
-            <option value={NUEVO_PROVEEDOR}>+ Nuevo proveedor…</option>
-          </select>
+        <Field label="Nombre" hint="Cómo lo vas a reconocer: «Yeserías», «Instalación eléctrica»…">
+          <input
+            className="input"
+            value={titulo}
+            onChange={(e) => setTitulo(e.target.value)}
+            placeholder="Yeserías"
+            autoFocus
+          />
         </Field>
+
+        <p className="field__label">Proveedores a los que pedírselo</p>
+        <p className="form-section__note">Se pueden añadir más después, desde la ficha.</p>
+        {proveedores.map((p) => (
+          <Checkbox
+            key={p.id}
+            label={p.razon_social + (p.email ? '' : ' (sin correo)')}
+            checked={elegidos.has(p.id)}
+            onChange={() => alternar(p.id)}
+          />
+        ))}
+        <button
+          className="btn btn--sm"
+          style={{ marginTop: 'var(--sp-2)' }}
+          onClick={() => setCreandoProveedor(true)}
+        >
+          + Nuevo proveedor…
+        </button>
+
         <Field label="Fecha límite (opcional)">
           <input
             className="input"
@@ -109,7 +132,7 @@ export function SolicitarPreciosModal({
             onChange={(e) => setFechaLimite(e.target.value)}
           />
         </Field>
-        <Field label="Notas para el proveedor (opcional)">
+        <Field label="Notas para los proveedores (opcional)">
           <textarea
             className="input"
             rows={3}
@@ -119,11 +142,11 @@ export function SolicitarPreciosModal({
         </Field>
 
         <p className="field__label">
-          {partidas.length} partida{partidas.length === 1 ? '' : 's'}
+          Se pide precio de {items.length} {items.length === 1 ? 'línea' : 'líneas'}
         </p>
         <ul className="chat-ia__componentes">
-          {partidas.map((p) => (
-            <li key={p.id}>
+          {items.map((p) => (
+            <li key={p.clave}>
               {p.resumen} ({p.unidad})
             </li>
           ))}
@@ -136,11 +159,11 @@ export function SolicitarPreciosModal({
         </button>
         <button
           className="btn btn--primary"
-          disabled={!proveedorId || guardando}
+          disabled={!titulo.trim() || guardando}
           onClick={() => void guardar()}
         >
           {!guardando && <Save size={16} aria-hidden="true" />}
-          {guardando ? 'Guardando…' : 'Guardar borrador'}
+          {guardando ? 'Creando…' : 'Crear solicitud'}
         </button>
       </div>
 
@@ -150,7 +173,7 @@ export function SolicitarPreciosModal({
           onClose={() => setCreandoProveedor(false)}
           onCreado={(tercero) => {
             setProveedores((actual) => [...actual, tercero])
-            setProveedorId(tercero.id)
+            setElegidos((actual) => new Set(actual).add(tercero.id))
             setCreandoProveedor(false)
           }}
         />

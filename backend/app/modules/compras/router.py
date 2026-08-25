@@ -14,7 +14,7 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.compras import costes, oferta_service, service, solicitud_service
-from app.modules.compras.models import SolicitudLinea
+from app.modules.compras.models import OfertaLinea, SolicitudDestinatario, SolicitudLinea
 from app.modules.compras.publico_router import router as publico_router
 from app.modules.compras.schemas import (
     AlbaranCreate,
@@ -28,10 +28,13 @@ from app.modules.compras.schemas import (
     InformeCosteObra,
 )
 from app.modules.compras.solicitud_schemas import (
+    DestinatarioActualizar,
+    DestinatarioCrear,
+    DestinatarioOut,
     EnlaceOut,
     LineasActualizar,
+    OfertaLineaOut,
     SolicitudActualizar,
-    SolicitudConEnlaceOut,
     SolicitudCrear,
     SolicitudLineaOut,
     SolicitudOut,
@@ -242,39 +245,67 @@ async def coste_real_vs_presupuestado(
 # --- Solicitud de precios a proveedor ---
 
 
-async def _solicitud_out(
-    session: AsyncSession,
-    solicitud,
-    *,
-    con_lineas: bool = False,
-    proveedor: Tercero | None = None,
-) -> SolicitudOut:
-    if proveedor is None:
-        proveedor = await session.get(Tercero, solicitud.proveedor_id)
-    lineas: list[SolicitudLineaOut] = []
-    if con_lineas:
-        filas = (
+async def _solicitud_out(session: AsyncSession, solicitud) -> SolicitudOut:
+    """El paquete entero de una sola lectura: sus líneas y, por cada
+    destinatario, lo que lleva ofertado. Es el formato que la matriz del
+    comparativo necesita para pintarse sin ir pidiendo cosas."""
+    lineas = [
+        SolicitudLineaOut.model_validate(l)
+        for l in (
             await session.execute(
                 select(SolicitudLinea)
                 .where(SolicitudLinea.solicitud_id == solicitud.id)
                 .order_by(SolicitudLinea.orden)
             )
         ).scalars()
-        lineas = [SolicitudLineaOut.model_validate(l) for l in filas]
+    ]
+
+    filas = (
+        await session.execute(
+            select(SolicitudDestinatario, Tercero)
+            .join(Tercero, Tercero.id == SolicitudDestinatario.proveedor_id)
+            .where(SolicitudDestinatario.solicitud_id == solicitud.id)
+            .order_by(SolicitudDestinatario.created_at)
+        )
+    ).all()
+
+    destinatarios = []
+    for destinatario, proveedor in filas:
+        ofertas = [
+            OfertaLineaOut.model_validate(o)
+            for o in (
+                await session.execute(
+                    select(OfertaLinea).where(
+                        OfertaLinea.destinatario_id == destinatario.id
+                    )
+                )
+            ).scalars()
+        ]
+        destinatarios.append(
+            DestinatarioOut(
+                id=destinatario.id,
+                proveedor_id=destinatario.proveedor_id,
+                proveedor_razon_social=proveedor.razon_social,
+                proveedor_email=proveedor.email,
+                email_destino=destinatario.email_destino,
+                estado=destinatario.estado,
+                enviada_en=destinatario.enviada_en,
+                respondida_en=destinatario.respondida_en,
+                oferta_presupuesto_id=destinatario.oferta_presupuesto_id,
+                ofertas=ofertas,
+            )
+        )
+
     return SolicitudOut(
         id=solicitud.id,
         codigo=solicitud.codigo,
+        titulo=solicitud.titulo,
         presupuesto_id=solicitud.presupuesto_id,
-        proveedor_id=solicitud.proveedor_id,
-        proveedor_razon_social=proveedor.razon_social if proveedor else "",
-        proveedor_email=proveedor.email if proveedor else None,
         estado=solicitud.estado,
         fecha_limite=solicitud.fecha_limite,
-        enviada_en=solicitud.enviada_en,
-        respondida_en=solicitud.respondida_en,
         notas=solicitud.notas,
-        oferta_presupuesto_id=solicitud.oferta_presupuesto_id,
         lineas=lineas,
+        destinatarios=destinatarios,
     )
 
 
@@ -285,29 +316,46 @@ async def _solicitud_o_404(session: AsyncSession, solicitud_id: uuid.UUID):
     return solicitud
 
 
+async def _destinatario_o_404(
+    session: AsyncSession, solicitud_id: uuid.UUID, destinatario_id: uuid.UUID
+):
+    destinatario = await solicitud_service.obtener_destinatario(session, destinatario_id)
+    if destinatario is None or destinatario.solicitud_id != solicitud_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado en esta solicitud"
+        )
+    return destinatario
+
+
+_ERRORES_422 = (
+    solicitud_service.PresupuestoInvalido,
+    solicitud_service.ProveedorInvalido,
+    solicitud_service.SinPartidas,
+    solicitud_service.DestinatarioNoEditable,
+    solicitud_service.SinCorreoDeProveedor,
+)
+
+
 @solicitudes_router.post("", response_model=SolicitudOut, status_code=status.HTTP_201_CREATED)
 async def crear_solicitud(
     datos: SolicitudCrear,
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> SolicitudOut:
-    """Deja la solicitud en borrador — no manda nada todavía. Se completa y
-    se envía desde la pestaña Comparativo (`PATCH .../lineas`, `PATCH .../`,
-    `POST .../enviar`)."""
+    """Deja el paquete en borrador — no manda nada todavía. Se completa y se
+    envía proveedor a proveedor desde su ficha en la pestaña Comparativo."""
     try:
         solicitud = await solicitud_service.crear_solicitud(
             session,
             presupuesto_id=datos.presupuesto_id,
-            proveedor_id=datos.proveedor_id,
+            titulo=datos.titulo,
+            proveedor_ids=datos.proveedor_ids,
             partida_ids=datos.partida_ids,
+            componentes=[(c.partida_id, c.concepto_id) for c in datos.componentes],
             fecha_limite=datos.fecha_limite,
             notas=datos.notas,
         )
-    except (
-        solicitud_service.PresupuestoInvalido,
-        solicitud_service.ProveedorInvalido,
-        solicitud_service.SinPartidas,
-    ) as exc:
+    except _ERRORES_422 as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
@@ -324,16 +372,11 @@ async def actualizar_solicitud(
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> SolicitudOut:
     solicitud = await _solicitud_o_404(session, solicitud_id)
-    try:
-        await solicitud_service.actualizar_datos(
-            session, solicitud, datos.model_dump(exclude_unset=True)
-        )
-    except solicitud_service.SolicitudNoEditable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+    await solicitud_service.actualizar_datos(
+        session, solicitud, datos.model_dump(exclude_unset=True)
+    )
     await session.commit()
-    return await _solicitud_out(session, solicitud, con_lineas=True)
+    return await _solicitud_out(session, solicitud)
 
 
 @solicitudes_router.patch("/{solicitud_id}/lineas", response_model=SolicitudOut)
@@ -343,63 +386,22 @@ async def actualizar_lineas_solicitud(
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> SolicitudOut:
+    """Editable siempre, también con el paquete ya enviado: quien lo manda
+    decide si reenvía a los proveedores anteriores."""
     solicitud = await _solicitud_o_404(session, solicitud_id)
     try:
-        await solicitud_service.actualizar_lineas(session, solicitud, datos.partida_ids)
-    except (solicitud_service.SolicitudNoEditable, solicitud_service.SinPartidas) as exc:
+        await solicitud_service.actualizar_lineas(
+            session,
+            solicitud,
+            datos.partida_ids,
+            componentes=[(c.partida_id, c.concepto_id) for c in datos.componentes],
+        )
+    except _ERRORES_422 as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     await session.commit()
-    return await _solicitud_out(session, solicitud, con_lineas=True)
-
-
-@solicitudes_router.post("/{solicitud_id}/enviar", response_model=SolicitudConEnlaceOut)
-async def enviar_solicitud(
-    solicitud_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
-) -> SolicitudConEnlaceOut:
-    solicitud = await _solicitud_o_404(session, solicitud_id)
-    try:
-        enlace = await solicitud_service.enviar_solicitud(session, solicitud)
-    except (
-        solicitud_service.SolicitudYaEnviada,
-        solicitud_service.SinCorreoDeProveedor,
-    ) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
-    except MailerError as exc:
-        # La solicitud y el enlace ya existen y son válidos aunque el correo
-        # falle — el usuario puede reintentarlo desde el mismo borrador.
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"No se pudo enviar el correo: {exc}",
-        ) from exc
-    await session.commit()
-    base = await _solicitud_out(session, solicitud, con_lineas=True)
-    return SolicitudConEnlaceOut(**base.model_dump(), enlace=enlace)
-
-
-@solicitudes_router.post("/{solicitud_id}/enlace", response_model=EnlaceOut)
-async def generar_enlace(
-    solicitud_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
-) -> EnlaceOut:
-    """Enlace del proveedor para pasárselo por otro medio. Emite uno nuevo e
-    invalida el anterior — el token solo se guarda hasheado, así que no se
-    puede volver a enseñar el que ya se mandó."""
-    solicitud = await _solicitud_o_404(session, solicitud_id)
-    try:
-        enlace = await solicitud_service.generar_enlace(session, solicitud)
-    except solicitud_service.SolicitudNoEditable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
-    await session.commit()
-    return EnlaceOut(enlace=enlace)
+    return await _solicitud_out(session, solicitud)
 
 
 @solicitudes_router.delete("/{solicitud_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -411,11 +413,129 @@ async def eliminar_solicitud(
     solicitud = await _solicitud_o_404(session, solicitud_id)
     try:
         await solicitud_service.eliminar_borrador(session, solicitud)
-    except solicitud_service.SolicitudNoEditable as exc:
+    except _ERRORES_422 as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     await session.commit()
+
+
+# --- Destinatarios: a quién se le pide ---
+
+
+@solicitudes_router.post("/{solicitud_id}/destinatarios", response_model=SolicitudOut)
+async def anadir_destinatario(
+    solicitud_id: uuid.UUID,
+    datos: DestinatarioCrear,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+) -> SolicitudOut:
+    """Un proveedor más al paquete, también si ya se envió a otros: recibe
+    exactamente las mismas líneas."""
+    solicitud = await _solicitud_o_404(session, solicitud_id)
+    try:
+        await solicitud_service.anadir_destinatario(
+            session, solicitud, datos.proveedor_id, datos.email_destino
+        )
+    except _ERRORES_422 as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return await _solicitud_out(session, solicitud)
+
+
+@solicitudes_router.patch(
+    "/{solicitud_id}/destinatarios/{destinatario_id}", response_model=SolicitudOut
+)
+async def actualizar_destinatario(
+    solicitud_id: uuid.UUID,
+    destinatario_id: uuid.UUID,
+    datos: DestinatarioActualizar,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+) -> SolicitudOut:
+    solicitud = await _solicitud_o_404(session, solicitud_id)
+    destinatario = await _destinatario_o_404(session, solicitud_id, destinatario_id)
+    destinatario.email_destino = datos.email_destino
+    await session.commit()
+    return await _solicitud_out(session, solicitud)
+
+
+@solicitudes_router.delete(
+    "/{solicitud_id}/destinatarios/{destinatario_id}", response_model=SolicitudOut
+)
+async def quitar_destinatario(
+    solicitud_id: uuid.UUID,
+    destinatario_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+) -> SolicitudOut:
+    solicitud = await _solicitud_o_404(session, solicitud_id)
+    destinatario = await _destinatario_o_404(session, solicitud_id, destinatario_id)
+    try:
+        await solicitud_service.quitar_destinatario(session, destinatario)
+    except _ERRORES_422 as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return await _solicitud_out(session, solicitud)
+
+
+@solicitudes_router.post(
+    "/{solicitud_id}/destinatarios/{destinatario_id}/enviar", response_model=EnlaceOut
+)
+async def enviar_a_destinatario(
+    solicitud_id: uuid.UUID,
+    destinatario_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+) -> EnlaceOut:
+    """Manda el paquete a este proveedor. Sirve igual para el primer envío y
+    para reenviar tras retocar las líneas: emite un enlace nuevo, el anterior
+    muere, y lo que ya hubiera rellenado se conserva."""
+    solicitud = await _solicitud_o_404(session, solicitud_id)
+    destinatario = await _destinatario_o_404(session, solicitud_id, destinatario_id)
+    try:
+        enlace = await solicitud_service.enviar_a(session, solicitud, destinatario)
+    except _ERRORES_422 as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except MailerError as exc:
+        # El enlace ya existe y es válido aunque el correo falle — se puede
+        # reintentar o pasar el enlace a mano.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No se pudo enviar el correo: {exc}",
+        ) from exc
+    await session.commit()
+    return EnlaceOut(enlace=enlace)
+
+
+@solicitudes_router.post(
+    "/{solicitud_id}/destinatarios/{destinatario_id}/enlace", response_model=EnlaceOut
+)
+async def generar_enlace(
+    solicitud_id: uuid.UUID,
+    destinatario_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+) -> EnlaceOut:
+    """Enlace de este proveedor para pasárselo por otro medio. Emite uno nuevo
+    e invalida el anterior — el token solo se guarda hasheado, así que no se
+    puede volver a enseñar el que ya se mandó."""
+    solicitud = await _solicitud_o_404(session, solicitud_id)
+    destinatario = await _destinatario_o_404(session, solicitud_id, destinatario_id)
+    try:
+        enlace = await solicitud_service.generar_enlace(session, solicitud, destinatario)
+    except _ERRORES_422 as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return EnlaceOut(enlace=enlace)
 
 
 @solicitudes_router.get("/por-presupuesto/{presupuesto_id}", response_model=list[SolicitudOut])
@@ -424,13 +544,10 @@ async def listar_por_presupuesto(
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "ver")),
 ) -> list[SolicitudOut]:
-    """Todas las solicitudes hechas sobre este presupuesto (borradores
-    incluidos), con sus líneas — lo que alimenta la pestaña Comparativo."""
-    filas = await solicitud_service.listar_por_presupuesto(session, presupuesto_id)
-    return [
-        await _solicitud_out(session, solicitud, con_lineas=True, proveedor=proveedor)
-        for solicitud, proveedor in filas
-    ]
+    """Todos los paquetes de este presupuesto (borradores incluidos) — lo que
+    alimenta la pestaña Comparativo."""
+    solicitudes = await solicitud_service.listar_por_presupuesto(session, presupuesto_id)
+    return [await _solicitud_out(session, s) for s in solicitudes]
 
 
 class AprobarLineaOut(BaseModel):
@@ -438,30 +555,31 @@ class AprobarLineaOut(BaseModel):
     precio: Decimal
 
 
-@solicitudes_router.post(
-    "/{solicitud_id}/lineas/{linea_id}/aprobar", response_model=AprobarLineaOut
-)
+@solicitudes_router.post("/ofertas-linea/{oferta_id}/aprobar", response_model=AprobarLineaOut)
 async def aprobar_linea(
-    solicitud_id: uuid.UUID,
-    linea_id: uuid.UUID,
+    oferta_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
-) -> dict:
-    """Elige la oferta de esta línea para la partida original: sustituye su
-    descompuesto por la subcontrata de este proveedor, a su precio."""
-    solicitud = await solicitud_service.obtener_solicitud(session, solicitud_id)
+) -> AprobarLineaOut:
+    """Adjudica una línea a un proveedor: aplica su precio sobre la partida
+    original del presupuesto (sustituyendo su descompuesto por la subcontrata,
+    o cambiando el precio del componente si lo que se pidió era un componente)."""
+    oferta = await solicitud_service.obtener_oferta_linea(session, oferta_id)
+    if oferta is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Oferta no encontrada")
+    linea = await solicitud_service.obtener_linea(session, oferta.linea_id)
+    destinatario = await solicitud_service.obtener_destinatario(session, oferta.destinatario_id)
+    if linea is None or destinatario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Oferta no encontrada")
+    solicitud = await solicitud_service.obtener_solicitud(session, linea.solicitud_id)
     if solicitud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada")
-    linea = await solicitud_service.obtener_linea(session, linea_id)
-    if linea is None or linea.solicitud_id != solicitud_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Línea no encontrada")
 
     try:
-        partida = await oferta_service.aprobar_linea(session, linea, solicitud)
-    except (
-        oferta_service.LineaSinPrecio,
-        oferta_service.LineaYaAprobada,
-    ) as exc:
+        partida = await oferta_service.aprobar_linea(
+            session, oferta, linea, destinatario, solicitud
+        )
+    except (oferta_service.LineaSinPrecio, oferta_service.LineaYaAprobada) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc

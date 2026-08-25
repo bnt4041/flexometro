@@ -458,7 +458,11 @@ export function PresupuestoDetalle() {
             minH: 5,
             contenido:
               seleccion?.tipo === 'partida' ? (
-                <DescompuestoPartida partida={seleccion.partida} onCambio={cargar} />
+                <DescompuestoPartida
+                  partida={seleccion.partida}
+                  presupuestoId={id}
+                  onCambio={cargar}
+                />
               ) : (
                 <EmptyState title="Ninguna partida seleccionada">
                   Selecciona una partida en el listado para ver de qué se compone su precio.

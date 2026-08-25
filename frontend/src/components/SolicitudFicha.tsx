@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, Link2, Mail, Save, Trash2, X } from 'lucide-react'
+import { Check, Link2, Mail, Save, Send, Trash2, X } from 'lucide-react'
 
 import { CrearTerceroModal } from './CrearTerceroModal'
 import { Documentos } from './Documentos'
-import { Checkbox, ErrorNotice, Field, Modal, Tooltip, formatoImporte } from './ui'
+import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
-import type { NodoCapitulo, SolicitudPrecios, Tercero } from '../lib/api'
+import type {
+  ComponentePedido,
+  NodoCapitulo,
+  SolicitudDestinatario,
+  SolicitudPrecios,
+  Tercero,
+} from '../lib/api'
 import { useToast } from '../toast'
 
 export const ETIQUETA_ESTADO_SOLICITUD: Record<string, string> = {
@@ -39,13 +45,13 @@ function agruparPorCapitulo(capitulos: NodoCapitulo[]): GrupoPartidas[] {
   return grupos
 }
 
-/** Ficha de UNA solicitud de precios (Fase 53): el ciclo de vida entero de
- *  una petición a un proveedor, desde el borrador editable hasta la oferta
- *  recibida y aprobada.
+/** Ficha de un paquete de solicitud de precios ("Yeserías"): qué se pide, a
+ *  quién, y qué ha ofertado cada uno.
  *
- *  Mientras es borrador se puede tocar todo (partidas, notas, documentos);
- *  en cuanto sale — por correo o por enlace — sus líneas quedan congeladas
- *  en lo que ve el proveedor, y lo que queda es recibir precios y aprobarlos. */
+ *  Las partidas son editables siempre, también con el paquete ya enviado;
+ *  quien lo manda decide si reenvía a los proveedores anteriores. Por eso el
+ *  comparativo puede tener huecos: un proveedor que no llegó a ver una línea
+ *  simplemente no la tiene ofertada. */
 export function SolicitudFicha({
   solicitud,
   capitulos,
@@ -60,21 +66,29 @@ export function SolicitudFicha({
   onAprobado: () => void
 }) {
   const { notificar } = useToast()
-  const esBorrador = solicitud.estado === 'borrador'
 
-  const [seleccion, setSeleccion] = useState<Set<string>>(
-    new Set(solicitud.lineas.map((l) => l.partida_id).filter((id): id is string => id != null)),
-  )
+  const [titulo, setTitulo] = useState(solicitud.titulo)
   const [notas, setNotas] = useState(solicitud.notas ?? '')
-  const [enlace, setEnlace] = useState<string | null>(null)
+  const [seleccion, setSeleccion] = useState<Set<string>>(
+    new Set(
+      solicitud.lineas
+        .filter((l) => l.concepto_id == null)
+        .map((l) => l.partida_id)
+        .filter((id): id is string => id != null),
+    ),
+  )
+  const [componentes, setComponentes] = useState<ComponentePedido[]>(
+    solicitud.lineas
+      .filter((l) => l.concepto_id != null && l.partida_id != null)
+      .map((l) => ({ partida_id: l.partida_id as string, concepto_id: l.concepto_id as string })),
+  )
+  const [enlaces, setEnlaces] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
-  const [ocupado, setOcupado] = useState<
-    'guardando' | 'enviando' | 'enlace' | 'eliminando' | 'aprobando' | null
-  >(null)
-  const [aprobandoLinea, setAprobandoLinea] = useState<string | null>(null)
-  const [duplicando, setDuplicando] = useState(false)
+  const [ocupado, setOcupado] = useState<string | null>(null)
+  const [anadiendo, setAnadiendo] = useState(false)
 
   const grupos = agruparPorCapitulo(capitulos)
+  const hayOfertas = solicitud.destinatarios.some((d) => d.ofertas.length > 0)
 
   function alternar(partidaId: string) {
     setSeleccion((actual) => {
@@ -85,348 +99,465 @@ export function SolicitudFicha({
     })
   }
 
-  async function guardarCambios(): Promise<boolean> {
-    if (seleccion.size === 0) {
-      setError('Elige al menos una partida')
-      return false
-    }
+  async function conAviso(clave: string, accion: () => Promise<void>) {
+    setOcupado(clave)
     setError(null)
     try {
-      await api.solicitudesPrecios.actualizarLineas(solicitud.id, [...seleccion])
-      await api.solicitudesPrecios.update(solicitud.id, { notas: notas || null })
-      return true
+      await accion()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
-      return false
+    } finally {
+      setOcupado(null)
     }
   }
 
   async function guardar() {
-    setOcupado('guardando')
-    const ok = await guardarCambios()
-    setOcupado(null)
-    if (!ok) return
-    notificar('Borrador guardado')
-    onCambio()
-  }
-
-  async function enviarPorCorreo() {
-    setOcupado('enviando')
-    if (esBorrador && !(await guardarCambios())) {
-      setOcupado(null)
+    if (seleccion.size === 0 && componentes.length === 0) {
+      setError('Elige al menos una partida o un componente')
       return
     }
-    try {
-      const resultado = await api.solicitudesPrecios.enviar(solicitud.id)
-      setEnlace(resultado.enlace)
-      notificar(`Solicitud enviada a ${solicitud.proveedor_razon_social}`)
+    await conAviso('guardar', async () => {
+      await api.solicitudesPrecios.actualizarLineas(solicitud.id, {
+        partida_ids: [...seleccion],
+        componentes,
+      })
+      await api.solicitudesPrecios.update(solicitud.id, {
+        titulo: titulo.trim() || solicitud.titulo,
+        notas: notas || null,
+      })
+      notificar('Solicitud guardada')
       onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    } finally {
-      setOcupado(null)
-    }
+    })
   }
 
-  async function copiarEnlace() {
-    // Si acabamos de emitirlo en esta misma sesión (al enviar el correo, o de
-    // una copia anterior), se reutiliza: pedir otro invalidaría el que el
-    // proveedor ya tiene.
-    if (enlace) {
-      await alPortapapeles(enlace)
-      return
-    }
-    if (
-      !esBorrador &&
-      !window.confirm(
-        'Se generará un enlace NUEVO y el anterior dejará de funcionar ' +
-          '(el que ya se envió no se puede recuperar). ¿Continuar?',
-      )
-    ) {
-      return
-    }
-    setOcupado('enlace')
-    if (esBorrador && !(await guardarCambios())) {
-      setOcupado(null)
-      return
-    }
-    try {
-      const { enlace: nuevo } = await api.solicitudesPrecios.generarEnlace(solicitud.id)
-      setEnlace(nuevo)
-      await alPortapapeles(nuevo)
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    } finally {
-      setOcupado(null)
-    }
-  }
-
-  async function alPortapapeles(texto: string) {
+  async function copiar(texto: string) {
     try {
       await navigator.clipboard.writeText(texto)
       notificar('Enlace copiado al portapapeles')
     } catch {
       // Sin permiso de portapapeles queda visible en pantalla para copiarlo
       // a mano — el enlace no se pierde por esto.
-      notificar('Copia el enlace de abajo a mano', 'error')
+      notificar('Copia el enlace de la tabla a mano', 'error')
     }
+  }
+
+  async function enviarA(d: SolicitudDestinatario) {
+    const reenvio = d.estado !== 'borrador'
+    if (
+      reenvio &&
+      !window.confirm(
+        `Se le manda un enlace NUEVO a ${d.proveedor_razon_social} y el anterior deja de ` +
+          'funcionar. Lo que ya hubiera rellenado se conserva. ¿Continuar?',
+      )
+    ) {
+      return
+    }
+    await conAviso(`enviar:${d.id}`, async () => {
+      const { enlace } = await api.solicitudesPrecios.destinatarios.enviar(solicitud.id, d.id)
+      setEnlaces((e) => ({ ...e, [d.id]: enlace }))
+      notificar(`Enviado a ${d.proveedor_razon_social}`)
+      onCambio()
+    })
+  }
+
+  async function enlazar(d: SolicitudDestinatario) {
+    if (enlaces[d.id]) {
+      await copiar(enlaces[d.id])
+      return
+    }
+    if (
+      d.estado !== 'borrador' &&
+      !window.confirm(
+        'Se generará un enlace NUEVO y el anterior dejará de funcionar. ' +
+          'Lo que ya hubiera rellenado se conserva. ¿Continuar?',
+      )
+    ) {
+      return
+    }
+    await conAviso(`enlace:${d.id}`, async () => {
+      const { enlace } = await api.solicitudesPrecios.destinatarios.generarEnlace(
+        solicitud.id,
+        d.id,
+      )
+      setEnlaces((e) => ({ ...e, [d.id]: enlace }))
+      await copiar(enlace)
+      onCambio()
+    })
+  }
+
+  async function quitar(d: SolicitudDestinatario) {
+    if (!window.confirm(`¿Quitar a ${d.proveedor_razon_social} de esta solicitud?`)) return
+    await conAviso(`quitar:${d.id}`, async () => {
+      await api.solicitudesPrecios.destinatarios.remove(solicitud.id, d.id)
+      notificar(`${d.proveedor_razon_social} quitado`)
+      onCambio()
+    })
+  }
+
+  async function cambiarCorreo(d: SolicitudDestinatario, valor: string) {
+    await conAviso(`correo:${d.id}`, async () => {
+      await api.solicitudesPrecios.destinatarios.update(solicitud.id, d.id, {
+        email_destino: valor && valor !== d.proveedor_email ? valor : null,
+      })
+      onCambio()
+    })
+  }
+
+  async function aprobar(ofertaId: string) {
+    await conAviso(`aprobar:${ofertaId}`, async () => {
+      await api.solicitudesPrecios.aprobarOferta(ofertaId)
+      notificar('Adjudicada: el precio se ha aplicado sobre la partida')
+      onAprobado()
+      onCambio()
+    })
   }
 
   async function eliminar() {
-    if (!window.confirm(`¿Eliminar el borrador para «${solicitud.proveedor_razon_social}»?`)) return
-    setOcupado('eliminando')
-    setError(null)
-    try {
+    if (!window.confirm(`¿Eliminar la solicitud «${solicitud.titulo}»?`)) return
+    await conAviso('eliminar', async () => {
       await api.solicitudesPrecios.remove(solicitud.id)
-      notificar('Borrador eliminado')
+      notificar('Solicitud eliminada')
       onCambio()
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-      setOcupado(null)
-    }
-  }
-
-  async function aprobar(lineaId: string) {
-    setAprobandoLinea(lineaId)
-    setError(null)
-    try {
-      await api.solicitudesPrecios.aprobarLinea(solicitud.id, lineaId)
-      notificar('Precio aprobado: el descompuesto de la partida se ha actualizado')
-      onAprobado()
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    } finally {
-      setAprobandoLinea(null)
-    }
-  }
-
-  async function duplicarPara(proveedor: Tercero) {
-    setError(null)
-    try {
-      await api.solicitudesPrecios.create({
-        presupuesto_id: solicitud.presupuesto_id,
-        proveedor_id: proveedor.id,
-        partida_ids: solicitud.lineas
-          .map((l) => l.partida_id)
-          .filter((id): id is string => id != null),
-        notas: notas || null,
-      })
-      notificar(`Borrador creado para ${proveedor.razon_social}`)
-      setDuplicando(false)
-      onCambio()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    }
+    })
   }
 
   return (
-    <Modal
-      title={`${solicitud.codigo} · ${solicitud.proveedor_razon_social}`}
+    <ModalPantalla
+      title={`${solicitud.titulo} · ${solicitud.codigo}`}
       onClose={onClose}
     >
       <div className="form-section">
-        <p className="muted" style={{ marginBottom: 'var(--sp-3)' }}>
-          <span className={`chip chip--estado-${solicitud.estado}`}>
-            {ETIQUETA_ESTADO_SOLICITUD[solicitud.estado] ?? solicitud.estado}
-          </span>
-          {solicitud.proveedor_email ? ` · ${solicitud.proveedor_email}` : ' · sin correo'}
-          {solicitud.fecha_limite ? ` · fecha límite ${solicitud.fecha_limite}` : ''}
-        </p>
-
         <ErrorNotice error={error} />
 
-        {enlace && (
-          <div className="notice" style={{ marginBottom: 'var(--sp-4)' }}>
-            <p className="field__label">Enlace del proveedor</p>
-            <input className="input" readOnly value={enlace} onFocus={(e) => e.target.select()} />
-            <p className="muted" style={{ marginTop: 'var(--sp-1)' }}>
-              Solo se puede ver ahora: en base de datos queda cifrado. Si lo pierdes habrá que
-              generar otro, y este dejará de funcionar.
+        {/* --- 1. Datos --- */}
+        <div className="form-grid">
+          <Field ancho="doble" label="Nombre">
+            <input className="input" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+          </Field>
+          <Field label="Estado">
+            <span className={`chip chip--estado-${solicitud.estado}`}>
+              {ETIQUETA_ESTADO_SOLICITUD[solicitud.estado] ?? solicitud.estado}
+            </span>
+          </Field>
+        </div>
+        <Field label="Notas para los proveedores (opcional)">
+          <textarea
+            className="input"
+            rows={2}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+          />
+        </Field>
+
+        {/* --- 2. Partidas --- */}
+        <p className="field__label" style={{ marginTop: 'var(--sp-4)' }}>
+          Partidas
+        </p>
+        <p className="form-section__note">
+          Se pueden cambiar aunque ya se haya enviado. Los proveedores verán la lista actualizada
+          la próxima vez que entren; si ya te habían contestado, reenvíales el enlace.
+        </p>
+        {grupos.map((grupo) => (
+          <div key={grupo.capituloResumen} style={{ marginBottom: 'var(--sp-3)' }}>
+            <p className="muted" style={{ marginBottom: 'var(--sp-1)' }}>
+              {grupo.capituloResumen}
             </p>
+            {grupo.partidas.map((p) => (
+              <Checkbox
+                key={p.id}
+                label={`${p.resumen} (${p.unidad})`}
+                checked={seleccion.has(p.id)}
+                onChange={() => alternar(p.id)}
+              />
+            ))}
           </div>
+        ))}
+
+        {componentes.length > 0 && (
+          <>
+            <p className="field__label">Componentes de descompuesto</p>
+            <p className="form-section__note">
+              Se piden desde el descompuesto de una partida. Aquí solo se pueden quitar.
+            </p>
+            <ul className="chat-ia__componentes">
+              {solicitud.lineas
+                .filter((l) => l.concepto_id != null)
+                .map((l) => {
+                  const sigue = componentes.some((c) => c.concepto_id === l.concepto_id)
+                  return (
+                    <li key={l.id}>
+                      {l.resumen} ({l.unidad}){' '}
+                      <button
+                        className="btn btn--sm"
+                        disabled={!sigue}
+                        onClick={() =>
+                          setComponentes((actual) =>
+                            actual.filter((c) => c.concepto_id !== l.concepto_id),
+                          )
+                        }
+                      >
+                        {sigue ? 'Quitar' : 'Quitado'}
+                      </button>
+                    </li>
+                  )
+                })}
+            </ul>
+          </>
         )}
 
-        {esBorrador ? (
-          <>
-            <p className="field__label">Partidas</p>
-            {grupos.map((grupo) => (
-              <div key={grupo.capituloResumen} style={{ marginBottom: 'var(--sp-3)' }}>
-                <p className="muted" style={{ marginBottom: 'var(--sp-1)' }}>
-                  {grupo.capituloResumen}
-                </p>
-                {grupo.partidas.map((p) => (
-                  <Checkbox
-                    key={p.id}
-                    label={`${p.resumen} (${p.unidad})`}
-                    checked={seleccion.has(p.id)}
-                    onChange={() => alternar(p.id)}
-                  />
-                ))}
-              </div>
-            ))}
+        <div className="form-actions" style={{ marginBottom: 'var(--sp-5)' }}>
+          <button className="btn btn--primary" disabled={ocupado !== null} onClick={() => void guardar()}>
+            {ocupado !== 'guardar' && <Save size={16} aria-hidden="true" />}
+            {ocupado === 'guardar' ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+        </div>
 
-            <Field label="Notas para el proveedor (opcional)">
-              <textarea
-                className="input"
-                rows={3}
-                value={notas}
-                onChange={(e) => setNotas(e.target.value)}
-              />
-            </Field>
-          </>
-        ) : (
+        {/* --- 3. Proveedores --- */}
+        <p className="field__label">Proveedores</p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th>Enviar a</th>
+                <th>Estado</th>
+                <th>Ofertadas</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {solicitud.destinatarios.map((d) => (
+                <tr key={d.id}>
+                  <td>
+                    <strong>{d.proveedor_razon_social}</strong>
+                    {enlaces[d.id] && (
+                      <input
+                        className="input"
+                        readOnly
+                        value={enlaces[d.id]}
+                        onFocus={(e) => e.target.select()}
+                        style={{ marginTop: 'var(--sp-1)' }}
+                      />
+                    )}
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="email"
+                      defaultValue={d.email_destino ?? d.proveedor_email ?? ''}
+                      placeholder="sin correo"
+                      onBlur={(e) => void cambiarCorreo(d, e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <span className={`chip chip--estado-${d.estado}`}>
+                      {ETIQUETA_ESTADO_SOLICITUD[d.estado] ?? d.estado}
+                    </span>
+                  </td>
+                  <td className="table__num">
+                    {d.ofertas.filter((o) => o.precio_ofertado != null).length || '—'}
+                  </td>
+                  <td className="table__actions">
+                    <Tooltip texto={d.estado === 'borrador' ? 'Mandarle el enlace por correo' : 'Reenviar con un enlace nuevo'}>
+                      <button
+                        className="btn btn--sm"
+                        disabled={ocupado !== null}
+                        onClick={() => void enviarA(d)}
+                      >
+                        <Mail size={14} aria-hidden="true" />
+                        {ocupado === `enviar:${d.id}`
+                          ? 'Enviando…'
+                          : d.estado === 'borrador'
+                            ? 'Enviar'
+                            : 'Reenviar'}
+                      </button>
+                    </Tooltip>{' '}
+                    <Tooltip texto="Generar el enlace para pasárselo tú">
+                      <button
+                        className="btn btn--sm"
+                        disabled={ocupado !== null}
+                        onClick={() => void enlazar(d)}
+                      >
+                        <Link2 size={14} aria-hidden="true" />
+                        {ocupado === `enlace:${d.id}` ? 'Generando…' : 'Enlace'}
+                      </button>
+                    </Tooltip>{' '}
+                    {d.estado === 'borrador' && (
+                      <button
+                        className="btn btn--sm"
+                        disabled={ocupado !== null}
+                        onClick={() => void quitar(d)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        Quitar
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button
+          className="btn btn--sm"
+          style={{ marginTop: 'var(--sp-2)' }}
+          onClick={() => setAnadiendo(true)}
+        >
+          <Send size={14} aria-hidden="true" />
+          Añadir proveedor…
+        </button>
+
+        {/* --- 4. Comparativo --- */}
+        {hayOfertas && (
           <>
-            <p className="field__label">Partidas y precios recibidos</p>
+            <p className="field__label" style={{ marginTop: 'var(--sp-5)' }}>
+              Comparativo
+            </p>
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
                     <th>Partida</th>
                     <th>Medición</th>
-                    <th>Precio ofertado</th>
-                    <th />
+                    {solicitud.destinatarios.map((d) => (
+                      <th key={d.id}>{d.proveedor_razon_social}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {solicitud.lineas.map((l) => (
-                    <tr key={l.id}>
-                      <td>
-                        <span className="muted">{l.capitulo_resumen}</span>
-                        <br />
-                        {l.resumen}
-                        {l.observaciones_proveedor && (
-                          <div className="muted">{l.observaciones_proveedor}</div>
-                        )}
-                      </td>
-                      <td className="table__num">
-                        {l.medicion} {l.unidad}
-                      </td>
-                      <td className="table__num">
-                        {l.precio_ofertado ? `${formatoImporte(l.precio_ofertado)} €` : '—'}
-                      </td>
-                      <td>
-                        {l.aprobada ? (
-                          <span className="badge badge--success">
-                            <Check size={12} aria-hidden="true" /> Aprobada
-                          </span>
-                        ) : (
-                          l.precio_ofertado && (
-                            <Tooltip texto="Sustituye el descompuesto de la partida por esta subcontrata">
-                              <button
-                                className="btn btn--sm"
-                                disabled={aprobandoLinea === l.id}
-                                onClick={() => void aprobar(l.id)}
+                  {solicitud.lineas.map((linea) => {
+                    const celdas = solicitud.destinatarios.map((d) => ({
+                      destinatario: d,
+                      oferta: d.ofertas.find((o) => o.linea_id === linea.id) ?? null,
+                    }))
+                    const mejor = celdas
+                      .map((c) =>
+                        c.oferta?.precio_ofertado ? Number(c.oferta.precio_ofertado) : null,
+                      )
+                      .filter((v): v is number => v !== null)
+                      .reduce((min, v) => (min === null || v < min ? v : min), null as number | null)
+
+                    return (
+                      <tr key={linea.id}>
+                        <td>
+                          <span className="muted">{linea.capitulo_resumen}</span>
+                          <br />
+                          {linea.resumen}
+                        </td>
+                        <td className="table__num">
+                          {linea.medicion} {linea.unidad}
+                        </td>
+                        {celdas.map(({ destinatario, oferta }) => {
+                          if (!oferta || oferta.precio_ofertado == null) {
+                            return (
+                              <td key={destinatario.id} className="muted">
+                                —
+                              </td>
+                            )
+                          }
+                          const esMejor =
+                            mejor !== null && Number(oferta.precio_ofertado) === mejor
+                          const adjudicadaAOtro =
+                            linea.adjudicada_a_id != null &&
+                            linea.adjudicada_a_id !== destinatario.id
+                          return (
+                            <td key={destinatario.id}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 'var(--sp-2)',
+                                  fontWeight: esMejor ? 600 : undefined,
+                                }}
                               >
-                                {aprobandoLinea === l.id ? 'Aprobando…' : 'Aprobar'}
-                              </button>
-                            </Tooltip>
+                                <span className="table__num">
+                                  {formatoImporte(oferta.precio_ofertado)} €
+                                </span>
+                                {oferta.aprobada ? (
+                                  <span className="badge badge--success">
+                                    <Check size={12} aria-hidden="true" /> Adjudicada
+                                  </span>
+                                ) : (
+                                  !adjudicadaAOtro && (
+                                    <Tooltip texto="Aplica este precio sobre la partida del presupuesto">
+                                      <button
+                                        className="btn btn--sm"
+                                        disabled={ocupado !== null}
+                                        onClick={() => void aprobar(oferta.id)}
+                                      >
+                                        {ocupado === `aprobar:${oferta.id}`
+                                          ? 'Adjudicando…'
+                                          : 'Adjudicar'}
+                                      </button>
+                                    </Tooltip>
+                                  )
+                                )}
+                              </div>
+                              {oferta.observaciones_proveedor && (
+                                <div className="muted">{oferta.observaciones_proveedor}</div>
+                              )}
+                            </td>
                           )
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        })}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
-
-            {solicitud.notas && (
-              <>
-                <p className="field__label" style={{ marginTop: 'var(--sp-4)' }}>
-                  Notas enviadas
-                </p>
-                <p>{solicitud.notas}</p>
-              </>
-            )}
           </>
         )}
 
-        <p className="field__label" style={{ marginTop: 'var(--sp-4)' }}>
-          Documentos para el proveedor
+        {/* --- 5. Documentos --- */}
+        <p className="field__label" style={{ marginTop: 'var(--sp-5)' }}>
+          Documentos para los proveedores
         </p>
         <p className="form-section__note">
-          Los ve y se los descarga desde su enlace, sin necesidad de cuenta.
+          Los ven y se los descargan desde su enlace, sin necesidad de cuenta.
         </p>
         <Documentos entidad="solicitud_precios" entidadId={solicitud.id} />
-
-        <button
-          className="btn btn--sm"
-          style={{ marginTop: 'var(--sp-3)' }}
-          onClick={() => setDuplicando(true)}
-        >
-          <Copy size={14} aria-hidden="true" />
-          Pedir lo mismo a otro proveedor…
-        </button>
       </div>
 
       <div className="form-actions">
-        {esBorrador && (
-          <button className="btn" onClick={() => void eliminar()} disabled={ocupado !== null}>
+        {solicitud.estado === 'borrador' && (
+          <button className="btn" disabled={ocupado !== null} onClick={() => void eliminar()}>
             <Trash2 size={16} aria-hidden="true" />
-            {ocupado === 'eliminando' ? 'Eliminando…' : 'Eliminar'}
+            {ocupado === 'eliminar' ? 'Eliminando…' : 'Eliminar solicitud'}
           </button>
         )}
         <button className="btn" onClick={onClose}>
           <X size={16} aria-hidden="true" />
           Cerrar
         </button>
-        {esBorrador && (
-          <button className="btn" disabled={ocupado !== null} onClick={() => void guardar()}>
-            {ocupado !== 'guardando' && <Save size={16} aria-hidden="true" />}
-            {ocupado === 'guardando' ? 'Guardando…' : 'Guardar'}
-          </button>
-        )}
-        <Tooltip
-          texto={
-            enlace
-              ? 'Copiar el enlace recién emitido'
-              : 'Genera el enlace para pasárselo tú (WhatsApp, tu propio correo…)'
-          }
-        >
-          <button className="btn" disabled={ocupado !== null} onClick={() => void copiarEnlace()}>
-            <Link2 size={16} aria-hidden="true" />
-            {ocupado === 'enlace' ? 'Generando…' : 'Copiar enlace'}
-          </button>
-        </Tooltip>
-        {esBorrador && (
-          <Tooltip
-            texto={
-              solicitud.proveedor_email
-                ? `Enviar a ${solicitud.proveedor_email}`
-                : 'Este proveedor no tiene correo: usa «Copiar enlace»'
-            }
-          >
-            <button
-              className="btn btn--primary"
-              disabled={ocupado !== null || !solicitud.proveedor_email}
-              onClick={() => void enviarPorCorreo()}
-            >
-              {ocupado !== 'enviando' && <Mail size={16} aria-hidden="true" />}
-              {ocupado === 'enviando' ? 'Enviando…' : 'Enviar por correo'}
-            </button>
-          </Tooltip>
-        )}
       </div>
 
-      {duplicando && (
-        <SeleccionarProveedorModal
-          onClose={() => setDuplicando(false)}
-          onElegido={(p) => void duplicarPara(p)}
+      {anadiendo && (
+        <AnadirProveedorModal
+          yaElegidos={solicitud.destinatarios.map((d) => d.proveedor_id)}
+          onClose={() => setAnadiendo(false)}
+          onElegido={(p) =>
+            void conAviso('anadir', async () => {
+              await api.solicitudesPrecios.destinatarios.add(solicitud.id, { proveedor_id: p.id })
+              notificar(`${p.razon_social} añadido`)
+              setAnadiendo(false)
+              onCambio()
+            })
+          }
         />
       )}
-    </Modal>
+    </ModalPantalla>
   )
 }
 
-/** Picker mínimo de proveedor, con alta al vuelo — para «Pedir lo mismo a
- *  otro proveedor», que crea una solicitud hermana en vez de meter varios
- *  proveedores en la misma (una solicitud sigue siendo de UN proveedor). */
-function SeleccionarProveedorModal({
+/** Picker de proveedor con alta al vuelo, para sumar destinatarios a un
+ *  paquete que ya existe. */
+function AnadirProveedorModal({
+  yaElegidos,
   onClose,
   onElegido,
 }: {
+  yaElegidos: string[]
   onClose: () => void
   onElegido: (proveedor: Tercero) => void
 }) {
@@ -439,8 +570,10 @@ function SeleccionarProveedorModal({
       .then((p) => setProveedores(p.items))
   }, [])
 
+  const disponibles = proveedores.filter((p) => !yaElegidos.includes(p.id))
+
   return (
-    <Modal title="Elegir proveedor" onClose={onClose}>
+    <Modal title="Añadir proveedor" onClose={onClose}>
       <div className="form-section">
         <Field label="Proveedor">
           <select
@@ -451,12 +584,12 @@ function SeleccionarProveedorModal({
                 setCreando(true)
                 return
               }
-              const proveedor = proveedores.find((p) => p.id === e.target.value)
+              const proveedor = disponibles.find((p) => p.id === e.target.value)
               if (proveedor) onElegido(proveedor)
             }}
           >
             <option value="">Elige un proveedor…</option>
-            {proveedores.map((p) => (
+            {disponibles.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.razon_social}
               </option>

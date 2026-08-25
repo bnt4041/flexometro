@@ -1378,11 +1378,12 @@ export function RejillaPresupuesto({
       {solicitandoPrecios && (
         <SolicitarPreciosModal
           presupuestoId={presupuesto.id}
-          partidas={solicitandoPrecios.map((f) => ({
-            id: f.id,
+          items={solicitandoPrecios.map((f) => ({
+            clave: f.id,
             resumen: f.resumen,
             unidad: f.unidad,
           }))}
+          seleccion={{ partida_ids: solicitandoPrecios.map((f) => f.id) }}
           onClose={() => setSolicitandoPrecios(null)}
           onCreada={() => setSolicitandoPrecios(null)}
         />

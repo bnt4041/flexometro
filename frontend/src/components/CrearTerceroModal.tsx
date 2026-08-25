@@ -23,6 +23,7 @@ export function CrearTerceroModal({
   const [razonSocial, setRazonSocial] = useState('')
   const [nif, setNif] = useState('')
   const [ciudad, setCiudad] = useState('')
+  const [email, setEmail] = useState('')
   const [esCliente, setEsCliente] = useState(rolPorDefecto === 'cliente')
   const [esProveedor, setEsProveedor] = useState(rolPorDefecto === 'proveedor')
   const [esSubcontratista, setEsSubcontratista] = useState(rolPorDefecto === 'subcontratista')
@@ -40,6 +41,7 @@ export function CrearTerceroModal({
         es_proveedor: esProveedor,
         es_subcontratista: esSubcontratista,
         ciudad: ciudad || null,
+        email: email || null,
       })
       onCreado(tercero)
     } catch (err) {
@@ -66,6 +68,18 @@ export function CrearTerceroModal({
           </Field>
           <Field label="Población">
             <input className="input" value={ciudad} onChange={(e) => setCiudad(e.target.value)} />
+          </Field>
+          <Field
+            ancho="doble"
+            label="Email"
+            hint="Para poder mandarle solicitudes de precios o documentos"
+          >
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </Field>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-5)', marginTop: 'var(--sp-4)' }}>

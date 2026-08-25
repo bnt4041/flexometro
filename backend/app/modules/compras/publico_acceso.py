@@ -53,7 +53,8 @@ from app.core.tenancy import (
 from app.modules.compras.models import (
     AccesoEstado,
     AccesoToken,
-    EstadoSolicitud,
+    EstadoDestinatario,
+    SolicitudDestinatario,
     SolicitudPrecios,
 )
 
@@ -63,7 +64,9 @@ from app.modules.compras.models import (
 BYTES_TOKEN = 32
 
 # Estados en los que el enlace sigue admitiendo respuesta del proveedor.
-_ESTADOS_ABIERTOS = frozenset({EstadoSolicitud.ENVIADA, EstadoSolicitud.RESPONDIDA})
+_ESTADOS_ABIERTOS = frozenset(
+    {EstadoDestinatario.ENVIADA, EstadoDestinatario.RESPONDIDA}
+)
 
 
 def generar_token() -> tuple[str, str]:
@@ -79,9 +82,14 @@ def hashear_token(token: str) -> str:
 
 @dataclass(frozen=True)
 class ContextoProveedor:
-    """Lo que un endpoint público necesita saber, ya validado."""
+    """Lo que un endpoint público necesita saber, ya validado.
+
+    `destinatario` es QUIÉN está entrando: el token identifica a un proveedor
+    concreto dentro del paquete, y todo lo que se escriba tiene que quedar
+    acotado a él."""
 
     solicitud: SolicitudPrecios
+    destinatario: SolicitudDestinatario
     estado: AccesoEstado
     organization_id: uuid.UUID
 
@@ -134,7 +142,7 @@ async def acceso_proveedor(
         text("SELECT slug FROM core.organization WHERE id = :org_id"), {"org_id": str(org_id)}
     )
     principal = Principal(
-        subject=f"proveedor:{acceso.solicitud_id}",
+        subject=f"proveedor:{acceso.destinatario_id}",
         organization_id=org_id,
         organization_slug=slug,
         username="Proveedor (enlace externo)",
@@ -144,25 +152,37 @@ async def acceso_proveedor(
     request.state.principal = principal
 
     try:
-        # Ya con RLS puesto: el estado del enlace y la solicitud se leen como
-        # cualquier otra tabla de negocio.
+        # Ya con RLS puesto: el estado del enlace, el destinatario y su
+        # paquete se leen como cualquier otra tabla de negocio.
         estado = await session.scalar(
-            select(AccesoEstado).where(AccesoEstado.solicitud_id == acceso.solicitud_id)
+            select(AccesoEstado).where(AccesoEstado.destinatario_id == acceso.destinatario_id)
         )
+        destinatario = await session.scalar(
+            select(SolicitudDestinatario).where(
+                SolicitudDestinatario.id == acceso.destinatario_id
+            )
+        )
+        if estado is None or destinatario is None:
+            raise _no_encontrado()
         solicitud = await session.scalar(
-            select(SolicitudPrecios).where(SolicitudPrecios.id == acceso.solicitud_id)
+            select(SolicitudPrecios).where(SolicitudPrecios.id == destinatario.solicitud_id)
         )
-        if estado is None or solicitud is None:
+        if solicitud is None:
             raise _no_encontrado()
         if estado.revocado or estado.expira_en <= datetime.now(UTC):
             raise _no_encontrado()
-        if solicitud.estado not in _ESTADOS_ABIERTOS:
+        if destinatario.estado not in _ESTADOS_ABIERTOS:
             raise _no_encontrado()
 
         estado.usos += 1
         estado.ultimo_uso_en = datetime.now(UTC)
 
-        yield ContextoProveedor(solicitud=solicitud, estado=estado, organization_id=org_id)
+        yield ContextoProveedor(
+            solicitud=solicitud,
+            destinatario=destinatario,
+            estado=estado,
+            organization_id=org_id,
+        )
 
         # Con el principal todavía en contexto, para que la auditoría tenga
         # autor. El commit lo hace `get_session`, nunca el router: la variable
