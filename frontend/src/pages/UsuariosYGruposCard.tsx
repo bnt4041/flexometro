@@ -3,6 +3,7 @@ import { Mail, Pencil, Plus, Power, Save, Trash2, UserMinus, UserPlus, X } from 
 
 import { Checkbox, ErrorNotice, Field, ModalPantalla } from '../components/ui'
 import type { Alcance, Grupo, ModuloDisponible, UsuarioKeycloak, UsuariosGruposAPI } from '../lib/api'
+import { useToast } from '../toast'
 
 const ETIQUETA_ALCANCE: Record<Alcance, string> = {
   ninguno: 'Ninguno',
@@ -119,6 +120,7 @@ function UsuariosSeccion({
   const [editando, setEditando] = useState<UsuarioKeycloak | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { notificar } = useToast()
 
   async function toggleHabilitado(usuario: UsuarioKeycloak) {
     setBusy(usuario.id)
@@ -137,11 +139,22 @@ function UsuariosSeccion({
     setBusy(usuario.id)
     setError(null)
     try {
-      await api.reenviar(usuario.id, {
+      const resultado = await api.reenviar(usuario.id, {
         username: usuario.username,
         email: usuario.email ?? '',
         nombre: usuario.firstName ?? usuario.username,
       })
+      // La petición siempre responde 200 aunque el correo no llegue (el
+      // envío es best-effort) — sin comprobar `email_enviado` el usuario no
+      // tiene ninguna forma de saber si de verdad se ha reenviado la
+      // invitación o si se ha quedado callado por un fallo de SMTP.
+      if (resultado.email_enviado) {
+        notificar(`Invitación reenviada a ${usuario.email}`)
+      } else {
+        setError(
+          `La contraseña se ha reiniciado, pero el correo a ${usuario.email} no se pudo enviar — revisa la configuración SMTP.`,
+        )
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {

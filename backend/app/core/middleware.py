@@ -22,6 +22,39 @@ from app.core.tenancy import (
 # Rutas que no necesitan organización activa.
 PUBLIC_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/api/config"})
 
+# Espacio sin autenticar, por prefijo en vez de por ruta exacta: lo usa la
+# separata que rellena un proveedor externo, que llega desde un enlace de
+# correo y no tiene cuenta en el sistema. Cada endpoint de aquí dentro se
+# autoriza a sí mismo contra el token de la URL y fija a mano el contexto de
+# organización (ver `compras/publico_router.py`).
+#
+# ⚠️ Montar un router bajo este prefijo lo deja SIN autenticar y SIN
+# `require_permiso`, en silencio. Para que eso no pase por descuido,
+# `app.main.create_app` comprueba al arrancar que las rutas que cuelgan de
+# aquí son exactamente las de la lista blanca `RUTAS_PUBLICAS_PERMITIDAS`.
+PUBLIC_PREFIXES = ("/api/publico/",)
+
+# Lista blanca de lo que legítimamente vive bajo `PUBLIC_PREFIXES`, con el
+# formato de `APIRoute.path`. Añadir algo aquí es una decisión de seguridad
+# consciente, no un efecto colateral de crear un router.
+RUTAS_PUBLICAS_PERMITIDAS = frozenset(
+    {
+        "/api/publico/oferta/{token}",
+        "/api/publico/oferta/{token}/lineas",
+        "/api/publico/oferta/{token}/enviar",
+        # Documentos que el EMISOR adjuntó al borrador antes de enviarlo — de
+        # solo lectura para el proveedor, nunca de subida (eso es la lectura
+        # con IA del PDF del proveedor, fuera de esta fase, y sigue sin
+        # declararse de antemano).
+        "/api/publico/oferta/{token}/documentos",
+        "/api/publico/oferta/{token}/documentos/{documento_id}/descargar",
+    }
+)
+
+
+def es_ruta_publica(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
 
 class TenancyMiddleware:
     def __init__(self, app: ASGIApp, auth_backend: AuthBackend) -> None:
@@ -29,7 +62,7 @@ class TenancyMiddleware:
         self.auth_backend = auth_backend
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"] in PUBLIC_PATHS:
+        if scope["type"] != "http" or es_ruta_publica(scope["path"]):
             await self.app(scope, receive, send)
             return
 

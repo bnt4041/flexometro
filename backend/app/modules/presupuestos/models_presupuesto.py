@@ -42,6 +42,17 @@ class EstadoPresupuesto(StrEnum):
     CANCELADO = "cancelado"
 
 
+class TipoPresupuesto(StrEnum):
+    """CLIENTE es la oferta de toda la vida. PROVEEDOR es la oferta que
+    devuelve un proveedor a una solicitud de precios (`compras.solicitud_
+    precios`) — misma estructura de capítulos/partidas/mediciones, así que
+    comparte tabla en vez de duplicar el árbol; solo cambia qué lado del
+    negocio la generó."""
+
+    CLIENTE = "cliente"
+    PROVEEDOR = "proveedor"
+
+
 class MetodoCalculo(StrEnum):
     """Cómo se pasa del coste al precio de venta — Fase 35.
 
@@ -110,6 +121,26 @@ class Presupuesto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Autori
         index=True,
     )
     emplazamiento: Mapped[str | None] = mapped_column(String(250), nullable=True)
+
+    # --- Oferta recibida de un proveedor ---
+    # La oferta que devuelve un proveedor a una solicitud de precios es un
+    # presupuesto con la misma estructura (capítulos, partidas, mediciones,
+    # descompuestos), así que vive en esta misma tabla distinguida por `tipo`
+    # en vez de en un árbol paralelo duplicado. Todo listado de presupuestos
+    # de cliente filtra por `tipo == CLIENTE`; el de Compras, por PROVEEDOR.
+    tipo: Mapped[TipoPresupuesto] = mapped_column(
+        enum_column(TipoPresupuesto, "tipo_presupuesto"),
+        nullable=False,
+        default=TipoPresupuesto.CLIENTE,
+    )
+    # Quién ofertó. Solo en las de tipo PROVEEDOR; `cliente_id` es su
+    # equivalente en las de cliente y son excluyentes en la práctica.
+    proveedor_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
     validez_dias: Mapped[int | None] = mapped_column(Integer, nullable=True)

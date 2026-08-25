@@ -78,9 +78,7 @@ async def enviar_email(
 
     org_id = require_organization_id()
 
-    config = await settings_service.obtener_configuracion_smtp_organizacion(session, organization_id)
-    if not config.host:
-        config = await settings_service.obtener_configuracion_smtp_plataforma(session)
+    config = await settings_service.configuracion_smtp_de(session, organization_id)
 
     adjuntos: list[tuple[str, str, bytes]] = []
     adjuntos_nota: list[dict] = []

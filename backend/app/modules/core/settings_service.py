@@ -87,6 +87,20 @@ async def obtener_configuracion_smtp_organizacion(
     return config
 
 
+async def configuracion_smtp_de(
+    session: AsyncSession, organization_id: uuid.UUID
+) -> ConfiguracionSmtpOrganizacion | ConfiguracionSmtpPlataforma:
+    """La que de verdad hay que usar para mandar un correo en nombre de esta
+    organización: la suya propia si la ha configurado, si no la de
+    plataforma. Mismo criterio ya usado en `crm.service.enviar_email`,
+    reunido aquí para no repetirlo cada vez que un módulo nuevo necesite
+    mandar correo."""
+    propia = await obtener_configuracion_smtp_organizacion(session, organization_id)
+    if propia.host:
+        return propia
+    return await obtener_configuracion_smtp_plataforma(session)
+
+
 async def actualizar_configuracion_smtp_organizacion(
     session: AsyncSession, organization_id: uuid.UUID, datos: dict
 ) -> ConfiguracionSmtpOrganizacion:

@@ -27,6 +27,7 @@ from app.modules.presupuestos.models_presupuesto import (
     Partida,
     PartidaDescomposicion,
     Presupuesto,
+    TipoPresupuesto,
 )
 from app.modules.presupuestos.presupuesto_schemas import (
     CambioLinea,
@@ -116,6 +117,7 @@ async def listar(
     q: str | None = None,
     estado: str | None = None,
     es_plantilla: bool = False,
+    tipo: TipoPresupuesto = TipoPresupuesto.CLIENTE,
     solo_ultima_version: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -124,9 +126,12 @@ async def listar(
     org_id = require_organization_id()
     # Las plantillas no se mezclan con los presupuestos reales en el listado:
     # comparten tabla, pero no son lo mismo para quien mira la pantalla.
+    # Igual con `tipo`: por defecto CLIENTE, para que el listado de toda la
+    # vida no tenga que cambiar y siga sin ver las ofertas de proveedor.
     base = select(Presupuesto).where(
         Presupuesto.organization_id == org_id,
         Presupuesto.es_plantilla.is_(es_plantilla),
+        Presupuesto.tipo == tipo,
     )
     if solo_ultima_version:
         # De cada línea de versiones, solo la más alta. La línea se identifica

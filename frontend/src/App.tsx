@@ -36,10 +36,12 @@ import { ImportarBC3 } from './pages/ImportarBC3'
 import { Landing } from './pages/Landing'
 import { ObraCrear, Obras } from './pages/Obras'
 import { ObraDetalle } from './pages/ObraDetalle'
+import { OfertaProveedor } from './pages/OfertaProveedor'
 import { Personal } from './pages/Personal'
 import { Placeholder } from './pages/Placeholder'
 import { PresupuestoCrear, Presupuestos } from './pages/Presupuestos'
 import { PresupuestoDetalle } from './pages/PresupuestoDetalle'
+import { PresupuestosProveedor } from './pages/PresupuestosProveedor'
 import { TerceroCrear, Terceros } from './pages/Terceros'
 import { TerceroDetalle } from './pages/TerceroDetalle'
 import { UsuariosGrupos } from './pages/UsuariosGrupos'
@@ -55,10 +57,14 @@ const PANTALLAS: Record<string, ComponentType> = {
   '/contactos': Contactos,
   '/banco-precios': BancoPrecios,
   '/presupuestos': Presupuestos,
+  // Sin entrada en el menú (ver `presupuestos/__init__.py`): la pantalla
+  // sigue existiendo y accesible por URL, pero el BC3 se importa ya desde
+  // dentro del presupuesto o del banco, que es donde tiene contexto.
   '/importar-bc3': ImportarBC3,
   '/obras': Obras,
   '/personal': Personal,
   '/albaranes': Albaranes,
+  '/presupuestos-proveedor': PresupuestosProveedor,
   '/certificaciones': Certificaciones,
   '/facturas': Facturas,
   '/ia/patrones': IaPatrones,
@@ -268,10 +274,21 @@ function Portada({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <ToastProvider>
-      <WorkspaceProvider>
-        <Workspace />
-      </WorkspaceProvider>
-    </ToastProvider>
+    <Routes>
+      {/* Único tramo sin sesión de toda la aplicación (ver plan «Solicitud de
+          precios a proveedor», §2): fuera de `WorkspaceProvider` a propósito,
+          para que el arranque de Keycloak de éste no llegue a dispararse. */}
+      <Route path="/oferta/:token" element={<OfertaProveedor />} />
+      <Route
+        path="/*"
+        element={
+          <ToastProvider>
+            <WorkspaceProvider>
+              <Workspace />
+            </WorkspaceProvider>
+          </ToastProvider>
+        }
+      />
+    </Routes>
   )
 }

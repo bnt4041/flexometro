@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Solicitud de precios</title>
+</head>
+<body style="margin:0; padding:0; background:#f3f4f6; font-family: Arial, Helvetica, sans-serif; color:#1a2130;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding: 32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; overflow:hidden;">
+          <tr>
+            <td style="background:#1b293e; color:#ffffff; padding:20px 28px; font-size:20px; font-weight:700;">
+              {{ emisor_nombre }}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px;">
+              <p style="font-size:16px; margin:0 0 16px;">Hola{% if proveedor_nombre %}, {{ proveedor_nombre }}{% endif %},</p>
+              <p style="margin:0 0 16px;">
+                <strong>{{ emisor_nombre }}</strong> te pide precio para {{ num_lineas }}
+                partida{% if num_lineas != 1 %}s{% endif %} de la obra «{{ presupuesto_nombre }}».
+              </p>
+              {% if notas %}
+              <p style="margin:0 0 16px; padding:12px 16px; background:#f3f4f6; border-radius:6px;">
+                {{ notas }}
+              </p>
+              {% endif %}
+              {% if fecha_limite %}
+              <p style="margin:0 0 16px;">
+                Se agradece respuesta antes del <strong>{{ fecha_limite }}</strong>.
+              </p>
+              {% endif %}
+              <p style="margin:0 0 24px;">
+                <a href="{{ url_oferta }}" style="display:inline-block; background:#f5a904; color:#1b293e; text-decoration:none; padding:10px 20px; border-radius:6px; font-weight:700;">
+                  Ver partidas y poner precio
+                </a>
+              </p>
+              <p style="margin:0; font-size:13px; color:#5b6472;">
+                No hace falta ninguna cuenta ni contraseña: el enlace de arriba es tuyo y solo
+                tuyo — no lo reenvíes. Puedes entrar, ir guardando y volver más tarde hasta que
+                envíes tu oferta.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

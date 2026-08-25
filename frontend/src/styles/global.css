@@ -2656,6 +2656,25 @@ input[type='file'].input {
   color: var(--c-success);
 }
 
+/* --- Estados de solicitud de precios (borrador y aprobada ya existen) --- */
+
+.chip--estado-enviada {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.chip--estado-respondida,
+.chip--estado-aprobada {
+  background: var(--c-success-soft);
+  color: var(--c-success);
+}
+
+.chip--estado-descartada,
+.chip--estado-caducada {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+}
+
 /* --- Estados de factura (borrador ya existe, reutilizado) --- */
 
 .chip--estado-emitida {

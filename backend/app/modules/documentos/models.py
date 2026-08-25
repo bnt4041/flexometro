@@ -29,6 +29,7 @@ class EntidadDocumento(StrEnum):
     OBRA = "obra"
     CERTIFICACION = "certificacion"
     FACTURA = "factura"
+    SOLICITUD_PRECIOS = "solicitud_precios"
 
 
 class Documento(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):

@@ -8,7 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.core.enums import OrigenDato, TipoIVA
 from app.core.html_seguro import sanear_html
 from app.modules.presupuestos.models import NaturalezaConcepto
-from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, MetodoCalculo
+from app.modules.presupuestos.models_presupuesto import (
+    EstadoPresupuesto,
+    MetodoCalculo,
+    TipoPresupuesto,
+)
 
 
 class LineaMedicionBase(BaseModel):
@@ -572,6 +576,12 @@ class PresupuestoOut(PresupuestoBase):
 
     id: uuid.UUID
     codigo: str
+    # Solo lectura a propósito: no vive en PresupuestoBase/PresupuestoCreate,
+    # para que crear un presupuesto por la vía normal nunca pueda marcarlo
+    # como oferta de proveedor — eso solo lo hace `compras.oferta_service`
+    # al cerrar una solicitud de precios.
+    tipo: TipoPresupuesto
+    proveedor_id: uuid.UUID | None = None
     estado: EstadoPresupuesto
     precios_bloqueados: bool
     raiz_id: uuid.UUID | None

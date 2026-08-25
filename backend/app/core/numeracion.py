@@ -47,6 +47,11 @@ PATRON_POR_DEFECTO: dict[str, str] = {
     "presupuesto": "PRE{SEQ:05d}",
     "albaran": "ALB{SEQ:05d}",
     "factura": "FAC{SEQ:05d}",
+    # Petición de oferta a un proveedor, y la oferta que devuelve. Series
+    # aparte de "presupuesto" a propósito: una oferta recibida no debe
+    # consumir un número de la serie que el cliente ve en sus presupuestos.
+    "solicitud_precios": "SOL{SEQ:05d}",
+    "oferta_proveedor": "OFE{SEQ:05d}",
 }
 
 _TOKEN_RE = re.compile(r"\{(SEQ|YYYY|YY|MM|DD|ORG)(?::0(\d+)d)?\}")

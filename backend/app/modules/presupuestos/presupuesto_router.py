@@ -18,7 +18,11 @@ from app.modules.presupuestos import service as banco_service
 from app.modules.presupuestos import sustitucion_service
 from app.modules.presupuestos import versionado
 from app.modules.presupuestos.models import NaturalezaConcepto
-from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto, Presupuesto
+from app.modules.presupuestos.models_presupuesto import (
+    EstadoPresupuesto,
+    Presupuesto,
+    TipoPresupuesto,
+)
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.core.tenant_utils import cuenta_id_del_principal
@@ -98,6 +102,10 @@ async def listar(
     q: str | None = None,
     estado: EstadoPresupuesto | None = None,
     es_plantilla: bool = Query(default=False, description="true para listar plantillas"),
+    tipo: TipoPresupuesto = Query(
+        default=TipoPresupuesto.CLIENTE,
+        description="cliente (el listado de toda la vida) o proveedor (ofertas recibidas)",
+    ),
     solo_ultima_version: bool = Query(
         default=False, description="Solo la versión más alta de cada línea"
     ),
@@ -112,6 +120,7 @@ async def listar(
         q=q,
         estado=estado.value if estado else None,
         es_plantilla=es_plantilla,
+        tipo=tipo,
         solo_ultima_version=solo_ultima_version,
         limit=limit,
         offset=offset,

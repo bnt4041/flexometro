@@ -15,6 +15,7 @@ import {
   LockOpen,
   Plus,
   Ruler,
+  Send,
   Sparkles,
   Trash2,
   Upload,
@@ -27,6 +28,7 @@ import { DocumentoIAModal } from './DocumentoIAModal'
 import { ImportarBC3EnCapituloModal } from './ImportarBC3EnCapituloModal'
 import { PegarModal } from './PegarModal'
 import type { ColumnaRejilla, ItemMenuContextual, OpcionCelda } from './RejillaEditable'
+import { SolicitarPreciosModal } from './SolicitarPreciosModal'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
@@ -195,6 +197,11 @@ export function RejillaPresupuesto({
   // partida (no un capítulo) — un capítulo no tiene ni resumen ni precio
   // propio con qué buscar un sustituto.
   const [sustituyendo, setSustituyendo] = useState<FilaPresupuesto | null>(null)
+  // «Solicitar precios…» (Fase 53): sobre la marca múltiple si hay más de
+  // una fila marcada e incluye la pulsada, si no sobre la fila sola — mismo
+  // patrón que ya usa `RejillaBancoPrecios` para "Familia (N)".
+  const [marcadas, setMarcadas] = useState<string[]>([])
+  const [solicitandoPrecios, setSolicitandoPrecios] = useState<FilaPresupuesto[] | null>(null)
   // "Arrastrar al presupuesto": BC3 se cuelga de un capítulo, o de la raíz
   // del presupuesto (`capituloId: null`) como capítulos de primer nivel;
   // PDF/imagen abre la conversación con la IA. `filaParaSubir` es del botón
@@ -793,6 +800,23 @@ export function RejillaPresupuesto({
     inputFicheroRef.current?.click()
   }
 
+  /** Partidas de un capítulo, recursivamente a través de sus sub-capítulos —
+   *  para "Solicitar precios…" sobre el capítulo entero en vez de partida a
+   *  partida. */
+  function partidasDescendientes(capituloId: string): FilaPresupuesto[] {
+    const resultado: FilaPresupuesto[] = []
+    const pendientes = [capituloId]
+    while (pendientes.length > 0) {
+      const id = pendientes.pop()!
+      for (const f of filas) {
+        if (f.padreId !== id) continue
+        if (f.tipo === 'partida') resultado.push(f)
+        else pendientes.push(f.id)
+      }
+    }
+    return resultado
+  }
+
   function menuContextualDe(f: FilaPresupuesto): ItemMenuContextual[] {
     const esRaiz = f.id === ID_RAIZ
     const items: ItemMenuContextual[] = [
@@ -827,6 +851,30 @@ export function RejillaPresupuesto({
         icono: <ArrowLeftRight size={14} aria-hidden="true" />,
         onClick: () => setSustituyendo(f),
       })
+    }
+    if (f.tipo === 'partida') {
+      const objetivo = marcadas.length > 1 && marcadas.includes(f.id) ? marcadas : [f.id]
+      const partidas = objetivo
+        .map((id) => porId.get(id))
+        .filter((fila): fila is FilaPresupuesto => fila?.tipo === 'partida')
+      const sufijo = partidas.length > 1 ? ` (${partidas.length})` : ''
+      items.push({
+        id: 'solicitar-precios',
+        etiqueta: `Solicitar precios…${sufijo}`,
+        icono: <Send size={14} aria-hidden="true" />,
+        onClick: () => setSolicitandoPrecios(partidas),
+      })
+    }
+    if (f.tipo === 'capitulo' && !esRaiz) {
+      const partidas = partidasDescendientes(f.id)
+      if (partidas.length > 0) {
+        items.push({
+          id: 'solicitar-precios-capitulo',
+          etiqueta: `Solicitar precios del capítulo… (${partidas.length})`,
+          icono: <Send size={14} aria-hidden="true" />,
+          onClick: () => setSolicitandoPrecios(partidas),
+        })
+      }
     }
     if (iaActiva) {
       items.push({
@@ -1105,6 +1153,7 @@ export function RejillaPresupuesto({
           onSeleccionar?.(f)
         }}
         seleccionadaId={seleccionadaId}
+        onMarcarVarias={setMarcadas}
         onCopiar={copiar}
         onPegar={pegar}
         onSoltarEn={(f, zona) => (f && zona !== 'dentro' ? soltarEnBorde(f, zona) : pegar(f))}
@@ -1324,6 +1373,18 @@ export function RejillaPresupuesto({
             notificar(`«${sustituyendo.resumen}» sustituida por «${candidato.resumen}»`)
           }}
           onClose={() => setSustituyendo(null)}
+        />
+      )}
+      {solicitandoPrecios && (
+        <SolicitarPreciosModal
+          presupuestoId={presupuesto.id}
+          partidas={solicitandoPrecios.map((f) => ({
+            id: f.id,
+            resumen: f.resumen,
+            unidad: f.unidad,
+          }))}
+          onClose={() => setSolicitandoPrecios(null)}
+          onCreada={() => setSolicitandoPrecios(null)}
         />
       )}
     </>

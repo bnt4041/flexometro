@@ -6,7 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.auth import build_auth_backend
 from app.core.config import get_settings
-from app.core.middleware import TenancyMiddleware
+from app.core.middleware import (
+    PUBLIC_PREFIXES,
+    RUTAS_PUBLICAS_PERMITIDAS,
+    TenancyMiddleware,
+)
 from app.core.modules import registry
 from app.core.storage import asegurar_bucket
 from app.modules import register_all
@@ -32,6 +36,32 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("No se pudieron preparar las plantillas de sistema", exc_info=True)
     yield
+
+
+def _verificar_rutas_publicas(app: FastAPI) -> None:
+    """Falla el arranque si alguien cuelga una ruta nueva del espacio sin
+    autenticar sin declararla como tal.
+
+    `PUBLIC_PREFIXES` deja fuera del middleware de tenancy todo lo que empiece
+    por ese prefijo — es decir, sin sesión, sin organización en contexto y sin
+    `require_permiso`. Eso es correcto para la separata del proveedor, que se
+    autoriza contra el token de su enlace, pero es una trampa para el
+    siguiente que monte un router ahí sin darse cuenta. Que reviente al
+    arrancar es mucho mejor que descubrirlo en producción.
+    """
+    montadas = {
+        ruta.path
+        for ruta in app.routes
+        if getattr(ruta, "path", "").startswith(PUBLIC_PREFIXES)
+    }
+    no_declaradas = montadas - RUTAS_PUBLICAS_PERMITIDAS
+    if no_declaradas:
+        raise RuntimeError(
+            "Hay rutas bajo el espacio público sin declarar en "
+            f"RUTAS_PUBLICAS_PERMITIDAS: {sorted(no_declaradas)}. "
+            "Cualquier ruta ahí queda SIN autenticar: decláralas a conciencia "
+            "en app/core/middleware.py o móntalas fuera de ese prefijo."
+        )
 
 
 def create_app() -> FastAPI:
@@ -79,6 +109,7 @@ def create_app() -> FastAPI:
             "client_id": "obras-web",
         }
 
+    _verificar_rutas_publicas(app)
     return app
 
 

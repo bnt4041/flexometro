@@ -5,6 +5,7 @@ import { Mail, Pencil, Plus, Power, Trash2, X } from 'lucide-react'
 import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
 import type { UsuarioKeycloak } from '../lib/api'
+import { useToast } from '../toast'
 
 export type ContextoPersonalPlataforma = { onCambio: () => void }
 
@@ -17,6 +18,7 @@ export function AdminPersonalPlataforma() {
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  const { notificar } = useToast()
 
   const cargar = useCallback(async () => {
     try {
@@ -50,11 +52,20 @@ export function AdminPersonalPlataforma() {
     setBusy(usuario.id)
     setError(null)
     try {
-      await api.admin.personalPlataforma.reenviar(usuario.id, {
+      const resultado = await api.admin.personalPlataforma.reenviar(usuario.id, {
         username: usuario.username,
         email: usuario.email ?? '',
         nombre: usuario.firstName ?? usuario.username,
       })
+      // 200 aunque el correo no llegue (envío best-effort) — sin mirar
+      // `email_enviado` no hay forma de saber si de verdad se ha reenviado.
+      if (resultado.email_enviado) {
+        notificar(`Invitación reenviada a ${usuario.email}`)
+      } else {
+        setError(
+          `La contraseña se ha reiniciado, pero el correo a ${usuario.email} no se pudo enviar — revisa la configuración SMTP.`,
+        )
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {

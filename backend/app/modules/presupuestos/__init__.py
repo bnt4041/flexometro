@@ -18,6 +18,5 @@ SPEC = ModuleSpec(
     nav=(
         NavItem(label="Banco de precios", path="/banco-precios", icon="layers"),
         NavItem(label="Presupuestos", path="/presupuestos", icon="calculator"),
-        NavItem(label="Importar BC3", path="/importar-bc3", icon="upload"),
     ),
 )

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import { Comparativo } from '../components/Comparativo'
 import { ContactosAsociados } from '../components/ContactosAsociados'
 import { CopiarPresupuestoModal } from '../components/CopiarPresupuestoModal'
 import { DescompuestoPartida } from '../components/DescompuestoPartida'
@@ -669,6 +670,18 @@ export function PresupuestoDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="presupuesto" entidadId={id} />,
+    },
+    {
+      id: 'comparativo',
+      etiqueta: 'Comparativo',
+      icono: 'comparativo',
+      contenido: (
+        <Comparativo
+          presupuestoId={id}
+          capitulos={presupuesto.capitulos}
+          onAprobado={() => void cargar()}
+        />
+      ),
     },
     {
       id: 'historial',

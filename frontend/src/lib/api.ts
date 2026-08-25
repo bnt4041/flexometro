@@ -580,6 +580,7 @@ export type EntidadDocumento =
   | 'obra'
   | 'certificacion'
   | 'factura'
+  | 'solicitud_precios'
 
 export interface Documento {
   id: string
@@ -995,11 +996,15 @@ export interface Comparacion {
   sin_cambios: number
 }
 
+export type TipoPresupuesto = 'cliente' | 'proveedor'
+
 export interface Presupuesto {
   id: string
   codigo: string
   nombre: string
   descripcion: string | null
+  tipo: TipoPresupuesto
+  proveedor_id: string | null
   cliente_id: string | null
   emplazamiento: string | null
   fecha: string | null
@@ -1136,6 +1141,43 @@ export interface AlbaranDetalle extends Albaran {
   proveedor_razon_social: string
   lineas: AlbaranLinea[]
   total: string
+}
+
+export type EstadoSolicitudPrecios =
+  | 'borrador'
+  | 'enviada'
+  | 'respondida'
+  | 'aprobada'
+  | 'descartada'
+  | 'caducada'
+
+export interface SolicitudLinea {
+  id: string
+  partida_id: string | null
+  capitulo_resumen: string | null
+  codigo: string | null
+  resumen: string
+  unidad: string
+  medicion: string
+  precio_ofertado: string | null
+  observaciones_proveedor: string | null
+  aprobada: boolean
+}
+
+export interface SolicitudPrecios {
+  id: string
+  codigo: string
+  presupuesto_id: string
+  proveedor_id: string
+  proveedor_razon_social: string
+  proveedor_email: string | null
+  estado: EstadoSolicitudPrecios
+  fecha_limite: string | null
+  enviada_en: string | null
+  respondida_en: string | null
+  notas: string | null
+  oferta_presupuesto_id: string | null
+  lineas: SolicitudLinea[]
 }
 
 export interface CosteCapitulo {
@@ -2406,6 +2448,7 @@ export const api = {
       q?: string
       estado?: string
       es_plantilla?: boolean
+      tipo?: TipoPresupuesto
       solo_ultima_version?: boolean
       limit?: number
       offset?: number
@@ -2776,6 +2819,39 @@ export const api = {
     remove: (id: string) => del(`/api/albaranes-lineas/${id}`),
   },
 
+  solicitudesPrecios: {
+    create: (datos: {
+      presupuesto_id: string
+      proveedor_id: string
+      partida_ids: string[]
+      fecha_limite?: string | null
+      notas?: string | null
+    }) => post<SolicitudPrecios>('/api/solicitudes-precios', datos),
+    listarPorPresupuesto: (presupuestoId: string) =>
+      request<SolicitudPrecios[]>(`/api/solicitudes-precios/por-presupuesto/${presupuestoId}`),
+    aprobarLinea: (solicitudId: string, lineaId: string) =>
+      post<{ partida_id: string; precio: string }>(
+        `/api/solicitudes-precios/${solicitudId}/lineas/${lineaId}/aprobar`,
+        {},
+      ),
+    /** Solo mientras `estado === 'borrador'` — el backend rechaza el resto
+     *  con un 422. */
+    update: (id: string, datos: { notas?: string | null; fecha_limite?: string | null }) =>
+      patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}`, datos),
+    actualizarLineas: (id: string, partidaIds: string[]) =>
+      patch<SolicitudPrecios>(`/api/solicitudes-precios/${id}/lineas`, { partida_ids: partidaIds }),
+    /** Devuelve el enlace del proveedor además de la solicitud: es la única
+     *  vez que viaja en claro (en base de datos solo queda su hash), así que
+     *  si se quiere copiar hay que hacerlo con esta respuesta. */
+    enviar: (id: string) =>
+      post<SolicitudPrecios & { enlace: string }>(`/api/solicitudes-precios/${id}/enviar`, {}),
+    /** Emite un enlace NUEVO e invalida el anterior — para pasárselo al
+     *  proveedor por otro medio en vez de mandarlo por correo. */
+    generarEnlace: (id: string) =>
+      post<{ enlace: string }>(`/api/solicitudes-precios/${id}/enlace`, {}),
+    remove: (id: string) => del(`/api/solicitudes-precios/${id}`),
+  },
+
   certificaciones: {
     list: (params: { obra_id?: string; limit?: number; offset?: number }) =>
       request<Page<Certificacion>>(`/api/certificaciones${query(params)}`),
@@ -3009,4 +3085,72 @@ export const ETIQUETA_FORMA_PAGO: Record<FormaPago, string> = {
   confirming: 'Confirming',
   efectivo: 'Efectivo',
   tarjeta: 'Tarjeta',
+}
+
+// --- Espacio público del proveedor: sin sesión, sin Authorization ---
+//
+// `api` de arriba manda siempre el token de Keycloak y la organización
+// activa (ver `cabeceras`); esta página no tiene ninguna de las dos — quien
+// entra llega desde un enlace de correo, con el token de su solicitud en la
+// URL, no en una cabecera. `apiPublico` es deliberadamente un cliente aparte
+// y no una opción de `request()`, para que sea imposible que un cambio en
+// el cliente normal empiece a mandar credenciales aquí sin querer.
+
+export interface LineaSeparata {
+  id: string
+  capitulo_resumen: string | null
+  codigo: string | null
+  resumen: string
+  texto: string | null
+  unidad: string
+  medicion: string
+  precio_ofertado: string | null
+  observaciones_proveedor: string | null
+}
+
+export interface DocumentoSeparata {
+  id: string
+  nombre_archivo: string
+  tamano_bytes: number
+}
+
+export interface Separata {
+  codigo: string
+  estado: string
+  fecha_limite: string | null
+  notas: string | null
+  emisor: string
+  proveedor: string
+  lineas: LineaSeparata[]
+  documentos: DocumentoSeparata[]
+}
+
+async function peticionPublica<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/json')
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) throw new Error(await mensajeDeError(response))
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export const apiPublico = {
+  verSeparata: (token: string) => peticionPublica<Separata>(`/api/publico/oferta/${token}`),
+  guardarPrecios: (
+    token: string,
+    lineas: { id: string; precio_ofertado: string | null; observaciones_proveedor?: string | null }[],
+  ) =>
+    peticionPublica<Separata>(`/api/publico/oferta/${token}/lineas`, {
+      method: 'PATCH',
+      body: JSON.stringify({ lineas }),
+    }),
+  enviar: (token: string) =>
+    peticionPublica<{ enviado: boolean; mensaje: string }>(`/api/publico/oferta/${token}/enviar`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  /** No es una petición — es la URL del enlace de descarga directo, para un
+   *  `<a href>` plano (sin `fetch`, sin cabeceras). */
+  urlDocumento: (token: string, documentoId: string) =>
+    `/api/publico/oferta/${token}/documentos/${documentoId}/descargar`,
 }

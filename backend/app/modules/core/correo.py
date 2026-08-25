@@ -1,4 +1,5 @@
-"""Correo de bienvenida al administrador de una organización nueva."""
+"""Plantillas de correo: bienvenida al administrador de una organización
+nueva, y solicitud de precios a un proveedor."""
 
 from pathlib import Path
 
@@ -30,4 +31,26 @@ def render_bienvenida(
         password_temporal=password_temporal,
         url_app=url_app,
         es_plataforma=es_plataforma,
+    )
+
+
+def render_solicitud_precios(
+    *,
+    emisor_nombre: str,
+    proveedor_nombre: str | None,
+    presupuesto_nombre: str,
+    num_lineas: int,
+    notas: str | None,
+    fecha_limite: str | None,
+    url_oferta: str,
+) -> str:
+    plantilla = _env.get_template("solicitud_precios.html")
+    return plantilla.render(
+        emisor_nombre=emisor_nombre,
+        proveedor_nombre=proveedor_nombre,
+        presupuesto_nombre=presupuesto_nombre,
+        num_lineas=num_lineas,
+        notas=notas,
+        fecha_limite=fecha_limite,
+        url_oferta=url_oferta,
     )
