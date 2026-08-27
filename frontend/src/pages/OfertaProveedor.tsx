@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Send } from 'lucide-react'
+import { ChevronDown, ChevronRight, Send, Sparkles } from 'lucide-react'
+
+import { DescompuestoOfertaTabla } from '../components/DescompuestoOfertaTabla'
+import { MedicionesOferta } from '../components/MedicionesOferta'
+import { formatoImporte } from '../components/ui'
 
 // La versión para fondo claro: esta página es una tarjeta blanca. El
 // `logo-sobre-oscuro-recorte.png` que había aquí está recortado contra un
@@ -29,6 +33,42 @@ export function OfertaProveedor() {
   const [guardando, setGuardando] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [mensajeFinal, setMensajeFinal] = useState<string | null>(null)
+  /** Qué línea tiene el detalle desplegado, y en qué pestaña. */
+  const [detalle, setDetalle] = useState<{ lineaId: string; pestana: 'medicion' | 'precio' } | null>(
+    null,
+  )
+  const [leyendoIA, setLeyendoIA] = useState(false)
+  const [avisoIA, setAvisoIA] = useState<string | null>(null)
+  const ficheroIA = useRef<HTMLInputElement>(null)
+
+  async function leerConIA(fichero: File) {
+    setLeyendoIA(true)
+    setAvisoIA(null)
+    setError(null)
+    try {
+      const resultado = await apiPublico.leerDocumentoIA(token, fichero)
+      setSeparata(resultado.separata)
+      setAvisoIA(resultado.mensaje)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setLeyendoIA(false)
+      if (ficheroIA.current) ficheroIA.current.value = ''
+    }
+  }
+
+  // Agrupado por capítulo para que se lea como un presupuesto y no como una
+  // lista plana. Las líneas ya vienen ordenadas por capítulo del servidor.
+  const porCapitulo = useMemo(() => {
+    const grupos: { capitulo: string; lineas: LineaSeparata[] }[] = []
+    for (const linea of separata?.lineas ?? []) {
+      const nombre = linea.capitulo_resumen || 'Sin capítulo'
+      const ultimo = grupos[grupos.length - 1]
+      if (ultimo && ultimo.capitulo === nombre) ultimo.lineas.push(linea)
+      else grupos.push({ capitulo: nombre, lineas: [linea] })
+    }
+    return grupos
+  }, [separata])
 
   useEffect(() => {
     apiPublico
@@ -89,9 +129,9 @@ export function OfertaProveedor() {
   const soloLectura = separata != null && separata.estado !== 'enviada'
 
   return (
-    <div className="portada-sesion" style={{ alignItems: 'flex-start', paddingTop: 'var(--sp-8)' }}>
-      <div className="portada-sesion__caja" style={{ maxWidth: 920, width: '100%' }}>
-        <img src={logo} alt="Flexómetro" style={{ height: 36, width: 'auto', marginBottom: 'var(--sp-4)' }} />
+    <div className="separata">
+      <div className="separata__caja">
+        <img src={logo} alt="Flexómetro" className="separata__logo" />
 
         {cargando && <p className="muted">Cargando…</p>}
 
@@ -104,14 +144,14 @@ export function OfertaProveedor() {
             <p className="muted" style={{ marginBottom: 0 }}>
               {separata.emisor} pide precio a {separata.proveedor}
             </p>
-            <h1 style={{ marginBottom: 'var(--sp-1)' }}>{separata.titulo}</h1>
+            <h1 className="separata__titulo">{separata.titulo}</h1>
             <p className="table__code" style={{ marginBottom: 'var(--sp-4)' }}>
               Solicitud de precios {separata.codigo}
             </p>
 
             {/* De qué obra se trata: sin esto el proveedor no puede cotizar
                 (no sabe ni dónde tendría que ir). */}
-            <div className="ficha-datos" style={{ marginBottom: 'var(--sp-4)' }}>
+            <div className="separata__obra">
               <div>
                 <div className="barra-acciones__etiqueta">Obra</div>
                 <div>{separata.obra || <span className="muted">—</span>}</div>
@@ -170,61 +210,208 @@ export function OfertaProveedor() {
 
             <ErrorNotice error={error} />
 
+            {!soloLectura && (
+              <div className="separata__ia">
+                <input
+                  ref={ficheroIA}
+                  type="file"
+                  accept=".pdf,.xlsx,.xlsm,.csv,.txt"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) void leerConIA(f)
+                  }}
+                />
+                <button
+                  className="btn"
+                  disabled={leyendoIA}
+                  onClick={() => ficheroIA.current?.click()}
+                >
+                  <Sparkles size={16} aria-hidden="true" />
+                  {leyendoIA ? 'Leyendo…' : 'Rellenar desde mi hoja de precios'}
+                </button>
+                <span className="muted">
+                  Sube tu PDF, Excel o CSV y se rellenan los precios que se reconozcan. No te
+                  cuesta nada: lo paga quien te ha pedido la oferta.
+                </span>
+              </div>
+            )}
+
+            {avisoIA && (
+              <div className="notice" style={{ marginBottom: 'var(--sp-4)' }}>
+                {avisoIA}
+              </div>
+            )}
+
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Capítulo</th>
-                    <th>Código</th>
+                    <th />
                     <th>Descripción</th>
                     <th>Unidad</th>
                     <th>Medición</th>
                     <th>Precio unitario</th>
+                    <th>Importe</th>
                     <th>Observaciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {separata.lineas.map((l) => (
-                    <tr key={l.id}>
-                      <td className="muted">{l.capitulo_resumen}</td>
-                      <td className="table__code">{l.codigo}</td>
-                      <td>
-                        {l.resumen}
-                        {l.texto && (
-                          <>
-                            <br />
-                            <span className="muted">{l.texto}</span>
-                          </>
-                        )}
-                      </td>
-                      <td>{l.unidad}</td>
-                      <td className="table__num">{l.medicion}</td>
-                      <td>
-                        <input
-                          className="input"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          disabled={soloLectura}
-                          value={l.precio_ofertado ?? ''}
-                          onChange={(e) =>
-                            actualizarLinea(l.id, { precio_ofertado: e.target.value || null })
-                          }
-                          style={{ width: '9rem' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          type="text"
-                          disabled={soloLectura}
-                          value={l.observaciones_proveedor ?? ''}
-                          onChange={(e) =>
-                            actualizarLinea(l.id, { observaciones_proveedor: e.target.value || null })
-                          }
-                        />
-                      </td>
-                    </tr>
+                  {porCapitulo.map(({ capitulo, lineas }) => (
+                    <Fragment key={capitulo}>
+                      <tr className="separata__capitulo">
+                        <td colSpan={7}>{capitulo}</td>
+                      </tr>
+                      {lineas.map((l) => {
+                        const medida = l.medicion_proveedor ?? l.medicion
+                        const importe =
+                          l.precio_ofertado != null
+                            ? Number(medida) * Number(l.precio_ofertado)
+                            : null
+                        return (
+                          <Fragment key={l.id}>
+                            <tr>
+                              <td>
+                                <button
+                                  className="rejilla__plegar"
+                                  aria-label={
+                                    detalle?.lineaId === l.id ? 'Ocultar el detalle' : 'Detallar'
+                                  }
+                                  onClick={() =>
+                                    setDetalle(
+                                      detalle?.lineaId === l.id
+                                        ? null
+                                        : { lineaId: l.id, pestana: 'medicion' },
+                                    )
+                                  }
+                                >
+                                  {detalle?.lineaId === l.id ? (
+                                    <ChevronDown size={14} aria-hidden="true" />
+                                  ) : (
+                                    <ChevronRight size={14} aria-hidden="true" />
+                                  )}
+                                </button>
+                              </td>
+                              <td>
+                                {l.codigo && <span className="table__code">{l.codigo} </span>}
+                                {l.resumen}
+                                {l.texto && (
+                                  // El texto de una partida viene de un editor
+                                  // enriquecido, así que es HTML. El servidor lo
+                                  // sanea con lista blanca al guardarlo y otra
+                                  // vez al servirlo aquí (ver `publico_router`).
+                                  <div
+                                    className="muted separata__texto"
+                                    dangerouslySetInnerHTML={{ __html: l.texto }}
+                                  />
+                                )}
+                              </td>
+                              <td>{l.unidad}</td>
+                              <td className="table__num">
+                                {l.medicion_proveedor !== null ? (
+                                  <>
+                                    <strong>{l.medicion_proveedor}</strong>
+                                    <div className="muted">pedida: {l.medicion}</div>
+                                  </>
+                                ) : (
+                                  l.medicion
+                                )}
+                              </td>
+                              <td>
+                                {l.descompuesto.length > 0 ? (
+                                  // Con desglose, el precio es la suma de sus
+                                  // componentes: se enseña, no se teclea.
+                                  <span className="table__num" title="Sale de tu desglose">
+                                    {l.precio_ofertado}
+                                  </span>
+                                ) : (
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min={0}
+                                    step="0.01"
+                                    disabled={soloLectura}
+                                    value={l.precio_ofertado ?? ''}
+                                    onChange={(e) =>
+                                      actualizarLinea(l.id, {
+                                        precio_ofertado: e.target.value || null,
+                                      })
+                                    }
+                                    style={{ width: '8rem' }}
+                                  />
+                                )}
+                              </td>
+                              <td className="table__num">
+                                {importe !== null ? formatoImporte(importe) : '—'}
+                              </td>
+                              <td>
+                                <input
+                                  className="input"
+                                  type="text"
+                                  disabled={soloLectura}
+                                  value={l.observaciones_proveedor ?? ''}
+                                  onChange={(e) =>
+                                    actualizarLinea(l.id, {
+                                      observaciones_proveedor: e.target.value || null,
+                                    })
+                                  }
+                                />
+                              </td>
+                            </tr>
+                            {detalle?.lineaId === l.id && (
+                              <tr>
+                                <td />
+                                <td colSpan={6}>
+                                  <div className="pestanas">
+                                    <button
+                                      className={
+                                        detalle.pestana === 'medicion'
+                                          ? 'pestanas__item is-activa'
+                                          : 'pestanas__item'
+                                      }
+                                      onClick={() =>
+                                        setDetalle({ lineaId: l.id, pestana: 'medicion' })
+                                      }
+                                    >
+                                      Medición
+                                      {l.mediciones.length > 0 && ` (${l.mediciones.length})`}
+                                    </button>
+                                    <button
+                                      className={
+                                        detalle.pestana === 'precio'
+                                          ? 'pestanas__item is-activa'
+                                          : 'pestanas__item'
+                                      }
+                                      onClick={() =>
+                                        setDetalle({ lineaId: l.id, pestana: 'precio' })
+                                      }
+                                    >
+                                      Desglose del precio
+                                      {l.descompuesto.length > 0 && ` (${l.descompuesto.length})`}
+                                    </button>
+                                  </div>
+                                  {detalle.pestana === 'medicion' ? (
+                                    <MedicionesOferta
+                                      token={token}
+                                      linea={l}
+                                      soloLectura={soloLectura}
+                                      onSeparata={setSeparata}
+                                    />
+                                  ) : (
+                                    <DescompuestoOfertaTabla
+                                      token={token}
+                                      linea={l}
+                                      soloLectura={soloLectura}
+                                      onSeparata={setSeparata}
+                                    />
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

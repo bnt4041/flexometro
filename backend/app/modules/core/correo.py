@@ -44,7 +44,9 @@ def render_solicitud_precios(
     num_lineas: int,
     notas: str | None,
     fecha_limite: str | None,
-    url_oferta: str,
+    url_oferta: str | None,
+    url_aplicacion: str | None = None,
+    url_landing: str | None = None,
 ) -> str:
     plantilla = _env.get_template("solicitud_precios.html")
     return plantilla.render(
@@ -57,4 +59,6 @@ def render_solicitud_precios(
         notas=notas,
         fecha_limite=fecha_limite,
         url_oferta=url_oferta,
+        url_aplicacion=url_aplicacion,
+        url_landing=url_landing,
     )

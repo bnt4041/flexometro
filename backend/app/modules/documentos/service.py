@@ -22,6 +22,10 @@ _TABLA_POR_ENTIDAD: dict[EntidadDocumento, tuple[str, str]] = {
     EntidadDocumento.CONTACTO: ("terceros.contacto", "nombre"),
     EntidadDocumento.CONCEPTO: ("presupuestos.concepto", "codigo"),
     EntidadDocumento.SOLICITUD_PRECIOS: ("compras.solicitud_precios", "codigo"),
+    EntidadDocumento.PEDIDO: ("compras.pedido", "codigo"),
+    EntidadDocumento.CONTRATO: ("contratos.contrato", "codigo"),
+    EntidadDocumento.ALBARAN: ("compras.albaran", "codigo"),
+    EntidadDocumento.FACTURA_RECIBIDA: ("compras.factura_recibida", "codigo"),
 }
 
 

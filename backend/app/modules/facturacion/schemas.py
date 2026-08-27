@@ -169,3 +169,17 @@ class FacturaDetalle(FacturaResumen):
 
 class AnularFactura(BaseModel):
     motivo: str = Field(min_length=1, max_length=500)
+
+
+class ResumenVentasObra(BaseModel):
+    """Lo certificado y lo facturado en una obra: la mitad de ventas del cuadro
+    de mandos. Solo cuentan las facturas emitidas."""
+
+    certificado: Decimal
+    retenido: Decimal
+    certificaciones: int
+    facturado_base: Decimal
+    facturado_total: Decimal
+    facturas: int
+    cobrado: Decimal
+    pendiente_de_cobro: Decimal

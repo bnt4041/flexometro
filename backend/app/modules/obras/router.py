@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import tabla_de
@@ -13,9 +14,19 @@ from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.obras import service
-from app.modules.obras.models import Asignacion, EstadoObra, Obra
+from app.modules.obras import arbol_router, ia_router, service, tarea_router
+from app.modules.obras.models import (
+    Asignacion,
+    EstadoObra,
+    Obra,
+    ObraPresupuesto,
+    TipoVinculo,
+)
 from app.modules.obras.schemas import (
+    AceptadoOut,
+    AceptarPresupuestoIn,
+    VincularPresupuestoIn,
+    VinculoPresupuestoOut,
     AsignacionCreate,
     AsignacionDetalle,
     AsignacionOut,
@@ -424,8 +435,172 @@ async def eliminar_parte(
     await service.eliminar_parte(session, parte_id)
 
 
+# --- Presupuestos en ejecución dentro de la obra ---
+
+
+async def _vinculos_out(session: AsyncSession, obra_id: uuid.UUID) -> list[VinculoPresupuestoOut]:
+    """Los presupuestos de la obra, con su código y nombre resueltos de una vez
+    en vez de una consulta por fila."""
+    from app.modules.presupuestos.models_presupuesto import Presupuesto
+
+    filas = (
+        await session.execute(
+            select(ObraPresupuesto, Presupuesto.codigo, Presupuesto.nombre)
+            .join(Presupuesto, Presupuesto.id == ObraPresupuesto.presupuesto_id)
+            .where(ObraPresupuesto.obra_id == obra_id)
+            .order_by(ObraPresupuesto.orden)
+        )
+    ).all()
+    return [
+        VinculoPresupuestoOut(
+            **VinculoPresupuestoOut.model_validate(v).model_dump(
+                exclude={"presupuesto_codigo", "presupuesto_nombre"}
+            ),
+            presupuesto_codigo=codigo,
+            presupuesto_nombre=nombre,
+        )
+        for v, codigo, nombre in filas
+    ]
+
+
+@obras_router.get("/{obra_id}/presupuestos", response_model=list[VinculoPresupuestoOut])
+async def listar_presupuestos_de_obra(
+    obra_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("obras", "ver")),
+) -> list[VinculoPresupuestoOut]:
+    obra = await service.obtener_obra(session, obra_id)
+    if obra is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada")
+    return await _vinculos_out(session, obra_id)
+
+
+@obras_router.post("/{obra_id}/presupuestos", response_model=list[VinculoPresupuestoOut])
+async def vincular_presupuesto_a_obra(
+    obra_id: uuid.UUID,
+    datos: VincularPresupuestoIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+) -> list[VinculoPresupuestoOut]:
+    """Pone otro presupuesto en ejecución en esta obra (un anexo o adenda).
+    Lo marca como aprobado, que es lo que significa aceptarlo."""
+    obra = await service.obtener_obra(session, obra_id)
+    if obra is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada")
+    try:
+        await service.vincular_presupuesto(
+            session, obra, datos.presupuesto_id, tipo=datos.tipo, notas=datos.notas
+        )
+    except service.PresupuestoInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    salida = await _vinculos_out(session, obra_id)
+    await session.commit()
+    return salida
+
+
+@obras_router.delete(
+    "/{obra_id}/presupuestos/{vinculo_id}", response_model=list[VinculoPresupuestoOut]
+)
+async def desvincular_presupuesto_de_obra(
+    obra_id: uuid.UUID,
+    vinculo_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+) -> list[VinculoPresupuestoOut]:
+    vinculo = await session.scalar(
+        select(ObraPresupuesto).where(
+            ObraPresupuesto.id == vinculo_id, ObraPresupuesto.obra_id == obra_id
+        )
+    )
+    if vinculo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vínculo no encontrado")
+    try:
+        await service.desvincular_presupuesto(session, vinculo)
+    except service.PresupuestoInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    salida = await _vinculos_out(session, obra_id)
+    await session.commit()
+    return salida
+
+
+# --- Aceptar un presupuesto ---
+#
+# La URL habla de presupuestos pero el router es de `obras`, a propósito:
+# `obras` depende de `presupuestos` y no al revés, así que el módulo que puede
+# ver los dos es este. Mismo criterio que `compras/costes.py`, que expone
+# `/api/obras/{id}/costes` desde `compras`.
+aceptar_router = APIRouter(prefix="/api/presupuestos", tags=["obras"], dependencies=[guard])
+
+
+@aceptar_router.post("/{presupuesto_id}/aceptar", response_model=AceptadoOut)
+async def aceptar_presupuesto(
+    presupuesto_id: uuid.UUID,
+    datos: AceptarPresupuestoIn,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+) -> AceptadoOut:
+    """Aceptar un presupuesto es ponerlo en ejecución: o arranca una obra
+    nueva, o entra como anexo en una que ya existe. En ambos casos el
+    presupuesto queda aprobado y con los precios congelados."""
+    try:
+        if datos.obra_id is not None:
+            obra = await service.obtener_obra(session, datos.obra_id)
+            if obra is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada"
+                )
+            await service.vincular_presupuesto(
+                session, obra, presupuesto_id, tipo=TipoVinculo.ANEXO
+            )
+            creada = False
+            tipo = TipoVinculo.ANEXO
+        else:
+            assert datos.obra_nombre is not None  # lo garantiza el validador del schema
+            obra = await service.crear_obra(
+                session,
+                ObraCreate(
+                    nombre=datos.obra_nombre,
+                    codigo=datos.obra_codigo,
+                    presupuesto_id=presupuesto_id,
+                ),
+            )
+            creada = True
+            tipo = TipoVinculo.PRINCIPAL
+    except service.PresupuestoInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except service.CodigoDuplicado as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    resultado = AceptadoOut(
+        obra_id=obra.id,
+        obra_codigo=obra.codigo,
+        obra_nombre=obra.nombre,
+        tipo=tipo,
+        creada=creada,
+        mensaje=(
+            f"Obra «{obra.nombre}» creada y presupuesto aprobado."
+            if creada
+            else f"Añadido como anexo a «{obra.nombre}», y presupuesto aprobado."
+        ),
+    )
+    await session.commit()
+    return resultado
+
+
 router = APIRouter()
 router.include_router(obras_router)
+# El árbol de la obra vive en su propio módulo: son muchas rutas y no tienen
+# nada que ver con la ficha.
+router.include_router(arbol_router.router)
+router.include_router(ia_router.ia_router)
+router.include_router(tarea_router.router)
+router.include_router(aceptar_router)
 router.include_router(personal_router)
 router.include_router(asignaciones_router)
 router.include_router(partes_router)

@@ -18,6 +18,8 @@ en `gemini.py`)."""
 
 import uuid
 
+from fastapi import UploadFile
+
 from app.core.auth import Principal
 from app.core.tenancy import require_organization_id
 from app.modules.core import billing_service
@@ -35,22 +37,39 @@ MAX_TAMANO_BYTES = 15 * 1024 * 1024
 MAX_TOTAL_BYTES = 40 * 1024 * 1024
 MAX_FICHEROS = 6
 
+_EXTENSIONES_EXCEL = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+
+async def leer_documento_upload(fichero: UploadFile) -> tuple[bytes, str]:
+    """Bytes + tipo MIME real de un `UploadFile` — el navegador a veces no
+    sabe el tipo correcto de un .xlsx y manda algo genérico; la extensión es
+    la señal fiable, igual que con el BC3. Compartido entre el chat de
+    documentos de presupuestos, obras y certificaciones — un único sitio
+    para esta conversión en vez de repetirla en cada router."""
+    contenido = await fichero.read()
+    mime_type = fichero.content_type or "application/octet-stream"
+    if mime_type not in MIME_PERMITIDOS:
+        for extension, mime_real in _EXTENSIONES_EXCEL.items():
+            if (fichero.filename or "").lower().endswith(extension):
+                mime_type = mime_real
+                break
+    return contenido, mime_type
+
 
 class DocumentoInvalido(Exception):
     pass
 
 
-async def conversar(
-    session: AsyncSession,
-    documentos: list[tuple[bytes, str]],
-    mensajes: list[MensajeConversacionIn],
-    principal: Principal,
-    *,
-    presupuesto_id: uuid.UUID | None = None,
-    partida_id: uuid.UUID | None = None,
-) -> tuple[str, PropuestaAccionOut | None]:
-    if not documentos:
-        raise DocumentoInvalido("Hace falta al menos un fichero")
+def validar_documentos(documentos: list[tuple[bytes, str]]) -> None:
+    """Mismas comprobaciones para cualquier conversación sobre documentos
+    arrastrados, sea sobre un presupuesto (`conversar`, aquí abajo), una obra
+    (`app.modules.obras.ia_documento`) o una certificación
+    (`app.modules.facturacion.ia_certificacion`) — un único sitio para los
+    límites en vez de repetirlos en cada módulo.
+
+    Una lista vacía es válida a propósito: el documento es opcional — la
+    conversación puede ser solo texto ("certifica el 33% de todo") y el
+    usuario adjunta algo más tarde, o nunca."""
     if len(documentos) > MAX_FICHEROS:
         raise DocumentoInvalido(f"No se pueden adjuntar más de {MAX_FICHEROS} ficheros a la vez")
     for _contenido, mime_type in documentos:
@@ -67,6 +86,17 @@ async def conversar(
             f"Entre todos los ficheros suman más de {MAX_TOTAL_BYTES // (1024 * 1024)} MB"
         )
 
+
+async def conversar(
+    session: AsyncSession,
+    documentos: list[tuple[bytes, str]],
+    mensajes: list[MensajeConversacionIn],
+    principal: Principal,
+    *,
+    presupuesto_id: uuid.UUID | None = None,
+    partida_id: uuid.UUID | None = None,
+) -> tuple[str, PropuestaAccionOut | None]:
+    validar_documentos(documentos)
     org_id = require_organization_id()
 
     partida_destino = None

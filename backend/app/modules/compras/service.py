@@ -29,6 +29,10 @@ class ProveedorInvalido(Exception):
     pass
 
 
+class PedidoInvalido(Exception):
+    pass
+
+
 class ConceptoInvalido(Exception):
     pass
 
@@ -49,6 +53,24 @@ async def _validar_obra(session: AsyncSession, obra_id: uuid.UUID) -> None:
 
     if await obtener_obra(session, obra_id) is None:
         raise ObraInvalida("La obra no existe en esta organización")
+
+
+async def _validar_pedido(
+    session: AsyncSession, pedido_id: uuid.UUID, obra_id: uuid.UUID, proveedor_id: uuid.UUID
+) -> None:
+    from app.modules.compras.models import Pedido
+
+    org_id = require_organization_id()
+    fila = await session.execute(
+        select(Pedido.obra_id, Pedido.proveedor_id).where(
+            Pedido.id == pedido_id, Pedido.organization_id == org_id
+        )
+    )
+    resultado = fila.first()
+    if resultado is None:
+        raise PedidoInvalido("El pedido indicado no existe en esta organización")
+    if resultado[0] != obra_id or resultado[1] != proveedor_id:
+        raise PedidoInvalido("El pedido indicado no es de esta obra y proveedor")
 
 
 async def _validar_proveedor(session: AsyncSession, proveedor_id: uuid.UUID) -> None:
@@ -124,6 +146,8 @@ async def crear_albaran(session: AsyncSession, datos: AlbaranCreate) -> Albaran:
     org_id = require_organization_id()
     await _validar_obra(session, datos.obra_id)
     await _validar_proveedor(session, datos.proveedor_id)
+    if datos.pedido_id is not None:
+        await _validar_pedido(session, datos.pedido_id, datos.obra_id, datos.proveedor_id)
 
     async def _existe(codigo: str) -> bool:
         return (
@@ -224,7 +248,10 @@ async def actualizar_albaran(
     albaran = await obtener_albaran_obj(session, albaran_id)
     if albaran is None:
         return None
-    for campo, valor in datos.model_dump(exclude_unset=True).items():
+    cambios = datos.model_dump(exclude_unset=True)
+    if cambios.get("pedido_id") is not None:
+        await _validar_pedido(session, cambios["pedido_id"], albaran.obra_id, albaran.proveedor_id)
+    for campo, valor in cambios.items():
         setattr(albaran, campo, valor)
     await session.flush()
     return albaran
@@ -306,6 +333,23 @@ async def totales_de_albaranes(
         .group_by(AlbaranLinea.albaran_id)
     )
     return {albaran_id: redondear_precio(total) for albaran_id, total in filas.all()}
+
+
+async def total_albaranes_de_obra(
+    session: AsyncSession, obra_id: uuid.UUID
+) -> Decimal:
+    """Todo lo entregado en una obra según sus albaranes, en una consulta.
+
+    Distinto de `totales_de_albaranes`, que devuelve el total DE CADA albarán
+    para pintar un listado; aquí interesa la suma de la obra entera.
+    """
+    org_id = require_organization_id()
+    total = await session.scalar(
+        select(func.coalesce(func.sum(AlbaranLinea.importe), 0))
+        .join(Albaran, Albaran.id == AlbaranLinea.albaran_id)
+        .where(Albaran.obra_id == obra_id, Albaran.organization_id == org_id)
+    )
+    return redondear_precio(Decimal(total or 0))
 
 
 async def coste_materiales_por_capitulo(

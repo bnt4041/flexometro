@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Check, Link2, Mail, Save, Send, Trash2, X } from 'lucide-react'
 
 import { CrearTerceroModal } from './CrearTerceroModal'
 import { Documentos } from './Documentos'
-import { Checkbox, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from './ui'
+import { ArbolSolicitud } from './ArbolSolicitud'
+import { ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
 import type {
   ComponentePedido,
@@ -21,28 +22,6 @@ export const ETIQUETA_ESTADO_SOLICITUD: Record<string, string> = {
   aprobada: 'Aprobada',
   descartada: 'Descartada',
   caducada: 'Caducada',
-}
-
-interface GrupoPartidas {
-  capituloResumen: string
-  partidas: { id: string; resumen: string; unidad: string }[]
-}
-
-function agruparPorCapitulo(capitulos: NodoCapitulo[]): GrupoPartidas[] {
-  const grupos: GrupoPartidas[] = []
-  function recorrer(nodos: NodoCapitulo[]) {
-    for (const nodo of nodos) {
-      if (nodo.partidas.length > 0) {
-        grupos.push({
-          capituloResumen: nodo.resumen,
-          partidas: nodo.partidas.map((p) => ({ id: p.id, resumen: p.resumen, unidad: p.unidad })),
-        })
-      }
-      recorrer(nodo.hijos)
-    }
-  }
-  recorrer(capitulos)
-  return grupos
 }
 
 /** Ficha de un paquete de solicitud de precios ("Yeserías"): qué se pide, a
@@ -87,17 +66,63 @@ export function SolicitudFicha({
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [anadiendo, setAnadiendo] = useState(false)
 
-  const grupos = agruparPorCapitulo(capitulos)
   const hayOfertas = solicitud.destinatarios.some((d) => d.ofertas.length > 0)
 
-  function alternar(partidaId: string) {
-    setSeleccion((actual) => {
-      const nueva = new Set(actual)
-      if (nueva.has(partidaId)) nueva.delete(partidaId)
-      else nueva.add(partidaId)
-      return nueva
-    })
-  }
+  /** El precio que tenemos hoy en cada partida del presupuesto: es contra
+   *  esto contra lo que se compara una oferta. */
+  const precioPorPartida = useMemo(() => {
+    const mapa = new Map<string, string>()
+    const recorrer = (nodos: NodoCapitulo[]) => {
+      for (const nodo of nodos) {
+        for (const p of nodo.partidas) mapa.set(p.id, p.precio)
+        recorrer(nodo.hijos)
+      }
+    }
+    recorrer(capitulos)
+    return mapa
+  }, [capitulos])
+
+  /** Las líneas agrupadas por capítulo, para que el comparativo se lea como
+   *  un presupuesto y no repita el capítulo en cada fila. Vienen ya ordenadas
+   *  por capítulo del servidor. */
+  const filasComparativo = useMemo(() => {
+    const grupos: { capitulo: string; lineas: typeof solicitud.lineas }[] = []
+    for (const linea of solicitud.lineas) {
+      const nombre = linea.capitulo_resumen || 'Sin capítulo'
+      const ultimo = grupos[grupos.length - 1]
+      if (ultimo && ultimo.capitulo === nombre) ultimo.lineas.push(linea)
+      else grupos.push({ capitulo: nombre, lineas: [linea] })
+    }
+    return grupos
+  }, [solicitud.lineas])
+
+  /** Totales de lo pedido: el nuestro sobre todas las líneas, y el de cada
+   *  proveedor solo sobre las que ha cotizado — por eso se dice cuántas ha
+   *  dejado sin cotizar, o los totales no serían comparables. */
+  const totales = useMemo(() => {
+    let nuestro = 0
+    for (const linea of solicitud.lineas) {
+      const precio = precioPorPartida.get(linea.partida_id ?? '')
+      if (precio) nuestro += Number(precio) * Number(linea.medicion)
+    }
+    const porProveedor: Record<string, number> = {}
+    const sinCotizar: Record<string, number> = {}
+    for (const d of solicitud.destinatarios) {
+      let suma = 0
+      let faltan = 0
+      for (const linea of solicitud.lineas) {
+        const oferta = d.ofertas.find((o) => o.linea_id === linea.id)
+        if (oferta?.precio_ofertado != null) {
+          suma += Number(oferta.precio_ofertado) * Number(linea.medicion)
+        } else {
+          faltan += 1
+        }
+      }
+      porProveedor[d.id] = suma
+      sinCotizar[d.id] = faltan
+    }
+    return { nuestro, porProveedor, sinCotizar }
+  }, [solicitud.lineas, solicitud.destinatarios, precioPorPartida])
 
   async function conAviso(clave: string, accion: () => Promise<void>) {
     setOcupado(clave)
@@ -186,7 +211,24 @@ export function SolicitudFicha({
   }
 
   async function quitar(d: SolicitudDestinatario) {
-    if (!window.confirm(`¿Quitar a ${d.proveedor_razon_social} de esta solicitud?`)) return
+    const ofertadas = d.ofertas.filter((o) => o.precio_ofertado != null).length
+    const adjudicadas = d.ofertas.filter((o) => o.aprobada).length
+    let aviso = `¿Quitar a ${d.proveedor_razon_social} de esta solicitud?`
+    if (d.estado !== 'borrador') {
+      aviso += '\n\nSu enlace dejará de funcionar al momento.'
+    }
+    if (ofertadas > 0) {
+      aviso += `\nSe perderán los ${ofertadas} precio${ofertadas === 1 ? '' : 's'} que había puesto.`
+    }
+    if (adjudicadas > 0) {
+      aviso +=
+        `\n${adjudicadas} partida${adjudicadas === 1 ? '' : 's'} quedará${adjudicadas === 1 ? '' : 'n'}` +
+        ' sin adjudicar, pero el precio que ya se aplicó al presupuesto NO se deshace.'
+    }
+    if (d.oferta_presupuesto_id) {
+      aviso += '\nSu presupuesto de proveedor se conserva.'
+    }
+    if (!window.confirm(aviso)) return
     await conAviso(`quitar:${d.id}`, async () => {
       await api.solicitudesPrecios.destinatarios.remove(solicitud.id, d.id)
       notificar(`${d.proveedor_razon_social} quitado`)
@@ -213,7 +255,23 @@ export function SolicitudFicha({
   }
 
   async function eliminar() {
-    if (!window.confirm(`¿Eliminar la solicitud «${solicitud.titulo}»?`)) return
+    const conOferta = solicitud.destinatarios.filter((d) =>
+      d.ofertas.some((o) => o.precio_ofertado != null),
+    ).length
+    const conPresupuesto = solicitud.destinatarios.filter((d) => d.oferta_presupuesto_id).length
+    let aviso = `¿Eliminar la solicitud «${solicitud.titulo}»?`
+    if (solicitud.estado !== 'borrador') {
+      aviso += '\n\nLos enlaces de los proveedores dejarán de funcionar al momento.'
+    }
+    if (conOferta > 0) {
+      aviso += `\nSe perderá lo ofertado por ${conOferta} proveedor${conOferta === 1 ? '' : 'es'}.`
+    }
+    if (conPresupuesto > 0) {
+      aviso +=
+        `\nLos ${conPresupuesto} presupuesto${conPresupuesto === 1 ? '' : 's'} de proveedor ya` +
+        ' generados se conservan, y los precios ya adjudicados no se deshacen.'
+    }
+    if (!window.confirm(aviso)) return
     await conAviso('eliminar', async () => {
       await api.solicitudesPrecios.remove(solicitud.id)
       notificar('Solicitud eliminada')
@@ -255,56 +313,19 @@ export function SolicitudFicha({
           Partidas
         </p>
         <p className="form-section__note">
-          Se pueden cambiar aunque ya se haya enviado. Los proveedores verán la lista actualizada
-          la próxima vez que entren; si ya te habían contestado, reenvíales el enlace.
+          Marca lo que quieres pedir. Un capítulo entero, partidas sueltas, o —desplegando una
+          partida— solo una parte de su descompuesto. Se puede cambiar aunque ya se haya enviado:
+          los proveedores verán la lista actualizada la próxima vez que entren, y si ya te habían
+          contestado, reenvíales el enlace.
         </p>
-        {grupos.map((grupo) => (
-          <div key={grupo.capituloResumen} style={{ marginBottom: 'var(--sp-3)' }}>
-            <p className="muted" style={{ marginBottom: 'var(--sp-1)' }}>
-              {grupo.capituloResumen}
-            </p>
-            {grupo.partidas.map((p) => (
-              <Checkbox
-                key={p.id}
-                label={`${p.resumen} (${p.unidad})`}
-                checked={seleccion.has(p.id)}
-                onChange={() => alternar(p.id)}
-              />
-            ))}
-          </div>
-        ))}
-
-        {componentes.length > 0 && (
-          <>
-            <p className="field__label">Componentes de descompuesto</p>
-            <p className="form-section__note">
-              Se piden desde el descompuesto de una partida. Aquí solo se pueden quitar.
-            </p>
-            <ul className="chat-ia__componentes">
-              {solicitud.lineas
-                .filter((l) => l.concepto_id != null)
-                .map((l) => {
-                  const sigue = componentes.some((c) => c.concepto_id === l.concepto_id)
-                  return (
-                    <li key={l.id}>
-                      {l.resumen} ({l.unidad}){' '}
-                      <button
-                        className="btn btn--sm"
-                        disabled={!sigue}
-                        onClick={() =>
-                          setComponentes((actual) =>
-                            actual.filter((c) => c.concepto_id !== l.concepto_id),
-                          )
-                        }
-                      >
-                        {sigue ? 'Quitar' : 'Quitado'}
-                      </button>
-                    </li>
-                  )
-                })}
-            </ul>
-          </>
-        )}
+        <ArbolSolicitud
+          capitulos={capitulos}
+          seleccion={{ partidaIds: seleccion, componentes }}
+          onCambiarSeleccion={(nueva) => {
+            setSeleccion(nueva.partidaIds)
+            setComponentes(nueva.componentes)
+          }}
+        />
 
         <div className="form-actions" style={{ marginBottom: 'var(--sp-5)' }}>
           <button className="btn btn--primary" disabled={ocupado !== null} onClick={() => void guardar()}>
@@ -383,16 +404,14 @@ export function SolicitudFicha({
                         {ocupado === `enlace:${d.id}` ? 'Generando…' : 'Enlace'}
                       </button>
                     </Tooltip>{' '}
-                    {d.estado === 'borrador' && (
-                      <button
-                        className="btn btn--sm"
-                        disabled={ocupado !== null}
-                        onClick={() => void quitar(d)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                        Quitar
-                      </button>
-                    )}
+                    <button
+                      className="btn btn--sm"
+                      disabled={ocupado !== null}
+                      onClick={() => void quitar(d)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Quitar
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -414,96 +433,170 @@ export function SolicitudFicha({
             <p className="field__label" style={{ marginTop: 'var(--sp-5)' }}>
               Comparativo
             </p>
+            <p className="form-section__note">
+              «Nuestro coste» es lo que tienes presupuestado hoy en cada partida. El porcentaje
+              de cada oferta es la diferencia contra ese coste: en verde si te sale más barato.
+            </p>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table comparativo">
                 <thead>
                   <tr>
                     <th>Partida</th>
-                    <th>Medición</th>
+                    <th className="table__num">Medición</th>
+                    <th className="table__num comparativo__nuestro">Nuestro coste</th>
                     {solicitud.destinatarios.map((d) => (
-                      <th key={d.id}>{d.proveedor_razon_social}</th>
+                      <th key={d.id} className="table__num">
+                        {d.proveedor_razon_social}
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {solicitud.lineas.map((linea) => {
-                    const celdas = solicitud.destinatarios.map((d) => ({
-                      destinatario: d,
-                      oferta: d.ofertas.find((o) => o.linea_id === linea.id) ?? null,
-                    }))
-                    const mejor = celdas
-                      .map((c) =>
-                        c.oferta?.precio_ofertado ? Number(c.oferta.precio_ofertado) : null,
-                      )
-                      .filter((v): v is number => v !== null)
-                      .reduce((min, v) => (min === null || v < min ? v : min), null as number | null)
+                  {filasComparativo.map(({ capitulo, lineas }) => (
+                    <Fragment key={capitulo}>
+                      <tr className="separata__capitulo">
+                        <td colSpan={3 + solicitud.destinatarios.length}>{capitulo}</td>
+                      </tr>
+                      {lineas.map((linea) => {
+                        const medicion = Number(linea.medicion)
+                        const nuestro = precioPorPartida.get(linea.partida_id ?? '') ?? null
+                        const celdas = solicitud.destinatarios.map((d) => ({
+                          destinatario: d,
+                          oferta: d.ofertas.find((o) => o.linea_id === linea.id) ?? null,
+                        }))
+                        const mejor = celdas
+                          .map((c) =>
+                            c.oferta?.precio_ofertado != null
+                              ? Number(c.oferta.precio_ofertado)
+                              : null,
+                          )
+                          .filter((v): v is number => v !== null)
+                          .reduce((min, v) => (min === null || v < min ? v : min), null as number | null)
 
-                    return (
-                      <tr key={linea.id}>
-                        <td>
-                          <span className="muted">{linea.capitulo_resumen}</span>
-                          <br />
-                          {linea.resumen}
-                        </td>
-                        <td className="table__num">
-                          {linea.medicion} {linea.unidad}
-                        </td>
-                        {celdas.map(({ destinatario, oferta }) => {
-                          if (!oferta || oferta.precio_ofertado == null) {
-                            return (
-                              <td key={destinatario.id} className="muted">
-                                —
-                              </td>
-                            )
-                          }
-                          const esMejor =
-                            mejor !== null && Number(oferta.precio_ofertado) === mejor
-                          const adjudicadaAOtro =
-                            linea.adjudicada_a_id != null &&
-                            linea.adjudicada_a_id !== destinatario.id
-                          return (
-                            <td key={destinatario.id}>
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 'var(--sp-2)',
-                                  fontWeight: esMejor ? 600 : undefined,
-                                }}
-                              >
-                                <span className="table__num">
-                                  {formatoImporte(oferta.precio_ofertado)} €
-                                </span>
-                                {oferta.aprobada ? (
-                                  <span className="badge badge--success">
-                                    <Check size={12} aria-hidden="true" /> Adjudicada
-                                  </span>
-                                ) : (
-                                  !adjudicadaAOtro && (
-                                    <Tooltip texto="Aplica este precio sobre la partida del presupuesto">
-                                      <button
-                                        className="btn btn--sm"
-                                        disabled={ocupado !== null}
-                                        onClick={() => void aprobar(oferta.id)}
-                                      >
-                                        {ocupado === `aprobar:${oferta.id}`
-                                          ? 'Adjudicando…'
-                                          : 'Adjudicar'}
-                                      </button>
-                                    </Tooltip>
-                                  )
-                                )}
-                              </div>
-                              {oferta.observaciones_proveedor && (
-                                <div className="muted">{oferta.observaciones_proveedor}</div>
+                        return (
+                          <tr key={linea.id}>
+                            <td>
+                              {linea.resumen}
+                              {linea.adjudicada_a_id && (
+                                <div className="muted">
+                                  Adjudicada a{' '}
+                                  {solicitud.destinatarios.find(
+                                    (d) => d.id === linea.adjudicada_a_id,
+                                  )?.proveedor_razon_social ?? 'un proveedor'}
+                                </div>
                               )}
                             </td>
-                          )
-                        })}
-                      </tr>
-                    )
-                  })}
+                            <td className="table__num">
+                              {linea.medicion} <span className="muted">{linea.unidad}</span>
+                            </td>
+                            <td className="table__num comparativo__nuestro">
+                              {nuestro !== null ? (
+                                <>
+                                  {formatoImporte(nuestro)} €
+                                  <div className="muted">
+                                    {formatoImporte(Number(nuestro) * medicion)} €
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
+                            {celdas.map(({ destinatario, oferta }) => {
+                              if (!oferta || oferta.precio_ofertado == null) {
+                                return (
+                                  <td key={destinatario.id} className="table__num muted">
+                                    —
+                                  </td>
+                                )
+                              }
+                              const precio = Number(oferta.precio_ofertado)
+                              const esMejor = mejor !== null && precio === mejor
+                              const adjudicadaAOtro =
+                                linea.adjudicada_a_id != null &&
+                                linea.adjudicada_a_id !== destinatario.id
+                              const diferencia =
+                                nuestro !== null && Number(nuestro) > 0
+                                  ? ((precio - Number(nuestro)) / Number(nuestro)) * 100
+                                  : null
+
+                              return (
+                                <td
+                                  key={destinatario.id}
+                                  className={
+                                    esMejor ? 'table__num comparativo__mejor' : 'table__num'
+                                  }
+                                >
+                                  <div className="comparativo__precio">
+                                    {formatoImporte(oferta.precio_ofertado)} €
+                                  </div>
+                                  <div className="muted">
+                                    {formatoImporte(precio * medicion)} €
+                                  </div>
+                                  {diferencia !== null && (
+                                    <div
+                                      className={
+                                        diferencia <= 0
+                                          ? 'comparativo__dif comparativo__dif--baja'
+                                          : 'comparativo__dif comparativo__dif--alta'
+                                      }
+                                    >
+                                      {diferencia > 0 ? '+' : ''}
+                                      {diferencia.toFixed(1)} %
+                                    </div>
+                                  )}
+                                  {oferta.aprobada ? (
+                                    <span className="badge badge--success">
+                                      <Check size={12} aria-hidden="true" /> Adjudicada
+                                    </span>
+                                  ) : (
+                                    !adjudicadaAOtro && (
+                                      <Tooltip texto="Aplica este precio sobre la partida del presupuesto">
+                                        <button
+                                          className="btn btn--sm"
+                                          disabled={ocupado !== null}
+                                          onClick={() => void aprobar(oferta.id)}
+                                        >
+                                          {ocupado === `aprobar:${oferta.id}`
+                                            ? 'Adjudicando…'
+                                            : 'Adjudicar'}
+                                        </button>
+                                      </Tooltip>
+                                    )
+                                  )}
+                                  {oferta.observaciones_proveedor && (
+                                    <div className="muted comparativo__obs">
+                                      {oferta.observaciones_proveedor}
+                                    </div>
+                                  )}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        )
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={2}>
+                      <strong>Total de lo pedido</strong>
+                    </td>
+                    <td className="table__num comparativo__nuestro">
+                      <strong>{formatoImporte(totales.nuestro)} €</strong>
+                    </td>
+                    {solicitud.destinatarios.map((d) => (
+                      <td key={d.id} className="table__num">
+                        <strong>{formatoImporte(totales.porProveedor[d.id] ?? 0)} €</strong>
+                        {totales.sinCotizar[d.id] > 0 && (
+                          <div className="muted">
+                            {totales.sinCotizar[d.id]} sin cotizar
+                          </div>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </>
@@ -520,12 +613,10 @@ export function SolicitudFicha({
       </div>
 
       <div className="form-actions">
-        {solicitud.estado === 'borrador' && (
-          <button className="btn" disabled={ocupado !== null} onClick={() => void eliminar()}>
-            <Trash2 size={16} aria-hidden="true" />
-            {ocupado === 'eliminar' ? 'Eliminando…' : 'Eliminar solicitud'}
-          </button>
-        )}
+        <button className="btn" disabled={ocupado !== null} onClick={() => void eliminar()}>
+          <Trash2 size={16} aria-hidden="true" />
+          {ocupado === 'eliminar' ? 'Eliminando…' : 'Eliminar solicitud'}
+        </button>
         <button className="btn" onClick={onClose}>
           <X size={16} aria-hidden="true" />
           Cerrar

@@ -1,34 +1,50 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowRight,
   BarChart3,
   Check,
   ClipboardCheck,
   Plus,
   Save,
+  Sparkles,
   Trash2,
+  Upload,
   UserPlus,
   X,
 } from 'lucide-react'
 
 import { CamposLibres } from '../components/CamposLibres'
+import { Comparativo } from '../components/Comparativo'
+import { CuadroObra } from '../components/CuadroObra'
+import { TareasObra } from '../components/TareasObra'
+import { ComprasObra } from '../components/ComprasObra'
+import { VentasObra } from '../components/VentasObra'
+import { DocumentoIAModal } from '../components/DocumentoIAModal'
+import { MedicionesObra } from '../components/MedicionesObra'
+import { RejillaObra } from '../components/RejillaObra'
+import { WidgetGrid } from '../components/WidgetGrid'
 import { ContactosAsociados } from '../components/ContactosAsociados'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
+import { PresupuestosObra } from '../components/PresupuestosObra'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
-import { ETIQUETA_ESTADO_CERTIFICACION, ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
+import { ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
 import type {
+  ArbolObra,
   AsignacionDetalle,
   Certificacion,
   EstadoObra,
+  NodoObra,
   ObraDetalle as Detalle,
+  PartidaObra,
   Personal,
+  VinculoPresupuesto,
 } from '../lib/api'
 import { useContextoObras } from './Obras'
+import { useWorkspace } from '../workspace'
 
 /** Partida "plana" para elegir al certificar: el árbol de capítulos no
  *  importa aquí, solo qué partidas tiene la obra y cuánto llevan medido. */
@@ -52,6 +68,18 @@ function aplanarPartidas(nodos: { partidas: PartidaPlana[]; hijos: unknown[] }[]
   return resultado
 }
 
+/** Vuelve a encontrar una partida en el árbol recién cargado. Sin esto, la
+ *  selección se quedaría congelada en la copia del momento del clic. */
+function buscarPartida(nodos: NodoObra[], partidaId: string): PartidaObra | null {
+  for (const nodo of nodos) {
+    const encontrada = nodo.partidas.find((p) => p.id === partidaId)
+    if (encontrada) return encontrada
+    const enHijos = buscarPartida(nodo.hijos, partidaId)
+    if (enHijos) return enHijos
+  }
+  return null
+}
+
 export function ObraDetalle() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
@@ -65,17 +93,36 @@ export function ObraDetalle() {
   const [asignando, setAsignando] = useState(false)
   const [midiendoPartes, setMidiendoPartes] = useState<AsignacionDetalle | null>(null)
   const [certificando, setCertificando] = useState(false)
+  const [arbol, setArbol] = useState<ArbolObra | null>(null)
+  const [vinculos, setVinculos] = useState<VinculoPresupuesto[]>([])
+  const [seleccion, setSeleccion] = useState<PartidaObra | null>(null)
+  const [sincronizando, setSincronizando] = useState(false)
+  // Un contador, no los datos: mover una tarea tiene que refrescar el widget
+  // de pendientes del cuadro de mandos, y ese los pide por su cuenta.
+  const [refrescoTareas, setRefrescoTareas] = useState(0)
 
   const cargar = useCallback(async () => {
     try {
-      const [detalle, lista, certs] = await Promise.all([
+      const [detalle, lista, certs, arbolObra, vinculosObra] = await Promise.all([
         api.obras.get(id),
         api.obras.asignaciones(id),
         api.certificaciones.list({ obra_id: id, limit: 100 }),
+        api.obras.arbol(id),
+        api.obras.presupuestos(id),
       ])
       setCertificaciones(certs.items)
       setObra(detalle)
       setAsignaciones(lista)
+      setArbol(arbolObra)
+      setVinculos(vinculosObra)
+      // La partida seleccionada se relee del árbol recién cargado: guardar la
+      // copia del momento del clic dejaría el widget de mediciones enseñando
+      // la medición de antes de la última edición.
+      setSeleccion((actual) => {
+        if (actual === null) return null
+        const fresca = buscarPartida(arbolObra.capitulos, actual.id)
+        return fresca ?? null
+      })
       setBorrador({})
       setError(null)
     } catch (err) {
@@ -89,6 +136,19 @@ export function ObraDetalle() {
 
   function cerrar() {
     navigate('/obras')
+  }
+
+  async function sincronizarArbol() {
+    setSincronizando(true)
+    try {
+      await api.obras.sincronizarArbol(id)
+      await cargar()
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setSincronizando(false)
+    }
   }
 
   if (error && !obra) {
@@ -218,6 +278,8 @@ export function ObraDetalle() {
 
       <CamposLibres entidad="obra" entidadId={id} />
 
+      <PresupuestosObra obraId={id} onCambio={() => void cargar()} />
+
       <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Personal asignado</h2>
         <Tooltip texto="Asignar un trabajador a esta obra">
@@ -273,63 +335,6 @@ export function ObraDetalle() {
         )}
       </div>
 
-      <div className="page-head" style={{ marginTop: 'var(--sp-6)' }}>
-        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Certificaciones</h2>
-        <Tooltip texto="Certificar lo ejecutado hasta la fecha">
-          <button className="btn" onClick={() => setCertificando(true)}>
-            <Plus size={16} aria-hidden="true" />
-            Nueva certificación
-          </button>
-        </Tooltip>
-      </div>
-
-      <div className="table-wrap">
-        {certificaciones.length === 0 ? (
-          <EmptyState title="Sin certificaciones">
-            Certifica lo ejecutado hasta la fecha para poder facturarlo.
-          </EmptyState>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Nº</th>
-                <th>Fecha</th>
-                <th>Estado</th>
-                <th className="table__actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {certificaciones.map((c) => (
-                <tr key={c.id}>
-                  <td className="table__code">{c.codigo}</td>
-                  <td>{c.fecha}</td>
-                  <td>
-                    <span className={`chip chip--estado-cert-${c.estado}`}>
-                      {ETIQUETA_ESTADO_CERTIFICACION[c.estado]}
-                    </span>
-                  </td>
-                  <td className="table__actions">
-                    <Link className="btn btn--sm" to={`/certificaciones/${c.id}`}>
-                      Ver certificación nº {c.numero}
-                      <ArrowRight size={14} aria-hidden="true" />
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {certificando && (
-        <NuevaCertificacionModal
-          obraId={id}
-          presupuestoId={obra.presupuesto_id}
-          onClose={() => setCertificando(false)}
-          onCreada={(certId) => navigate(`/certificaciones/${certId}`)}
-        />
-      )}
-
       {asignando && (
         <AsignarModal
           obraId={id}
@@ -351,8 +356,147 @@ export function ObraDetalle() {
     </>
   )
 
+  /** Pestaña «Partidas»: el árbol de la obra y su medición real, con la misma
+   *  disposición de widgets que en presupuestos (arrastrables, ocultables, y
+   *  la posición guardada en el navegador). */
+  const pestanaPartidas = (
+    <>
+      <ErrorNotice error={error} />
+
+      {arbol !== null && arbol.capitulos.length === 0 && (
+        <div className="notice notice--aviso">
+          <span>
+            Esta obra todavía no tiene árbol propio. Puedes traer las partidas de sus
+            presupuestos vinculados: se copian, y a partir de ahí lo que midas en obra no toca el
+            presupuesto firmado con el cliente.
+          </span>
+          <button
+            className="btn btn--sm"
+            disabled={sincronizando}
+            onClick={() => void sincronizarArbol()}
+          >
+            {sincronizando ? 'Trayendo…' : 'Traer partidas de los presupuestos'}
+          </button>
+        </div>
+      )}
+
+      {arbol !== null && (
+        <WidgetGrid
+          id="obra-partidas"
+          widgets={[
+            {
+              id: 'arbol',
+              titulo: 'Capítulos y partidas de la obra',
+              x: 0,
+              y: 0,
+              w: 8,
+              h: 12,
+              minW: 4,
+              minH: 6,
+              contenido: (
+                <RejillaObra
+                  obraId={id}
+                  arbol={arbol}
+                  onCambio={cargar}
+                  onMedir={setSeleccion}
+                  seleccionadaId={seleccion?.id ?? null}
+                  onSeleccionar={(fila) =>
+                    setSeleccion(fila?.tipo === 'partida' && fila.partida ? fila.partida : null)
+                  }
+                />
+              ),
+            },
+            {
+              id: 'resumen',
+              titulo: 'Resumen',
+              x: 8,
+              y: 0,
+              w: 4,
+              h: 12,
+              minW: 3,
+              minH: 6,
+              contenido: <ResumenArbol arbol={arbol} vinculos={vinculos} />,
+            },
+            {
+              id: 'mediciones',
+              titulo: 'Medición de obra',
+              x: 0,
+              y: 12,
+              w: 12,
+              h: 11,
+              minW: 5,
+              minH: 5,
+              contenido:
+                seleccion === null ? (
+                  <EmptyState title="Ninguna partida seleccionada">
+                    Elige una partida del árbol para medir lo ejecutado.
+                  </EmptyState>
+                ) : (
+                  <MedicionesObra partida={seleccion} onCambio={cargar} />
+                ),
+            },
+          ]}
+        />
+      )}
+    </>
+  )
+
+  const codigosPresupuesto = new Map(
+    vinculos.map((v) => [v.presupuesto_id, v.presupuesto_codigo]),
+  )
+
   const pestanas: PestanaFicha[] = [
+    {
+      id: 'cuadro',
+      etiqueta: 'Cuadro de mandos',
+      icono: 'calculator',
+      contenido: (
+        <CuadroObra
+          obraId={id}
+          arbol={arbol}
+          certificaciones={certificaciones}
+          refresco={refrescoTareas}
+        />
+      ),
+    },
     { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    { id: 'partidas', etiqueta: 'Partidas', icono: 'medir', contenido: pestanaPartidas },
+    {
+      id: 'comparativo',
+      etiqueta: 'Comparativo',
+      icono: 'comparativo',
+      contenido: (
+        <Comparativo
+          obraId={id}
+          codigosPresupuesto={codigosPresupuesto}
+          onAprobado={() => void cargar()}
+        />
+      ),
+    },
+    {
+      id: 'compras',
+      etiqueta: 'Compras',
+      icono: 'truck',
+      contenido: <ComprasObra obraId={id} />,
+    },
+    {
+      id: 'ventas',
+      etiqueta: 'Ventas',
+      icono: 'receipt',
+      contenido: (
+        <VentasObra
+          obraId={id}
+          certificaciones={certificaciones}
+          onCertificar={() => setCertificando(true)}
+        />
+      ),
+    },
+    {
+      id: 'tareas',
+      etiqueta: 'Tareas',
+      icono: 'confirmar',
+      contenido: <TareasObra obraId={id} onCambio={() => setRefrescoTareas((n) => n + 1)} />,
+    },
     {
       id: 'contactos',
       etiqueta: 'Contactos',
@@ -380,21 +524,95 @@ export function ObraDetalle() {
   ]
 
   return (
-    <FichaDetalle
-      titulo={
-        <>
-          {obra.nombre} <span className="table__code">{obra.codigo}</span>
-        </>
-      }
-      subtitulo={
-        <p className="page-lead" style={{ marginBottom: 0 }}>
-          Presupuesto{' '}
-          <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
-        </p>
-      }
-      pestanas={pestanas}
-      onClose={cerrar}
-    />
+    <>
+      <FichaDetalle
+        titulo={
+          <>
+            {obra.nombre} <span className="table__code">{obra.codigo}</span>
+          </>
+        }
+        subtitulo={
+          <p className="page-lead" style={{ marginBottom: 0 }}>
+            Presupuesto{' '}
+            <Link to={`/presupuestos/${obra.presupuesto_id}`}>{obra.presupuesto_codigo}</Link>
+          </p>
+        }
+        pestanas={pestanas}
+        onClose={cerrar}
+      />
+
+      {/* Fuera de las pestañas a propósito: FichaDetalle solo monta el
+       *  contenido de la pestaña activa, y «crear certificación» se dispara
+       *  desde Ventas — si el modal viviera dentro de una pestaña concreta,
+       *  solo aparecería al entrar en esa pestaña. */}
+      {certificando && (
+        <NuevaCertificacionModal
+          obraId={id}
+          presupuestoId={obra.presupuesto_id}
+          onClose={() => setCertificando(false)}
+          onCreada={(certId) => navigate(`/certificaciones/${certId}`)}
+        />
+      )}
+    </>
+  )
+}
+
+/** Widget «Resumen»: lo contratado frente a lo que la obra dice hoy.
+ *
+ *  La cifra que importa es la desviación por los anexos: es lo que se ha
+ *  contratado DESPUÉS de arrancar y lo que hay que poder justificar. */
+function ResumenArbol({
+  arbol,
+  vinculos,
+}: {
+  arbol: ArbolObra
+  vinculos: VinculoPresupuesto[]
+}) {
+  const t = arbol.totales
+  const anexos = vinculos.filter((v) => v.tipo === 'anexo')
+  const margen = Number(t.venta) - Number(t.coste)
+  const margenPct = Number(t.venta) > 0 ? (margen / Number(t.venta)) * 100 : 0
+
+  return (
+    <div className="ficha-datos">
+      <dl className="resumen-obra">
+        <div>
+          <dt>Coste de obra</dt>
+          <dd>{formatoImporte(t.coste)} €</dd>
+        </div>
+        <div>
+          <dt>Venta (a certificar)</dt>
+          <dd>{formatoImporte(t.venta)} €</dd>
+        </div>
+        <div>
+          <dt>Margen</dt>
+          <dd>
+            {formatoImporte(String(margen))} €{' '}
+            <span className="muted">({margenPct.toFixed(1)} %)</span>
+          </dd>
+        </div>
+        <div className="resumen-obra__separado">
+          <dt>De ello, anexos</dt>
+          <dd>
+            {formatoImporte(t.coste_anexos)} € de coste
+            <div className="muted">{formatoImporte(t.venta_anexos)} € de venta</div>
+          </dd>
+        </div>
+        <div>
+          <dt>Presupuestos en ejecución</dt>
+          <dd>
+            {vinculos.length}{' '}
+            <span className="muted">
+              {anexos.length === 0
+                ? '(solo el principal)'
+                : anexos.length === 1
+                  ? '(1 anexo)'
+                  : `(${anexos.length} anexos)`}
+            </span>
+          </dd>
+        </div>
+      </dl>
+    </div>
   )
 }
 
@@ -645,12 +863,21 @@ function NuevaCertificacionModal({
   onClose: () => void
   onCreada: (certificacionId: string) => void
 }) {
+  const { modules } = useWorkspace()
+  const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
   const [partidas, setPartidas] = useState<PartidaPlana[]>([])
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   const [retencion, setRetencion] = useState('0.00')
   const [medidas, setMedidas] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
+  // Arrastrar un documento (un parte de obra, la certificación anterior...)
+  // rellena `medidas` con lo que la IA proponga — nunca se guarda nada por
+  // su cuenta, el usuario sigue revisando y creando la certificación por el
+  // camino normal.
+  const [documentoIA, setDocumentoIA] = useState<File[] | null>(null)
+  const [arrastrando, setArrastrando] = useState(false)
+  const inputFicheroRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void api.presupuestos
@@ -685,7 +912,13 @@ function NuevaCertificacionModal({
     }
   }
 
+  function resolverPartida(partidaId: string): string {
+    const p = partidas.find((x) => x.id === partidaId)
+    return p ? `${p.codigo} — ${p.resumen}` : partidaId
+  }
+
   return (
+    <>
     <Modal title="Nueva certificación" onClose={onClose}>
       <div className="form-section">
         <ErrorNotice error={error} />
@@ -713,7 +946,42 @@ function NuevaCertificacionModal({
           </Field>
         </div>
 
-        <div className="table-wrap" style={{ marginTop: 'var(--sp-4)' }}>
+        {iaActiva && partidas.length > 0 && (
+          <div
+            className="form-actions"
+            style={{ marginTop: 'var(--sp-4)', marginBottom: 0 }}
+          >
+            <button className="btn btn--sm" onClick={() => setDocumentoIA([])}>
+              <Sparkles size={14} aria-hidden="true" />
+              Preguntar a la IA
+            </button>
+            <button className="btn btn--sm" onClick={() => inputFicheroRef.current?.click()}>
+              <Upload size={14} aria-hidden="true" />
+              Subir documento (PDF, imagen o Excel)…
+            </button>
+            <span className="muted">o arrastra uno sobre la tabla</span>
+          </div>
+        )}
+
+        <div
+          className={
+            arrastrando ? 'table-wrap table-wrap--arrastrando' : 'table-wrap'
+          }
+          style={{ marginTop: 'var(--sp-4)' }}
+          onDragOver={(e) => {
+            if (!iaActiva || !e.dataTransfer.types.includes('Files')) return
+            e.preventDefault()
+            setArrastrando(true)
+          }}
+          onDragLeave={() => setArrastrando(false)}
+          onDrop={(e) => {
+            if (!iaActiva || !e.dataTransfer.types.includes('Files')) return
+            e.preventDefault()
+            setArrastrando(false)
+            const archivos = Array.from(e.dataTransfer.files)
+            if (archivos.length > 0) setDocumentoIA(archivos)
+          }}
+        >
           {partidas.length === 0 ? (
             <EmptyState title="El presupuesto no tiene partidas" />
           ) : (
@@ -765,5 +1033,41 @@ function NuevaCertificacionModal({
         </button>
       </div>
     </Modal>
+
+    <input
+      ref={inputFicheroRef}
+      type="file"
+      multiple
+      accept=".xlsx,application/pdf,image/png,image/jpeg,image/webp"
+      style={{ display: 'none' }}
+      onChange={(e) => {
+        const archivos = Array.from(e.target.files ?? [])
+        e.target.value = ''
+        if (archivos.length > 0) setDocumentoIA(archivos)
+      }}
+    />
+
+    {documentoIA && (
+      <DocumentoIAModal
+        ficheros={documentoIA}
+        entidad="obra"
+        entidadId={obraId}
+        conversar={(ficheros, mensajes) =>
+          api.certificaciones.documentoConversarIA(obraId, presupuestoId, ficheros, mensajes)
+        }
+        resolverPartida={resolverPartida}
+        aplicarPropuesta={async (propuesta) => {
+          const lineas = propuesta.lineas_certificacion_propuestas ?? []
+          setMedidas((m) => {
+            const copia = { ...m }
+            for (const l of lineas) copia[l.partida_id] = l.medicion_actual
+            return copia
+          })
+          return `Hecho: medición rellenada en ${lineas.length} partida${lineas.length === 1 ? '' : 's'} — revísala antes de crear la certificación.`
+        }}
+        onClose={() => setDocumentoIA(null)}
+      />
+    )}
+    </>
   )
 }

@@ -52,6 +52,16 @@ PATRON_POR_DEFECTO: dict[str, str] = {
     # consumir un número de la serie que el cliente ve en sus presupuestos.
     "solicitud_precios": "SOL{SEQ:05d}",
     "oferta_proveedor": "OFE{SEQ:05d}",
+    # Factura de proveedor. Serie propia y separada de "factura": esa es
+    # nuestra numeración legal de venta, y una factura que RECIBIMOS no puede
+    # gastar un número de ella. Aquí el código es solo referencia interna: lo
+    # que identifica la factura frente al proveedor es su propio número.
+    "factura_recibida": "FRE{SEQ:05d}",
+    # Orden de compra en firme a proveedor. Serie propia, separada de
+    # "albaran" (lo entregado) y de "solicitud_precios" (lo pedido antes de
+    # decidir a quién) — son tres momentos distintos del mismo proceso.
+    "pedido": "PED{SEQ:05d}",
+    "contrato": "CON{SEQ:05d}",
 }
 
 _TOKEN_RE = re.compile(r"\{(SEQ|YYYY|YY|MM|DD|ORG)(?::0(\d+)d)?\}")

@@ -12,6 +12,7 @@ Grafo de dependencias:
     compras      -> obras
     facturacion  -> obras, terceros
     ia           -> presupuestos
+    contratos    -> obras, terceros
 
 El módulo `catalogo` (Producto, Familia, PrecioSuministro) existió hasta la
 Fase 25, cuando se fusionó en `presupuestos.Concepto` bajo el nombre "banco de
@@ -21,6 +22,7 @@ precios": un producto/servicio y una partida unitaria son la misma ficha.
 from app.core.modules import registry
 from app.modules.campos_libres import SPEC as CAMPOS_LIBRES
 from app.modules.compras import SPEC as COMPRAS
+from app.modules.contratos import SPEC as CONTRATOS
 from app.modules.core import SPEC as CORE
 from app.modules.crm import SPEC as CRM
 from app.modules.documentos import SPEC as DOCUMENTOS
@@ -32,6 +34,7 @@ from app.modules.terceros import SPEC as TERCEROS
 
 ALL_SPECS = (
     CORE, CAMPOS_LIBRES, CRM, DOCUMENTOS, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA,
+    CONTRATOS,
 )
 
 
@@ -45,6 +48,7 @@ def import_models() -> None:
     """Puebla Base.metadata. Lo usa el env.py de Alembic."""
     from app.modules.campos_libres import models as _campos_libres_models  # noqa: F401
     from app.modules.compras import models as _compras_models  # noqa: F401
+    from app.modules.contratos import models as _contratos_models  # noqa: F401
     from app.modules.crm import models as _crm_models  # noqa: F401
     from app.modules.documentos import models as _documentos_models  # noqa: F401
     from app.modules.core import auditoria_models as _core_auditoria_models  # noqa: F401

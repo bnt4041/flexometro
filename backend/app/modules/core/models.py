@@ -1,12 +1,22 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.core.models import Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 SCHEMA = "core"
 
@@ -132,3 +142,59 @@ class OrganizationModule(UUIDPrimaryKeyMixin, Base):
     )
 
     organization: Mapped[Organization] = relationship(back_populates="modules")
+
+
+class Notificacion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Aviso persistente para una organización, o para un usuario concreto de
+    ella. La campana de la barra superior.
+
+    Hasta ahora la aplicación solo sabía mandar un correo o enseñar un aviso
+    de cuatro segundos (`frontend/src/toast.tsx`). Esto es lo que hace falta
+    para que a un proveedor que YA tiene Flexómetro le llegue una solicitud de
+    precios dentro de su propia aplicación en vez de por un enlace externo.
+
+    `destinatario_subject` a nulo = para toda la organización. Con valor, solo
+    la ve ese usuario (el `sub` de Keycloak).
+
+    `token_acceso` es el enlace del proveedor en claro, y solo lo llevan las
+    notificaciones de solicitud de precios. Es deliberado: esta fila vive en
+    la organización DEL PROVEEDOR y está protegida por RLS, así que tenerlo
+    aquí es la misma exposición que tenerlo en su bandeja de correo — y es lo
+    que permite aceptar la solicitud sin salir de la aplicación.
+    """
+
+    __tablename__ = "notificacion"
+    __table_args__ = (
+        Index("ix_core_notificacion_bandeja", "organization_id", "leida_en"),
+        {"schema": "core"},
+    )
+
+    # Qué clase de aviso es, para saber qué acción ofrecer al abrirlo.
+    tipo: Mapped[str] = mapped_column(String(48), nullable=False)
+    destinatario_subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    titulo: Mapped[str] = mapped_column(String(200), nullable=False)
+    cuerpo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Adónde lleva al pulsarla, dentro de la aplicación.
+    enlace: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    importante: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    leida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Qué se hizo con ella, si tenía acción (aceptar una solicitud, por
+    # ejemplo). Nulo = todavía no se ha decidido.
+    resuelta_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    token_acceso: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # El presupuesto que se creó al aceptarla, si se aceptó.
+    presupuesto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.presupuesto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # `{id de mi partida: id de la línea de la solicitud del emisor}`, para
+    # poder devolver la oferta. Es el puente entre las dos organizaciones, y
+    # vive aquí —en la del proveedor— porque una FK entre organizaciones
+    # distintas no tendría sentido: son documentos de empresas diferentes.
+    mapa_lineas: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Cuándo se le devolvió la oferta al emisor.
+    enviada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

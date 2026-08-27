@@ -186,6 +186,34 @@ class KeycloakAdminClient:
                 )
             return usuarios
 
+    async def buscar_por_email(self, email: str) -> dict | None:
+        """El usuario con ESE correo exacto, o `None`.
+
+        Es la pieza que permite saber si un proveedor al que le pedimos precio
+        ya tiene Flexómetro: no hay tabla de usuarios en la base de datos, el
+        directorio vive entero en Keycloak. Búsqueda exacta a propósito — con
+        `exact=false` un correo parcial devolvería a otra persona.
+
+        Devuelve el usuario en bruto de Keycloak; sus organizaciones están en
+        `attributes.organizacion`.
+        """
+        if not email or "@" not in email:
+            return None
+        base = self._base()
+        async with httpx.AsyncClient(timeout=15.0) as cliente:
+            token = await self._token_admin(cliente)
+            respuesta = await cliente.get(
+                f"{base}/users",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"email": email, "exact": "true", "max": 2},
+            )
+            if respuesta.status_code != 200:
+                raise KeycloakAdminError(f"No se pudo buscar por email: {respuesta.text}")
+            usuarios = respuesta.json()
+        # Con más de uno no se puede decidir a quién avisar sin equivocarse:
+        # mejor tratarlo como "no lo tengo claro" y mandar el correo de siempre.
+        return usuarios[0] if len(usuarios) == 1 else None
+
     async def listar_usuarios_por_rol(self, role: str) -> list[dict]:
         """Personal de la plataforma: no tiene el atributo `organizacion`, así
         que no se puede buscar como en `listar_usuarios` — se lista por el

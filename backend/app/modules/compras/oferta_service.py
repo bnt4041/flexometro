@@ -21,7 +21,9 @@ from app.core.numeracion import siguiente_referencia_libre
 from app.core.tenancy import require_organization_id
 from app.modules.compras.models import (
     EstadoDestinatario,
+    OfertaDescompuesto,
     OfertaLinea,
+    OfertaMedicion,
     SolicitudDestinatario,
     SolicitudLinea,
     SolicitudPrecios,
@@ -29,7 +31,12 @@ from app.modules.compras.models import (
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos import service as banco_service
 from app.modules.presupuestos.models import NaturalezaConcepto, PrecioSuministro, TipoConcepto
-from app.modules.presupuestos.models_presupuesto import Partida, Presupuesto, TipoPresupuesto
+from app.modules.presupuestos.models_presupuesto import (
+    Partida,
+    PartidaDescomposicion,
+    Presupuesto,
+    TipoPresupuesto,
+)
 from app.modules.presupuestos.presupuesto_schemas import (
     CapituloCreate,
     LineaMedicionCreate,
@@ -131,13 +138,54 @@ async def cerrar_oferta(
     for linea, oferta in con_precio:
         por_capitulo[linea.capitulo_resumen or "Sin capítulo"].append((linea, oferta))
 
+    # Los parciales que haya aportado el proveedor, por oferta.
+    parciales: dict[uuid.UUID, list[OfertaMedicion]] = defaultdict(list)
+    for medicion in (
+        await session.execute(
+            select(OfertaMedicion)
+            .join(OfertaLinea, OfertaLinea.id == OfertaMedicion.oferta_linea_id)
+            .where(OfertaLinea.destinatario_id == destinatario.id)
+            .order_by(OfertaMedicion.orden)
+        )
+    ).scalars():
+        parciales[medicion.oferta_linea_id].append(medicion)
+
+    desgloses: dict[uuid.UUID, list[OfertaDescompuesto]] = defaultdict(list)
+    for componente in (
+        await session.execute(
+            select(OfertaDescompuesto)
+            .join(OfertaLinea, OfertaLinea.id == OfertaDescompuesto.oferta_linea_id)
+            .where(OfertaLinea.destinatario_id == destinatario.id)
+            .order_by(OfertaDescompuesto.orden)
+        )
+    ).scalars():
+        desgloses[componente.oferta_linea_id].append(componente)
+
     for capitulo_resumen, lineas_capitulo in por_capitulo.items():
         capitulo = await service.crear_capitulo(
             session, presupuesto.id, CapituloCreate(resumen=capitulo_resumen)
         )
         assert capitulo is not None
         for linea, oferta in lineas_capitulo:
-            await service.crear_partida(
+            # Si el proveedor midió por su cuenta, manda su estado de
+            # mediciones; si no, se arrastra la medición que se le pidió como
+            # una sola línea.
+            mios = parciales.get(oferta.id)
+            mediciones = (
+                [
+                    LineaMedicionCreate(
+                        comentario=m.comentario,
+                        uds=m.uds,
+                        longitud=m.longitud,
+                        anchura=m.anchura,
+                        altura=m.altura,
+                    )
+                    for m in mios
+                ]
+                if mios
+                else [LineaMedicionCreate(uds=linea.medicion)]
+            )
+            partida = await service.crear_partida(
                 session,
                 capitulo.id,
                 PartidaCreate(
@@ -145,9 +193,31 @@ async def cerrar_oferta(
                     texto=linea.texto,
                     unidad=linea.unidad,
                     precio=oferta.precio_ofertado,
-                    lineas=[LineaMedicionCreate(uds=linea.medicion)],
+                    lineas=mediciones,
                 ),
             )
+
+            # El desglose que declaró el proveedor se copia tal cual, con
+            # `hijo_id` a nulo: son conceptos SUYOS, no del banco del emisor,
+            # y la columna admite nulo justo para casos así. Así el emisor ve
+            # de qué se compone el precio que le han dado.
+            if partida is not None and desgloses.get(oferta.id):
+                for orden, componente in enumerate(desgloses[oferta.id]):
+                    session.add(
+                        PartidaDescomposicion(
+                            organization_id=org_id,
+                            partida_id=partida.id,
+                            hijo_id=None,
+                            codigo=componente.codigo or "",
+                            resumen=componente.resumen,
+                            unidad=componente.unidad,
+                            naturaleza=componente.naturaleza,
+                            rendimiento=componente.rendimiento,
+                            factor=componente.factor,
+                            precio=componente.precio,
+                            orden=orden,
+                        )
+                    )
 
     destinatario.oferta_presupuesto_id = presupuesto.id
     destinatario.estado = EstadoDestinatario.RESPONDIDA

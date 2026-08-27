@@ -487,7 +487,15 @@ export interface TerceroDetalle extends Tercero {
 // (presupuesto, obra, certificación, factura) — no requiere que el contacto
 // pertenezca a un Tercero.
 
-export type EntidadContacto = 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+export type EntidadContacto =
+  | 'presupuesto'
+  | 'obra'
+  | 'certificacion'
+  | 'factura'
+  | 'pedido'
+  | 'contrato'
+  | 'albaran'
+  | 'factura_recibida'
 
 export interface ContactoAsociado {
   id: string
@@ -546,7 +554,17 @@ export interface RegistroAuditoria {
 // Cuaderno de bitácora del equipo sobre un objeto grande del negocio —
 // mismo alcance de entidades que `EntidadContacto`, más 'tercero'.
 
-export type EntidadNota = 'tercero' | 'contacto' | 'presupuesto' | 'obra' | 'certificacion' | 'factura'
+export type EntidadNota =
+  | 'tercero'
+  | 'contacto'
+  | 'presupuesto'
+  | 'obra'
+  | 'certificacion'
+  | 'factura'
+  | 'pedido'
+  | 'contrato'
+  | 'albaran'
+  | 'factura_recibida'
 export type TipoNota = 'texto' | 'email'
 
 export interface AdjuntoNota {
@@ -581,6 +599,10 @@ export type EntidadDocumento =
   | 'certificacion'
   | 'factura'
   | 'solicitud_precios'
+  | 'pedido'
+  | 'contrato'
+  | 'albaran'
+  | 'factura_recibida'
 
 export interface Documento {
   id: string
@@ -1102,6 +1124,146 @@ export interface ObraResumen extends Obra {
   pem: string
 }
 
+// --- El árbol de la obra ---
+// Copia de lo contratado que a partir de ahí va por su cuenta: en obra la
+// medición cambia cada semana y el presupuesto firmado no se toca.
+
+export interface MedicionObra {
+  id: string
+  partida_id: string
+  comentario: string | null
+  uds: string | null
+  longitud: string | null
+  anchura: string | null
+  altura: string | null
+  parcial: string
+  orden: number
+}
+
+export interface PartidaObra {
+  id: string
+  obra_id: string
+  capitulo_id: string
+  codigo: string
+  resumen: string
+  texto: string | null
+  unidad: string
+  precio: string
+  precio_venta: string
+  medicion: string
+  importe: string
+  importe_venta: string
+  orden: number
+  origen_presupuesto_id: string | null
+  origen_partida_id: string | null
+  /** Entró después de arrancar la obra: un anexo, o creada a mano. */
+  es_anexo: boolean
+  /** Código del presupuesto del que salió, ya resuelto. */
+  origen_codigo: string | null
+  tiene_desglose: boolean
+}
+
+export interface PartidaObraDetalle extends PartidaObra {
+  lineas: MedicionObra[]
+}
+
+export interface NodoObra {
+  id: string
+  obra_id: string
+  parent_id: string | null
+  codigo: string
+  resumen: string
+  texto: string | null
+  orden: number
+  origen_presupuesto_id: string | null
+  origen_capitulo_id: string | null
+  es_anexo: boolean
+  origen_codigo: string | null
+  /** Acumulados de todo lo que cuelga. */
+  importe: string
+  importe_venta: string
+  partidas: PartidaObra[]
+  hijos: NodoObra[]
+}
+
+export interface TotalesObra {
+  coste: string
+  venta: string
+  coste_anexos: string
+  venta_anexos: string
+}
+
+export interface ArbolObra {
+  obra_id: string
+  capitulos: NodoObra[]
+  totales: TotalesObra
+}
+
+export interface ArbolSincronizado {
+  capitulos: number
+  partidas: number
+  mediciones: number
+  presupuestos: number
+}
+
+// --- Tareas de obra ---
+
+export type EstadoTarea = 'pendiente' | 'en_curso' | 'hecha'
+export type PrioridadTarea = 'baja' | 'normal' | 'alta'
+
+export interface Tarea {
+  id: string
+  obra_id: string
+  titulo: string
+  descripcion: string | null
+  responsable_id: string | null
+  /** Ya resuelto por el servidor: la tarjeta enseña el nombre. */
+  responsable_nombre: string | null
+  fecha_limite: string | null
+  estado: EstadoTarea
+  prioridad: PrioridadTarea
+  /** Posición dentro de SU columna del tablero. */
+  orden: number
+  completada_en: string | null
+  created_at: string
+  updated_at: string
+  creado_por_nombre: string | null
+}
+
+export interface ResumenTareasObra {
+  pendientes: number
+  en_curso: number
+  hechas: number
+  /** Con fecha límite pasada y sin terminar. */
+  vencidas: number
+}
+
+export type TipoVinculo = 'principal' | 'anexo'
+
+/** Un presupuesto que se está ejecutando en la obra. El principal es el que la
+ *  originó; los anexos son lo que se contrató después. */
+export interface VinculoPresupuesto {
+  id: string
+  obra_id: string
+  presupuesto_id: string
+  presupuesto_codigo: string
+  presupuesto_nombre: string
+  tipo: TipoVinculo
+  fecha_vinculacion: string
+  orden: number
+  notas: string | null
+}
+
+/** Resultado de aceptar un presupuesto: dice a qué obra ha ido y si es nueva. */
+export interface PresupuestoAceptado {
+  obra_id: string
+  obra_codigo: string
+  obra_nombre: string
+  tipo: TipoVinculo
+  creada: boolean
+  mensaje: string
+}
+
 export interface ObraDetalle extends Obra {
   presupuesto_codigo: string
   presupuesto_nombre: string
@@ -1121,6 +1283,122 @@ export interface AlbaranLinea {
   orden: number
 }
 
+// --- Facturas de proveedor ---
+// No las emitimos nosotros: sin serie ni numeración legal. Lo que la identifica
+// frente al proveedor es SU número; `codigo` es la referencia interna.
+
+export type EstadoFacturaRecibida = 'pendiente' | 'pagada'
+
+export interface FacturaRecibida {
+  id: string
+  codigo: string
+  numero_proveedor: string
+  obra_id: string
+  proveedor_id: string
+  proveedor_razon_social: string
+  fecha: string
+  fecha_vencimiento: string | null
+  base_imponible: string
+  tipo_iva: TipoIVA
+  inversion_sujeto_pasivo: boolean
+  cuota_iva: string
+  total: string
+  estado: EstadoFacturaRecibida
+  fecha_pago: string | null
+  notas: string | null
+  /** Los albaranes que cubre: es el cuadre entre lo entregado y lo facturado. */
+  albaran_ids: string[]
+  albaran_codigos: string[]
+  created_at: string
+  updated_at: string
+  creado_por_nombre: string | null
+}
+
+/** El cuadre de compras de una obra. */
+export interface TotalesComprasObra {
+  albaranes_total: string
+  facturas_base: string
+  facturas_total: string
+  pendiente_de_pago: string
+  albaranes_sin_facturar: number
+}
+
+// --- Pedidos a proveedor (orden de compra en firme) ---
+// Distinto de la Solicitud de precios (pedir precio, comparar ofertas) y del
+// Albarán (lo que entra físicamente en obra): el paso intermedio, "esto es
+// lo que se le encarga" — con o sin una oferta ganadora detrás.
+
+export type EstadoPedido = 'pendiente' | 'confirmado' | 'servido_parcial' | 'servido' | 'cancelado'
+
+export interface PedidoLinea {
+  id: string
+  pedido_id: string
+  concepto_id: string | null
+  descripcion: string
+  unidad: string
+  cantidad: string
+  precio_unitario: string
+  importe: string
+  orden: number
+}
+
+export interface Pedido {
+  id: string
+  codigo: string
+  obra_id: string
+  proveedor_id: string
+  origen_solicitud_id: string | null
+  origen_oferta_presupuesto_id: string | null
+  fecha: string
+  fecha_entrega_prevista: string | null
+  estado: EstadoPedido
+  notas: string | null
+  created_at: string
+  updated_at: string
+  creado_por_nombre: string | null
+}
+
+export interface PedidoResumen extends Pedido {
+  proveedor_razon_social: string
+  total: string
+}
+
+export interface PedidoDetalle extends Pedido {
+  proveedor_razon_social: string
+  lineas: PedidoLinea[]
+  total: string
+}
+
+// --- Contratos: formalizan el acuerdo de una obra, con cliente o proveedor ---
+
+export type TipoContrato = 'cliente' | 'proveedor'
+export type EstadoContrato = 'borrador' | 'firmado' | 'rescindido' | 'finalizado'
+
+export interface Contrato {
+  id: string
+  codigo: string
+  tipo: TipoContrato
+  obra_id: string
+  cliente_id: string | null
+  proveedor_id: string | null
+  presupuesto_id: string | null
+  fecha_firma: string | null
+  fecha_inicio: string | null
+  fecha_fin_prevista: string | null
+  estado: EstadoContrato
+  importe: string | null
+  retencion_garantia_pct: string
+  notas: string | null
+  created_at: string
+  updated_at: string
+  creado_por_nombre: string | null
+}
+
+export interface ContratoResumen extends Contrato {
+  /** El cliente o el proveedor, según `tipo`. */
+  tercero_razon_social: string
+}
+
 export interface Albaran {
   id: string
   codigo: string
@@ -1130,6 +1408,9 @@ export interface Albaran {
   fecha: string
   estado: EstadoAlbaran
   notas: string | null
+  /** De qué pedido viene esta entrega — opcional, un albarán se puede seguir
+   *  dando de alta directo, sin pedido de por medio. */
+  pedido_id: string | null
 }
 
 export interface AlbaranResumen extends Albaran {
@@ -1218,6 +1499,23 @@ export interface SolicitudPrecios {
   destinatarios: SolicitudDestinatario[]
 }
 
+/** Un aviso persistente de la bandeja. El `token_acceso` de la solicitud NO
+ *  viaja al navegador: lo usa el servidor al aceptar. */
+export interface Notificacion {
+  id: string
+  tipo: string
+  titulo: string
+  cuerpo: string | null
+  enlace: string | null
+  importante: boolean
+  leida_en: string | null
+  resuelta_en: string | null
+  presupuesto_id: string | null
+  /** Cuándo se le devolvió la oferta a quien la pidió. */
+  enviada_en: string | null
+  created_at: string
+}
+
 export interface CosteCapitulo {
   capitulo_id: string | null
   codigo: string
@@ -1236,6 +1534,20 @@ export interface InformeCosteObra {
   obra_nombre: string
   capitulos: CosteCapitulo[]
   totales: CosteCapitulo
+}
+
+/** Lo certificado y lo facturado en una obra. Lo sirve `facturacion`, que es
+ *  quien ve certificaciones y facturas; el listado de certificaciones no lleva
+ *  importes (salen de sus líneas) y pedirlos uno a uno serían N peticiones. */
+export interface ResumenVentasObra {
+  certificado: string
+  retenido: string
+  certificaciones: number
+  facturado_base: string
+  facturado_total: string
+  facturas: number
+  cobrado: string
+  pendiente_de_cobro: string
 }
 
 export type EstadoCertificacion = 'borrador' | 'emitida'
@@ -1730,6 +2042,10 @@ export interface PropuestaIA {
     // documentos, cuando se soltó el fichero sobre esa partida) — usa
     // `partida_id` (destino) y `mediciones_propuestas`.
     | 'anadir_mediciones_partida'
+    // "IA en obra y certificaciones": rellena `medicion_actual` de una o
+    // varias partidas para preparar una certificación nueva — usa
+    // `lineas_certificacion_propuestas`, nunca crea nada por su cuenta.
+    | 'actualizar_mediciones_certificacion'
   descripcion: string
   // copiar_partida: origen. anadir_mediciones_partida: destino.
   partida_id: string | null
@@ -1752,6 +2068,14 @@ export interface PropuestaIA {
   // anadir_mediciones_partida (Fase 51c): líneas para la partida indicada
   // en `partida_id`, ya existente — mismo tipo que `LeerPlanoModal`.
   mediciones_propuestas: LineaSugerida[]
+  // actualizar_mediciones_certificacion: medición actual propuesta por
+  // partida, para rellenar el formulario de una certificación nueva.
+  lineas_certificacion_propuestas: LineaCertificacionPropuesta[]
+}
+
+export interface LineaCertificacionPropuesta {
+  partida_id: string
+  medicion_actual: string
 }
 
 export interface AnalisisBC3 {
@@ -2492,6 +2816,15 @@ export const api = {
       offset?: number
     }) => request<Page<PresupuestoResumen>>(`/api/presupuestos${query(params)}`),
     versiones: (id: string) => request<Version[]>(`/api/presupuestos/${id}/versiones`),
+    /** Aceptar = poner en ejecución. O arranca una obra nueva (obra_nombre), o
+     *  entra como anexo en una existente (obra_id). Lo sirve el módulo de
+     *  obras, que es el que puede hablar de las dos cosas. */
+    aceptar: (
+      id: string,
+      datos:
+        | { obra_id: string }
+        | { obra_nombre: string; obra_codigo?: string | null },
+    ) => post<PresupuestoAceptado>(`/api/presupuestos/${id}/aceptar`, datos),
     nuevaVersion: (id: string) =>
       post<Presupuesto>(`/api/presupuestos/${id}/nueva-version`, {}),
     comparar: (aId: string, bId: string) =>
@@ -2805,6 +3138,174 @@ export const api = {
       datos: { personal_id: string; fecha_desde: string; coste_hora?: string | null },
     ) => post<Asignacion>(`/api/obras/${id}/asignaciones`, datos),
     costes: (id: string) => request<InformeCosteObra>(`/api/obras/${id}/costes`),
+    tareas: (id: string, params: { estado?: EstadoTarea } = {}) =>
+      request<Tarea[]>(`/api/obras/${id}/tareas${query(params)}`),
+    resumenTareas: (id: string) =>
+      request<ResumenTareasObra>(`/api/obras/${id}/tareas/resumen`),
+    addTarea: (
+      id: string,
+      datos: {
+        titulo: string
+        descripcion?: string | null
+        responsable_id?: string | null
+        fecha_limite?: string | null
+        estado?: EstadoTarea
+        prioridad?: PrioridadTarea
+      },
+    ) => post<Tarea>(`/api/obras/${id}/tareas`, datos),
+    arbol: (id: string) => request<ArbolObra>(`/api/obras/${id}/arbol`),
+    /** Trae al árbol lo que falte de los presupuestos vinculados. Idempotente:
+     *  es para las obras que existían antes de que hubiera árbol. */
+    sincronizarArbol: (id: string) =>
+      post<ArbolSincronizado>(`/api/obras/${id}/arbol/sincronizar`, {}),
+    addCapitulo: (
+      id: string,
+      datos: {
+        resumen: string
+        codigo?: string | null
+        parent_id?: string | null
+        texto?: string | null
+        orden?: number
+      },
+    ) => post<NodoObra>(`/api/obras/${id}/capitulos`, datos),
+    presupuestos: (id: string) =>
+      request<VinculoPresupuesto[]>(`/api/obras/${id}/presupuestos`),
+    vincularPresupuesto: (
+      id: string,
+      datos: { presupuesto_id: string; tipo?: TipoVinculo; notas?: string | null },
+    ) => post<VinculoPresupuesto[]>(`/api/obras/${id}/presupuestos`, datos),
+    desvincularPresupuesto: (id: string, vinculoId: string) =>
+      del(`/api/obras/${id}/presupuestos/${vinculoId}`),
+    /** Arrastrar un documento a la pestaña Partidas de la obra — mismo
+     *  mecanismo que `api.ia.documentoConversar` en presupuestos, pero sin
+     *  banco de precios ni descompuesto (la obra no lleva ninguno). */
+    documentoConversarIA: (
+      obraId: string,
+      ficheros: File[],
+      mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
+      partidaId?: string,
+    ) => {
+      const f = new FormData()
+      for (const fichero of ficheros) f.append('ficheros', fichero)
+      f.append('mensajes', JSON.stringify(mensajes))
+      if (partidaId) f.append('partida_id', partidaId)
+      return subir<{ respuesta: string; propuesta: PropuestaIA | null }>(
+        `/api/obras/${obraId}/ia/documentos/conversar`,
+        f,
+      )
+    },
+    /** Confirma una propuesta `importar_capitulo`: crea el capítulo (anexo)
+     *  y sus partidas alzadas de una vez. */
+    aplicarPropuestaIA: (
+      obraId: string,
+      datos: {
+        capitulo_resumen: string
+        partidas: { resumen: string; unidad: string; precio: string; medicion: string }[]
+      },
+    ) => post<{ id: string; resumen: string; partidas: number }>(
+      `/api/obras/${obraId}/ia/aplicar-propuesta`,
+      datos,
+    ),
+    /** Confirma una propuesta `anadir_mediciones_partida` sobre una
+     *  partida ya existente de la obra. */
+    aplicarMedicionesIA: (datos: {
+      partida_id: string
+      lineas: {
+        comentario?: string | null
+        uds?: string | null
+        longitud?: string | null
+        anchura?: string | null
+        altura?: string | null
+      }[]
+    }) => post<MedicionObra[]>('/api/obras/ia/mediciones/aplicar-directo', datos),
+  },
+
+  tareas: {
+    update: (
+      id: string,
+      datos: Partial<{
+        titulo: string
+        descripcion: string | null
+        responsable_id: string | null
+        fecha_limite: string | null
+        estado: EstadoTarea
+        prioridad: PrioridadTarea
+      }>,
+    ) => patch<Tarea>(`/api/tareas/${id}`, datos),
+    /** Suelta una tarjeta en una columna y una posición. El servidor renumera
+     *  las dos columnas implicadas para que no queden empates de orden. */
+    mover: (id: string, datos: { estado: EstadoTarea; posicion: number }) =>
+      post<Tarea>(`/api/tareas/${id}/mover`, datos),
+    remove: (id: string) => del(`/api/tareas/${id}`),
+  },
+
+  obraCapitulos: {
+    update: (
+      id: string,
+      datos: Partial<{
+        parent_id: string | null
+        codigo: string
+        resumen: string
+        texto: string | null
+        orden: number
+      }>,
+    ) => patch<NodoObra>(`/api/obra-capitulos/${id}`, datos),
+    remove: (id: string) => del(`/api/obra-capitulos/${id}`),
+    addPartida: (
+      id: string,
+      datos: {
+        resumen: string
+        codigo?: string | null
+        unidad?: string
+        precio?: string
+        precio_venta?: string
+        medicion?: string
+        orden?: number
+      },
+    ) => post<PartidaObra>(`/api/obra-capitulos/${id}/partidas`, datos),
+  },
+
+  obraPartidas: {
+    get: (id: string) => request<PartidaObraDetalle>(`/api/obra-partidas/${id}`),
+    update: (
+      id: string,
+      datos: Partial<{
+        capitulo_id: string
+        codigo: string
+        resumen: string
+        texto: string | null
+        unidad: string
+        precio: string
+        precio_venta: string
+        medicion: string
+        orden: number
+      }>,
+    ) => patch<PartidaObra>(`/api/obra-partidas/${id}`, datos),
+    remove: (id: string) => del(`/api/obra-partidas/${id}`),
+    addMedicion: (
+      id: string,
+      datos: {
+        comentario?: string | null
+        uds?: string | null
+        longitud?: string | null
+        anchura?: string | null
+        altura?: string | null
+      },
+    ) => post<MedicionObra>(`/api/obra-partidas/${id}/mediciones`, datos),
+  },
+
+  obraMediciones: {
+    update: (
+      id: string,
+      datos: Partial<{
+        comentario: string | null
+        uds: string | null
+        longitud: string | null
+        anchura: string | null
+        altura: string | null
+      }>,
+    ) => patch<MedicionObra>(`/api/obra-mediciones/${id}`, datos),
+    remove: (id: string) => del(`/api/obra-mediciones/${id}`),
   },
 
   asignaciones: {
@@ -2820,6 +3321,56 @@ export const api = {
     remove: (id: string) => del(`/api/partes-trabajo/${id}`),
   },
 
+  facturasRecibidas: {
+    list: (params: {
+      obra_id?: string
+      proveedor_id?: string
+      estado?: EstadoFacturaRecibida
+      limit?: number
+      offset?: number
+    }) => request<Page<FacturaRecibida>>(`/api/facturas-recibidas${query(params)}`),
+    get: (id: string) => request<FacturaRecibida>(`/api/facturas-recibidas/${id}`),
+    create: (datos: {
+      obra_id: string
+      proveedor_id: string
+      numero_proveedor: string
+      fecha: string
+      fecha_vencimiento?: string | null
+      base_imponible: string
+      tipo_iva?: TipoIVA
+      inversion_sujeto_pasivo?: boolean
+      /** Si se dan, mandan sobre lo calculado: es lo que dice el papel. */
+      cuota_iva?: string | null
+      total?: string | null
+      albaran_ids?: string[]
+      notas?: string | null
+    }) => post<FacturaRecibida>('/api/facturas-recibidas', datos),
+    update: (
+      id: string,
+      datos: Partial<{
+        numero_proveedor: string
+        fecha: string
+        fecha_vencimiento: string | null
+        base_imponible: string
+        tipo_iva: TipoIVA
+        inversion_sujeto_pasivo: boolean
+        cuota_iva: string
+        total: string
+        estado: EstadoFacturaRecibida
+        fecha_pago: string | null
+        notas: string | null
+        albaran_ids: string[]
+      }>,
+    ) => patch<FacturaRecibida>(`/api/facturas-recibidas/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-recibidas/${id}`),
+    /** El cuadre de la obra: entregado frente a facturado. Lo sirve `compras`,
+     *  que es el módulo que ve albaranes y obras a la vez. */
+    totalesDeObra: (obraId: string) =>
+      request<TotalesComprasObra>(`/api/obras/${obraId}/compras`),
+    historial: (id: string) =>
+      request<RegistroAuditoria[]>(`/api/facturas-recibidas/${id}/historial`),
+  },
+
   albaranes: {
     list: (params: { obra_id?: string; proveedor_id?: string; limit?: number; offset?: number }) =>
       request<Page<AlbaranResumen>>(`/api/albaranes${query(params)}`),
@@ -2829,6 +3380,7 @@ export const api = {
       proveedor_id: string
       numero_proveedor?: string | null
       fecha: string
+      pedido_id?: string | null
       lineas?: {
         concepto_id?: string | null
         capitulo_id?: string | null
@@ -2851,10 +3403,113 @@ export const api = {
         precio_unitario?: string | null
       },
     ) => post<AlbaranLinea>(`/api/albaranes/${id}/lineas`, datos),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/albaranes/${id}/historial`),
   },
 
   albaranesLineas: {
     remove: (id: string) => del(`/api/albaranes-lineas/${id}`),
+  },
+
+  pedidos: {
+    list: (params: { obra_id?: string; proveedor_id?: string; limit?: number; offset?: number }) =>
+      request<Page<PedidoResumen>>(`/api/pedidos${query(params)}`),
+    get: (id: string) => request<PedidoDetalle>(`/api/pedidos/${id}`),
+    create: (datos: {
+      obra_id: string
+      proveedor_id: string
+      fecha: string
+      fecha_entrega_prevista?: string | null
+      notas?: string | null
+      origen_solicitud_id?: string | null
+      origen_oferta_presupuesto_id?: string | null
+      lineas?: {
+        concepto_id?: string | null
+        descripcion?: string | null
+        unidad?: string | null
+        cantidad: string
+        precio_unitario?: string | null
+      }[]
+    }) => post<PedidoDetalle>('/api/pedidos', datos),
+    update: (
+      id: string,
+      datos: Partial<{
+        fecha: string
+        fecha_entrega_prevista: string | null
+        estado: EstadoPedido
+        notas: string | null
+      }>,
+    ) => patch<Pedido>(`/api/pedidos/${id}`, datos),
+    remove: (id: string) => del(`/api/pedidos/${id}`),
+    addLinea: (
+      id: string,
+      datos: {
+        concepto_id?: string | null
+        descripcion?: string | null
+        unidad?: string | null
+        cantidad: string
+        precio_unitario?: string | null
+      },
+    ) => post<PedidoLinea>(`/api/pedidos/${id}/lineas`, datos),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/pedidos/${id}/historial`),
+  },
+
+  pedidosLineas: {
+    remove: (id: string) => del(`/api/pedidos-lineas/${id}`),
+  },
+
+  contratos: {
+    list: (params: { obra_id?: string; tipo?: TipoContrato; limit?: number; offset?: number }) =>
+      request<Page<ContratoResumen>>(`/api/contratos${query(params)}`),
+    get: (id: string) => request<ContratoResumen>(`/api/contratos/${id}`),
+    create: (datos: {
+      tipo: TipoContrato
+      obra_id: string
+      cliente_id?: string | null
+      proveedor_id?: string | null
+      presupuesto_id?: string | null
+      fecha_firma?: string | null
+      fecha_inicio?: string | null
+      fecha_fin_prevista?: string | null
+      importe?: string | null
+      retencion_garantia_pct?: string
+      notas?: string | null
+    }) => post<Contrato>('/api/contratos', datos),
+    update: (
+      id: string,
+      datos: Partial<{
+        presupuesto_id: string | null
+        fecha_firma: string | null
+        fecha_inicio: string | null
+        fecha_fin_prevista: string | null
+        estado: EstadoContrato
+        importe: string | null
+        retencion_garantia_pct: string
+        notas: string | null
+      }>,
+    ) => patch<Contrato>(`/api/contratos/${id}`, datos),
+    remove: (id: string) => del(`/api/contratos/${id}`),
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/contratos/${id}/historial`),
+  },
+
+  /** Bandeja de notificaciones (la campana de la barra superior). */
+  notificaciones: {
+    list: (soloPendientes = false) =>
+      request<Notificacion[]>(`/api/notificaciones${query({ solo_pendientes: soloPendientes })}`),
+    contador: () => request<{ pendientes: number }>('/api/notificaciones/contador'),
+    /** Si este presupuesto salió de una solicitud de otra empresa, su aviso —
+     *  para poder devolverle la oferta desde la propia ficha. */
+    porPresupuesto: (presupuestoId: string) =>
+      request<Notificacion | null>(`/api/notificaciones/por-presupuesto/${presupuestoId}`),
+    marcarLeidas: (ids: string[]) =>
+      post<{ pendientes: number }>('/api/notificaciones/leidas', { ids }),
+    /** Convierte una solicitud de precios de otra cuenta en un presupuesto
+     *  propio, en mi organización. */
+    aceptar: (id: string) =>
+      post<{ presupuesto_id: string; mensaje: string }>(`/api/notificaciones/${id}/aceptar`, {}),
+    /** Manda al emisor los precios del presupuesto que se creó al aceptar,
+     *  para que entren en su comparativo. */
+    devolver: (id: string) =>
+      post<{ lineas: number; mensaje: string }>(`/api/notificaciones/${id}/devolver`, {}),
   },
 
   solicitudesPrecios: {
@@ -2874,6 +3529,11 @@ export const api = {
     }) => post<SolicitudPrecios>('/api/solicitudes-precios', datos),
     listarPorPresupuesto: (presupuestoId: string) =>
       request<SolicitudPrecios[]>(`/api/solicitudes-precios/por-presupuesto/${presupuestoId}`),
+    /** El comparativo de la obra: los paquetes de todos sus presupuestos,
+     *  principal y anexos. Es donde de verdad se consulta — saber a quién se
+     *  adjudicó cada partida es el punto de partida de las compras. */
+    listarPorObra: (obraId: string) =>
+      request<SolicitudPrecios[]>(`/api/solicitudes-precios/por-obra/${obraId}`),
     update: (
       id: string,
       datos: { titulo?: string; notas?: string | null; fecha_limite?: string | null },
@@ -2928,6 +3588,10 @@ export const api = {
     list: (params: { obra_id?: string; limit?: number; offset?: number }) =>
       request<Page<Certificacion>>(`/api/certificaciones${query(params)}`),
     get: (id: string) => request<CertificacionDetalle>(`/api/certificaciones/${id}`),
+    /** El agregado de ventas de una obra: certificado, retenido, facturado y
+     *  cobrado, en dos consultas en vez de N. */
+    resumenDeObra: (obraId: string) =>
+      request<ResumenVentasObra>(`/api/obras/${obraId}/ventas`),
     create: (datos: {
       obra_id: string
       fecha: string
@@ -2943,6 +3607,24 @@ export const api = {
     generarFactura: (id: string, datos: { concepto?: string; serie?: string; fecha_vencimiento?: string | null }) =>
       post<Factura>(`/api/certificaciones/${id}/factura`, datos),
     pdfUrl: (id: string) => `/api/certificaciones/${id}/pdf`,
+    /** Arrastrar un documento a `NuevaCertificacionModal` (antes de crear
+     *  la certificación): la IA propone `medicion_actual` por partida para
+     *  rellenar el formulario, nunca escribe nada por su cuenta. */
+    documentoConversarIA: (
+      obraId: string,
+      presupuestoId: string,
+      ficheros: File[],
+      mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
+    ) => {
+      const f = new FormData()
+      f.append('presupuesto_id', presupuestoId)
+      for (const fichero of ficheros) f.append('ficheros', fichero)
+      f.append('mensajes', JSON.stringify(mensajes))
+      return subir<{ respuesta: string; propuesta: PropuestaIA | null }>(
+        `/api/obras/${obraId}/ia/certificacion/conversar`,
+        f,
+      )
+    },
   },
 
   facturas: {
@@ -3081,6 +3763,22 @@ export const api = {
   },
 }
 
+export const ETIQUETA_ESTADO_TAREA: Record<EstadoTarea, string> = {
+  pendiente: 'Pendiente',
+  en_curso: 'En curso',
+  hecha: 'Hecha',
+}
+
+export const ETIQUETA_PRIORIDAD: Record<PrioridadTarea, string> = {
+  baja: 'Baja',
+  normal: 'Normal',
+  alta: 'Alta',
+}
+
+/** El orden de las columnas del tablero. El enum no se puede ordenar por su
+ *  valor: alfabéticamente sale «en_curso, hecha, pendiente». */
+export const COLUMNAS_TAREA: EstadoTarea[] = ['pendiente', 'en_curso', 'hecha']
+
 export const ETIQUETA_ESTADO_CERTIFICACION: Record<EstadoCertificacion, string> = {
   borrador: 'Borrador',
   emitida: 'Emitida',
@@ -3111,6 +3809,31 @@ export const ETIQUETA_ESTADO_ALBARAN: Record<EstadoAlbaran, string> = {
   borrador: 'Borrador',
   conformado: 'Conformado',
   facturado: 'Facturado',
+}
+
+export const ETIQUETA_ESTADO_PEDIDO: Record<EstadoPedido, string> = {
+  pendiente: 'Pendiente',
+  confirmado: 'Confirmado',
+  servido_parcial: 'Servido parcial',
+  servido: 'Servido',
+  cancelado: 'Cancelado',
+}
+
+export const ETIQUETA_ESTADO_FACTURA_RECIBIDA: Record<EstadoFacturaRecibida, string> = {
+  pendiente: 'Pendiente',
+  pagada: 'Pagada',
+}
+
+export const ETIQUETA_ESTADO_CONTRATO: Record<EstadoContrato, string> = {
+  borrador: 'Borrador',
+  firmado: 'Firmado',
+  rescindido: 'Rescindido',
+  finalizado: 'Finalizado',
+}
+
+export const ETIQUETA_TIPO_CONTRATO: Record<TipoContrato, string> = {
+  cliente: 'Cliente',
+  proveedor: 'Proveedor',
 }
 
 export const ETIQUETA_ESTADO: Record<EstadoPresupuesto, string> = {
@@ -3168,6 +3891,35 @@ export const ETIQUETA_FORMA_PAGO: Record<FormaPago, string> = {
 // y no una opción de `request()`, para que sea imposible que un cambio en
 // el cliente normal empiece a mandar credenciales aquí sin querer.
 
+/** Un parcial del estado de mediciones que aporta el proveedor. Mismo
+ *  paradigma que una línea de medición de presupuesto: el parcial es el
+ *  producto de lo que se informe. */
+export interface MedicionOferta {
+  id: string
+  comentario: string | null
+  uds: string | null
+  longitud: string | null
+  anchura: string | null
+  altura: string | null
+  parcial: string
+  orden: number
+}
+
+/** Un componente del desglose que declara el proveedor. Sin referencia al
+ *  banco de precios: son conceptos suyos, texto libre. */
+export interface DescompuestoOferta {
+  id: string
+  codigo: string | null
+  resumen: string
+  unidad: string
+  naturaleza: string | null
+  rendimiento: string
+  factor: string
+  precio: string
+  importe: string
+  orden: number
+}
+
 export interface LineaSeparata {
   id: string
   capitulo_resumen: string | null
@@ -3175,9 +3927,17 @@ export interface LineaSeparata {
   resumen: string
   texto: string | null
   unidad: string
+  /** La que pide el emisor. */
   medicion: string
   precio_ofertado: string | null
   observaciones_proveedor: string | null
+  /** Lo que ha medido el proveedor por su cuenta. */
+  mediciones: MedicionOferta[]
+  /** Suma de sus parciales; nulo si no ha medido nada. */
+  medicion_proveedor: string | null
+  /** Cómo desglosa su precio. Si hay componentes, `precio_ofertado` sale de
+   *  su suma y deja de teclearse a mano. */
+  descompuesto: DescompuestoOferta[]
 }
 
 export interface DocumentoSeparata {
@@ -3232,4 +3992,80 @@ export const apiPublico = {
    *  `<a href>` plano (sin `fetch`, sin cabeceras). */
   urlDocumento: (token: string, documentoId: string) =>
     `/api/publico/oferta/${token}/documentos/${documentoId}/descargar`,
+
+  /** Estado de mediciones del proveedor. Todas devuelven la separata entera
+   *  ya recalculada, para no tener que refrescar aparte. */
+  mediciones: {
+    add: (token: string, lineaId: string, datos: DatosMedicion) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/lineas/${lineaId}/mediciones`, {
+        method: 'POST',
+        body: JSON.stringify(datos),
+      }),
+    update: (token: string, medicionId: string, datos: DatosMedicion) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/mediciones/${medicionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(datos),
+      }),
+    remove: (token: string, medicionId: string) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/mediciones/${medicionId}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  /** El proveedor sube su hoja de precios y la IA rellena lo que reconozca.
+   *  Lo paga el emisor, y por eso hay tope de usos por enlace. Va con
+   *  `FormData`, así que no puede usar `peticionPublica` (que fuerza JSON). */
+  leerDocumentoIA: async (token: string, fichero: File): Promise<LecturaIA> => {
+    const cuerpo = new FormData()
+    cuerpo.append('fichero', fichero)
+    const respuesta = await fetch(`/api/publico/oferta/${token}/ia/documento`, {
+      method: 'POST',
+      body: cuerpo,
+    })
+    if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+    return respuesta.json() as Promise<LecturaIA>
+  },
+
+  /** Desglose del precio. Como las mediciones, devuelven la separata entera
+   *  ya recalculada (el precio de la línea sale de la suma). */
+  descompuesto: {
+    add: (token: string, lineaId: string, datos: DatosComponente) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/lineas/${lineaId}/descompuesto`, {
+        method: 'POST',
+        body: JSON.stringify(datos),
+      }),
+    update: (token: string, componenteId: string, datos: DatosComponente) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/descompuesto/${componenteId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(datos),
+      }),
+    remove: (token: string, componenteId: string) =>
+      peticionPublica<Separata>(`/api/publico/oferta/${token}/descompuesto/${componenteId}`, {
+        method: 'DELETE',
+      }),
+  },
+}
+
+export interface LecturaIA {
+  rellenadas: number
+  mensaje: string
+  separata: Separata
+}
+
+export interface DatosComponente {
+  codigo?: string | null
+  resumen?: string | null
+  unidad?: string | null
+  naturaleza?: string | null
+  rendimiento?: string | null
+  factor?: string | null
+  precio?: string | null
+}
+
+export interface DatosMedicion {
+  comentario?: string | null
+  uds?: string | null
+  longitud?: string | null
+  anchura?: string | null
+  altura?: string | null
 }

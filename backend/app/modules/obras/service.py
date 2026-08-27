@@ -1,5 +1,6 @@
 import re
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -8,7 +9,14 @@ from sqlalchemy.orm import selectinload
 
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
-from app.modules.obras.models import Asignacion, Obra, ParteTrabajo, Personal
+from app.modules.obras.models import (
+    Asignacion,
+    Obra,
+    ObraPresupuesto,
+    ParteTrabajo,
+    Personal,
+    TipoVinculo,
+)
 from app.modules.obras.schemas import (
     AsignacionCreate,
     AsignacionUpdate,
@@ -196,11 +204,15 @@ async def crear_obra(session: AsyncSession, datos: ObraCreate) -> Obra:
     if presupuesto is None:
         raise PresupuestoInvalido("El presupuesto no existe en esta organización")
 
-    ya_ejecutada = await session.scalar(
-        select(Obra.id).where(Obra.presupuesto_id == datos.presupuesto_id)
+    # Un presupuesto solo se ejecuta en una obra: si ya está vinculado a
+    # alguna (como principal o como anexo), no vuelve a entrar.
+    ya_ejecutado = await session.scalar(
+        select(ObraPresupuesto.id).where(
+            ObraPresupuesto.presupuesto_id == datos.presupuesto_id
+        )
     )
-    if ya_ejecutada:
-        raise PresupuestoInvalido("Este presupuesto ya tiene una obra en ejecución")
+    if ya_ejecutado:
+        raise PresupuestoInvalido("Este presupuesto ya se está ejecutando en una obra")
 
     codigo = datos.codigo or await siguiente_codigo_obra(session)
     existe = await session.scalar(
@@ -217,7 +229,128 @@ async def crear_obra(session: AsyncSession, datos: ObraCreate) -> Obra:
     )
     session.add(obra)
     await session.flush()
+
+    await vincular_presupuesto(
+        session, obra, presupuesto.id, tipo=TipoVinculo.PRINCIPAL
+    )
     return obra
+
+
+async def vincular_presupuesto(
+    session: AsyncSession,
+    obra: Obra,
+    presupuesto_id: uuid.UUID,
+    *,
+    tipo: TipoVinculo,
+    notas: str | None = None,
+) -> ObraPresupuesto:
+    """Pone un presupuesto en ejecución dentro de esta obra.
+
+    Además de crear el vínculo, **marca el presupuesto como aprobado**: firmar
+    la ejecución es exactamente lo que significa aceptarlo, y eso congela sus
+    precios (ver `ESTADOS_BLOQUEADOS`). Si ya estaba aprobado no se toca.
+
+    El árbol de la obra se copia aparte, en `arbol_service`: aquí solo se
+    establece la relación, para que vincular y copiar se puedan probar por
+    separado.
+    """
+    from app.modules.presupuestos.models_presupuesto import EstadoPresupuesto
+    from app.modules.presupuestos.presupuesto_service import obtener as obtener_presupuesto
+
+    org_id = require_organization_id()
+    presupuesto = await obtener_presupuesto(session, presupuesto_id)
+    if presupuesto is None:
+        raise PresupuestoInvalido("El presupuesto no existe en esta organización")
+
+    ya = await session.scalar(
+        select(ObraPresupuesto.id).where(
+            ObraPresupuesto.presupuesto_id == presupuesto_id
+        )
+    )
+    if ya:
+        raise PresupuestoInvalido("Este presupuesto ya se está ejecutando en una obra")
+
+    ultimo = await session.scalar(
+        select(func.coalesce(func.max(ObraPresupuesto.orden), -1)).where(
+            ObraPresupuesto.obra_id == obra.id
+        )
+    )
+    vinculo = ObraPresupuesto(
+        organization_id=org_id,
+        obra_id=obra.id,
+        presupuesto_id=presupuesto_id,
+        tipo=tipo,
+        fecha_vinculacion=date.today(),
+        orden=(-1 if ultimo is None else ultimo) + 1,
+        notas=notas,
+    )
+    session.add(vinculo)
+
+    if presupuesto.estado != EstadoPresupuesto.APROBADO:
+        presupuesto.estado = EstadoPresupuesto.APROBADO
+        # Mismo criterio que `presupuesto_service.actualizar`: salir de
+        # borrador congela los precios para que la obra no se mueva bajo los
+        # pies si cambia el banco.
+        presupuesto.precios_bloqueados = True
+
+    await session.flush()
+
+    # Y ahora el árbol. Se hace aquí y no en el router para que no exista
+    # ningún camino que vincule un presupuesto sin traerse sus partidas: una
+    # obra con el vínculo pero sin árbol no se distingue de un fallo de datos.
+    from app.modules.obras import arbol_service
+
+    await arbol_service.copiar_presupuesto(
+        session, obra, presupuesto_id, es_anexo=tipo == TipoVinculo.ANEXO
+    )
+    return vinculo
+
+
+async def presupuestos_de_obra(
+    session: AsyncSession, obra_id: uuid.UUID
+) -> list[ObraPresupuesto]:
+    return list(
+        (
+            await session.execute(
+                select(ObraPresupuesto)
+                .where(ObraPresupuesto.obra_id == obra_id)
+                .order_by(ObraPresupuesto.orden)
+            )
+        ).scalars()
+    )
+
+
+async def desvincular_presupuesto(
+    session: AsyncSession, vinculo: ObraPresupuesto
+) -> None:
+    """Quita un anexo de la obra, y con él las partidas que trajo.
+
+    El principal no se puede quitar: es de donde la obra saca su comparación de
+    costes y sus certificaciones.
+
+    Tampoco se quita si ya se ha medido en obra sobre esas partidas. Se podría
+    dejar el árbol y borrar solo el vínculo, pero entonces quedarían partidas
+    huérfanas indistinguibles de las creadas a mano; y borrarlo todo tiraría
+    mediciones reales. Ante las dos malas, se para y se dice por qué.
+    """
+    from app.modules.obras import arbol_service
+
+    if vinculo.tipo == TipoVinculo.PRINCIPAL:
+        raise PresupuestoInvalido(
+            "El presupuesto principal no se puede quitar: la obra compara sus costes contra él"
+        )
+    if await arbol_service.tiene_mediciones_propias(
+        session, vinculo.obra_id, vinculo.presupuesto_id
+    ):
+        raise PresupuestoInvalido(
+            "Ya se ha medido en obra sobre las partidas de este anexo: quitarlo "
+            "borraría esas mediciones. Elimina primero lo medido si de verdad quieres quitarlo."
+        )
+    await arbol_service.borrar_copia_de_presupuesto(
+        session, vinculo.obra_id, vinculo.presupuesto_id
+    )
+    await session.delete(vinculo)
+    await session.flush()
 
 
 async def actualizar_obra(

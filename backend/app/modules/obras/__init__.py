@@ -7,7 +7,7 @@ SPEC = ModuleSpec(
     description="Ejecución: personal asignado, coste real frente a presupuestado.",
     icon="hard-hat",
     router=router,
-    depends_on=("presupuestos",),
+    depends_on=("presupuestos", "ia"),
     nav=(
         NavItem(label="Obras", path="/obras", icon="hard-hat"),
         NavItem(label="Personal", path="/personal", icon="users"),

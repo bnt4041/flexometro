@@ -280,10 +280,15 @@ export function ModalPantalla({
   title,
   onClose,
   children,
+  elevado,
 }: {
   title: ReactNode
   onClose: () => void
   children: ReactNode
+  // Por encima de un `Modal` (diálogo pequeño) en vez de por debajo — hace
+  // falta cuando esto se abre desde dentro de uno, como el chat de
+  // documentos con la IA abierto sobre "Nueva certificación".
+  elevado?: boolean
 }) {
   useEscapeCierra(onClose)
   const [colapsada, alternarColapsada] = useSidebarColapsada()
@@ -292,7 +297,12 @@ export function ModalPantalla({
   // zoom (que pone `transform`) para que el `position: fixed` cubra la
   // pantalla entera y no se recorte contra el borde del widget.
   return createPortal(
-    <div className="modal-pantalla-backdrop" onClick={onClose}>
+    <div
+      className={
+        elevado ? 'modal-pantalla-backdrop modal-pantalla-backdrop--elevado' : 'modal-pantalla-backdrop'
+      }
+      onClick={onClose}
+    >
       <div
         className="modal-pantalla"
         onClick={(e) => e.stopPropagation()}

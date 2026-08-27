@@ -1346,8 +1346,59 @@ export function RejillaPresupuesto({
           ficheros={documentoIA.ficheros}
           entidad="presupuesto"
           entidadId={presupuesto.id}
-          presupuestoId={presupuesto.id}
-          partidaId={documentoIA.partidaId}
+          conversar={(ficheros, mensajes) =>
+            api.ia.documentoConversar(
+              ficheros,
+              mensajes,
+              presupuesto.id,
+              documentoIA.partidaId ?? undefined,
+            )
+          }
+          aplicarPropuesta={async (propuesta) => {
+            if (propuesta.tipo === 'crear_capitulos') {
+              // Precios reales del banco (Fase 51): un capítulo por
+              // llamada, en secuencia — mismo endpoint y mismo patrón que
+              // "Ayuda con IA" sobre un presupuesto, aquí resuelto desde el
+              // documento en vez de la conversación.
+              const hechos: string[] = []
+              for (const capitulo of propuesta.capitulos_propuestos) {
+                const resultado = await api.presupuestos.aplicarCapituloIA(presupuesto.id, {
+                  capitulo_resumen: capitulo.resumen,
+                  partidas: capitulo.partidas,
+                })
+                hechos.push(
+                  `«${resultado.resumen}» (${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'})`,
+                )
+              }
+              return `Hecho: capítulo${hechos.length === 1 ? '' : 's'} creado${hechos.length === 1 ? '' : 's'} ${hechos.join(', ')}.`
+            }
+            if (propuesta.tipo === 'anadir_mediciones_partida') {
+              if (!propuesta.partida_id) throw new Error('La propuesta no trae la partida de destino')
+              const creadas = await api.ia.mediciones.aplicarDirecto(
+                propuesta.partida_id,
+                propuesta.mediciones_propuestas.map(
+                  ({ comentario, uds, longitud, anchura, altura }) => ({
+                    comentario,
+                    uds,
+                    longitud,
+                    anchura,
+                    altura,
+                  }),
+                ),
+              )
+              return `Hecho: ${creadas.length} línea${creadas.length === 1 ? '' : 's'} de medición añadida${creadas.length === 1 ? '' : 's'} a la partida.`
+            }
+            // Un único endpoint atómico (capítulo + partidas + rastro en el
+            // historial) en vez de crear el capítulo y luego cada partida
+            // por separado: si algo falla a media lista no queda un
+            // capítulo huérfano, y el historial del presupuesto deja
+            // constancia de que fue la IA.
+            const resultado = await api.presupuestos.aplicarPropuestaIA(presupuesto.id, {
+              capitulo_resumen: propuesta.capitulo_resumen || 'Importado de documento',
+              partidas: propuesta.partidas_propuestas,
+            })
+            return `Hecho: capítulo «${resultado.resumen}» creado con ${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'}.`
+          }}
           onClose={() => setDocumentoIA(null)}
           onCambio={() => {
             cambios.current.clear()

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auditoria import tabla_de
 from app.core.auth import Principal, get_principal
 from app.core.database import get_session
 from app.core.enums import Alcance
@@ -14,7 +15,14 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.compras import costes, oferta_service, service, solicitud_service
-from app.modules.compras.models import OfertaLinea, SolicitudDestinatario, SolicitudLinea
+from app.modules.compras.models import Albaran, OfertaLinea, SolicitudDestinatario, SolicitudLinea
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
+from app.modules.compras.factura_recibida_router import (
+    router as facturas_recibidas_router,
+    totales_router as compras_totales_router,
+)
+from app.modules.compras.pedido_router import router as pedido_router
 from app.modules.compras.publico_router import router as publico_router
 from app.modules.compras.schemas import (
     AlbaranCreate,
@@ -100,6 +108,7 @@ async def crear(
     except (
         service.ObraInvalida,
         service.ProveedorInvalido,
+        service.PedidoInvalido,
         service.ConceptoInvalido,
         service.LineaSinDatos,
     ) as exc:
@@ -144,6 +153,20 @@ async def detalle(
     )
 
 
+@albaranes_router.get("/{albaran_id}/historial", response_model=list[RegistroAuditoriaOut])
+async def historial(
+    albaran_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("compras", "ver")),
+) -> list[RegistroAuditoriaOut]:
+    await _albaran_propio(session, albaran_id, alcance, principal)
+    registros = await auditoria_service.listar_historial(
+        session, tabla=tabla_de(Albaran), registro_id=albaran_id
+    )
+    return [RegistroAuditoriaOut.model_validate(r) for r in registros]
+
+
 @albaranes_router.patch("/{albaran_id}", response_model=AlbaranOut)
 async def actualizar(
     albaran_id: uuid.UUID,
@@ -153,7 +176,12 @@ async def actualizar(
     alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> AlbaranOut:
     await _albaran_propio(session, albaran_id, alcance, principal)
-    albaran = await service.actualizar_albaran(session, albaran_id, datos)
+    try:
+        albaran = await service.actualizar_albaran(session, albaran_id, datos)
+    except service.PedidoInvalido as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     return AlbaranOut.model_validate(albaran)
 
 
@@ -410,13 +438,11 @@ async def eliminar_solicitud(
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> None:
+    """Borra la solicitud en cualquier estado. Se lleva por cascada lo que
+    hubieran ofertado los proveedores y sus enlaces; los presupuestos-oferta
+    ya generados se conservan. Avisar de eso es cosa de la pantalla."""
     solicitud = await _solicitud_o_404(session, solicitud_id)
-    try:
-        await solicitud_service.eliminar_borrador(session, solicitud)
-    except _ERRORES_422 as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+    await solicitud_service.eliminar(session, solicitud)
     await session.commit()
 
 
@@ -471,14 +497,12 @@ async def quitar_destinatario(
     session: AsyncSession = Depends(get_session),
     _alcance: Alcance = Depends(require_permiso("compras", "editar")),
 ) -> SolicitudOut:
+    """Saca al proveedor en cualquier estado. Se lleva su acceso y lo que
+    hubiera ofertado, y deja sin adjudicar sus líneas; su presupuesto-oferta
+    se conserva. Avisar de eso es cosa de la pantalla."""
     solicitud = await _solicitud_o_404(session, solicitud_id)
     destinatario = await _destinatario_o_404(session, solicitud_id, destinatario_id)
-    try:
-        await solicitud_service.quitar_destinatario(session, destinatario)
-    except _ERRORES_422 as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+    await solicitud_service.quitar_destinatario(session, destinatario)
     await session.commit()
     return await _solicitud_out(session, solicitud)
 
@@ -538,6 +562,27 @@ async def generar_enlace(
     return EnlaceOut(enlace=enlace)
 
 
+@solicitudes_router.get("/por-obra/{obra_id}", response_model=list[SolicitudOut])
+async def listar_por_obra(
+    obra_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("compras", "ver")),
+) -> list[SolicitudOut]:
+    """El comparativo de la obra: los paquetes de precios de todos los
+    presupuestos que ejecuta, principal y anexos.
+
+    Es lo mismo que ve la pestaña Comparativo del presupuesto, pero reunido por
+    obra — que es donde de verdad se usa: saber a quién se adjudicó cada
+    partida es el punto de partida de las compras.
+    """
+    from app.modules.obras.service import obtener_obra
+
+    if await obtener_obra(session, obra_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada")
+    solicitudes = await solicitud_service.listar_por_obra(session, obra_id)
+    return [await _solicitud_out(session, s) for s in solicitudes]
+
+
 @solicitudes_router.get("/por-presupuesto/{presupuesto_id}", response_model=list[SolicitudOut])
 async def listar_por_presupuesto(
     presupuesto_id: uuid.UUID,
@@ -593,6 +638,11 @@ router.include_router(albaranes_router)
 router.include_router(lineas_router)
 router.include_router(costes_router)
 router.include_router(solicitudes_router)
+# Facturas de proveedor y pedidos: van en su propio módulo, `router.py` ya
+# es largo.
+router.include_router(facturas_recibidas_router)
+router.include_router(compras_totales_router)
+router.include_router(pedido_router)
 
 # Espacio SIN autenticar (separata del proveedor). Va sin las guardas de
 # arriba a propósito: quien entra no tiene cuenta. Se autoriza contra el token

@@ -99,6 +99,7 @@ const ICONOS: Record<string, LucideIcon> = {
   crm: MessageSquareText,
   documentos: FilePlus,
   comparativo: Scale,
+  trazabilidad: Link2,
   historial: History,
   apariciones: Link2,
   'cuentas-bancarias': Banknote,

@@ -18,6 +18,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 
 import httpx
 import openpyxl
@@ -28,6 +29,7 @@ from app.core.tenancy import require_organization_id
 from app.modules.ia.credenciales import credenciales_gemini
 from app.modules.ia.schemas import (
     CapituloPropuestoOut,
+    LineaCertificacionPropuestaOut,
     LineaMedicionSugeridaOut,
     LineaSugeridaLLM,
     PropuestaAccionOut,
@@ -171,22 +173,95 @@ def tabla_de_excel(contenido: bytes) -> str:
     return "\n".join(partes)
 
 
-def _prompt_documento(permite_importar: bool, partida_destino: dict | None = None) -> str:
-    base = (
-        "Eres un asistente de gestión documental de una constructora en España. "
-        "Te mandan uno o varios documentos (imagen, PDF o la tabla de texto de "
-        "un Excel) sin más contexto que esta conversación — puede que se vayan "
-        "añadiendo más documentos a lo largo de la charla, no solo al "
-        "principio. En tu PRIMERA respuesta, identifica brevemente qué tipo de "
-        "documento(s) es cada uno (por ejemplo: plano acotado, presupuesto de "
-        "proveedor, factura, albarán, ficha técnica, foto de obra, contrato, u "
-        "otro) y qué contiene cada uno, en dos o tres frases, y termina "
-        "preguntando qué quiere que hagas con ellos (leer una medida concreta, "
-        "resumir un importe, comparar algo con el propio presupuesto, "
-        "comparar los documentos entre sí...). A partir de ahí, responde a lo "
-        "que se te pida sobre ellos: qué dicen, qué datos traen, resúmenes, lo "
-        "que haga falta. Responde en español, breve y directo."
-    )
+def _prompt_documento(
+    permite_importar: bool,
+    partida_destino: dict | None = None,
+    *,
+    contexto: str = "presupuesto",
+    partidas_certificacion: list[dict] | None = None,
+    hay_documentos: bool = True,
+) -> str:
+    if hay_documentos:
+        base = (
+            "Eres un asistente de gestión documental de una constructora en España. "
+            "Te mandan uno o varios documentos (imagen, PDF o la tabla de texto de "
+            "un Excel) sin más contexto que esta conversación — puede que se vayan "
+            "añadiendo más documentos a lo largo de la charla, no solo al "
+            "principio. En tu PRIMERA respuesta, identifica brevemente qué tipo de "
+            "documento(s) es cada uno (por ejemplo: plano acotado, presupuesto de "
+            "proveedor, factura, albarán, ficha técnica, foto de obra, contrato, u "
+            "otro) y qué contiene cada uno, en dos o tres frases, y termina "
+            "preguntando qué quiere que hagas con ellos (leer una medida concreta, "
+            "resumir un importe, comparar algo con el propio presupuesto, "
+            "comparar los documentos entre sí...). A partir de ahí, responde a lo "
+            "que se te pida sobre ellos: qué dicen, qué datos traen, resúmenes, lo "
+            "que haga falta. Responde en español, breve y directo."
+        )
+    else:
+        # El documento es opcional (Fase "IA en obra y certificaciones"): esta
+        # conversación empezó sin ninguno — puede que el usuario solo quiera
+        # preguntar o dar una instrucción por escrito, y puede que adjunte
+        # algo más adelante. Nunca pidas el documento como condición para
+        # seguir si lo que se pide ya se puede hacer solo con lo escrito.
+        base = (
+            "Eres un asistente de gestión documental y de datos de una "
+            "constructora en España. Esta conversación, de momento, no "
+            "tiene ningún documento adjunto — puede que el usuario solo "
+            "quiera preguntarte algo o darte una instrucción por escrito "
+            "(una cifra, un porcentaje, una descripción), y puede que en "
+            "cualquier momento adjunte un documento (imagen, PDF o Excel) "
+            "para que lo leas; si lo hace, sigue las mismas reglas de abajo "
+            "sobre documentos. No pidas que te manden un documento si lo "
+            "que piden ya se puede resolver con lo que te han escrito. "
+            "Responde en español, breve y directo."
+        )
+    if contexto == "certificacion":
+        texto = (
+            base
+            + " Esta conversación se ha abierto para preparar una "
+            "certificación de obra nueva: hay una lista de partidas ya "
+            "contratadas y se necesita saber, de cada una, cuánto lleva "
+            "ejecutado EN TOTAL hasta hoy (acumulado desde el principio de "
+            "la obra, no solo lo de este mes/período) — el propio "
+            "formulario ya resta después lo ya certificado antes para "
+            "sacar lo de este período, así que NUNCA propongas la cantidad "
+            "de un período suelto, siempre el acumulado total."
+        )
+        if partidas_certificacion:
+            lista = "\n".join(
+                f"- id {p['id']}: «{p['resumen']}» ({p['unidad']}), presupuestado "
+                f"{p['presupuestado']}"
+                + (
+                    f", ya certificado hasta ahora {p['ya_certificado']}"
+                    if p.get("ya_certificado") and p["ya_certificado"] != "0"
+                    else ""
+                )
+                for p in partidas_certificacion
+            )
+            texto += (
+                f"\n\nPartidas de esta certificación:\n{lista}\n\nSi el "
+                "documento trae, para alguna de estas partidas, la cantidad "
+                "ejecutada hasta hoy (o datos con los que calcularla: lo ya "
+                "certificado más lo hecho este período) — o si el usuario te "
+                "lo dice directamente por escrito, sin documento (una cifra "
+                "concreta, o algo como «certifica el 33% de todo», que "
+                "significa calcular el 33% del presupuestado de CADA "
+                "partida) — usa `proponer_medicion_certificacion` con el "
+                "`partida_id` EXACTO de la lista de arriba — nunca inventes "
+                "un id. La cifra nunca puede ser menor que 'ya certificado "
+                "hasta ahora' cuando ese dato aparece arriba. Si no tienes "
+                "dato ni instrucción para alguna partida, no la incluyas: no "
+                "es un plan completo, solo lo que puedas calcular o leer con "
+                "confianza. No es una acción real todavía, solo una "
+                "propuesta que el usuario revisa y confirma."
+            )
+        else:
+            texto += (
+                " Todavía no se sabe sobre qué presupuesto se ha abierto "
+                "esta certificación, así que no hay partidas contra las que "
+                "proponer nada — limítate a responder por texto."
+            )
+        return texto
     if not permite_importar:
         return (
             base
@@ -195,6 +270,37 @@ def _prompt_documento(permite_importar: bool, partida_destino: dict | None = Non
             "sobre él la hace el propio usuario desde la pantalla (por "
             "ejemplo, guardarlo), no tú."
         )
+    if contexto == "obra":
+        texto = (
+            base
+            + " Si el documento trae una relación de partidas/conceptos con "
+            "precio (una oferta, un presupuesto de proveedor, un albarán "
+            "con precios...) — o si el usuario te da esa misma información "
+            "por escrito, sin documento (resumen, unidad y precio de una "
+            "partida) — y pide colgarlo de la obra, añadirlo o meterlo en "
+            "un capítulo aparte, usa `proponer_importar_capitulo` con cada "
+            "línea que puedas leer o que te hayan dicho con claridad — "
+            "sin inventar ni redondear lo que no sea seguro (omite esa "
+            "línea si el precio o la unidad no son claros). Esta obra no "
+            "lleva descompuestos ni banco de precios propio: si no hay "
+            "precio (ni en el documento ni por escrito, un plano acotado "
+            "sin presupuesto, por ejemplo), dilo en la conversación en vez "
+            "de inventar uno — aquí no hay forma de presupuestar sin "
+            "precio. No es una acción real todavía, solo propones — el "
+            "usuario confirma después en la pantalla."
+        )
+        if partida_destino:
+            texto += (
+                f"\n\nEsta conversación se ha abierto sobre una partida ya "
+                f"existente de la obra: «{partida_destino['resumen']}» "
+                f"(unidad: {partida_destino['unidad']}). Si el documento es "
+                f"un plano acotado, una memoria técnica o unas cotas que "
+                f"corresponden a ESE mismo elemento y el usuario pide sus "
+                f"mediciones, usa `proponer_mediciones_partida` para "
+                f"añadírselas a esta partida — NO crees una partida nueva "
+                f"con `proponer_importar_capitulo` para esto, ya existe."
+            )
+        return texto
     texto = (
         base
         + " Si el documento trae una relación de partidas/conceptos con "
@@ -497,7 +603,58 @@ _DECLARACION_PROPONER_MEDICIONES = {
 }
 
 
-def _herramientas_documento(partida_destino: dict | None) -> list[dict]:
+_DECLARACION_PROPONER_MEDICION_CERTIFICACION = {
+    "name": "proponer_medicion_certificacion",
+    "description": (
+        "Propón la medición actual (acumulada, TOTAL ejecutado hasta ahora — "
+        "no solo lo de este período) de una o varias partidas YA "
+        "PRESUPUESTADAS, leída del documento (un parte de obra, la "
+        "certificación anterior, un albarán con cantidades...). No crea "
+        "nada: solo rellena el formulario de la certificación nueva para "
+        "que el usuario lo revise antes de guardar."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "lineas": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "partida_id": {
+                            "type": "STRING",
+                            "description": "id exacto de la partida, de las que se te han dado",
+                        },
+                        "medicion_actual": {
+                            "type": "NUMBER",
+                            "description": "Cantidad ejecutada en total hasta ahora (acumulada), no solo este período",
+                        },
+                    },
+                    "required": ["partida_id", "medicion_actual"],
+                },
+            },
+            "descripcion": {
+                "type": "STRING",
+                "description": "Frase corta resumiendo cuántas partidas propones y de qué",
+            },
+        },
+        "required": ["lineas", "descripcion"],
+    },
+}
+
+
+def _herramientas_documento(
+    contexto: str, partida_destino: dict | None, partidas_certificacion: list[dict] | None
+) -> list[dict]:
+    if contexto == "certificacion":
+        if not partidas_certificacion:
+            return []
+        return [{"functionDeclarations": [_DECLARACION_PROPONER_MEDICION_CERTIFICACION]}]
+    if contexto == "obra":
+        declaraciones = [_DECLARACION_IMPORTAR_CAPITULO]
+        if partida_destino:
+            declaraciones.append(_DECLARACION_PROPONER_MEDICIONES)
+        return [{"functionDeclarations": declaraciones}]
     declaraciones = [
         _DECLARACION_IMPORTAR_CAPITULO,
         _DECLARACION_BUSCAR_CONCEPTOS_BANCO,
@@ -519,8 +676,10 @@ async def chat_documento(
     documentos: list[tuple[bytes, str]],
     mensajes: list[dict],
     *,
+    contexto: str = "presupuesto",
     permitir_propuesta: bool = False,
     partida_destino: dict | None = None,
+    partidas_certificacion: list[dict] | None = None,
 ) -> tuple[str, PropuestaAccionOut | None, UsoTokens]:
     """Conversación de varios turnos sobre uno o varios documentos (Fase
     "Arrastrar al presupuesto"). A diferencia de `leer_plano` (un turno, JSON
@@ -537,12 +696,18 @@ async def chat_documento(
     en qué punto los añadió el usuario, solo que Gemini los vea en el
     contexto que se le manda ahora.
 
-    `permitir_propuesta` activa la herramienta `proponer_importar_capitulo`
-    (Fase 39) — solo tiene sentido cuando la conversación se abrió sobre un
-    presupuesto concreto al que colgarle lo que proponga. `partida_destino`
-    (Fase 51c), cuando el documento se soltó sobre una partida ya existente,
-    activa además `proponer_mediciones_partida` — añadir líneas de medición
-    a esa partida en vez de crear una nueva."""
+    `contexto` decide qué puede proponer, no solo el presupuesto (Fase "IA
+    en obra y certificaciones"): "obra" cambia a partidas alzadas sin banco
+    de precios (la obra no lleva descompuesto) y "certificacion" cambia del
+    todo — no crea capítulos, solo propone `medicion_actual` de partidas ya
+    presupuestadas (`partidas_certificacion`) para rellenar el formulario de
+    una certificación nueva. `permitir_propuesta` activa la herramienta
+    `proponer_importar_capitulo` (Fase 39) — solo tiene sentido cuando la
+    conversación se abrió sobre un presupuesto u obra concreta a la que
+    colgarle lo que proponga. `partida_destino` (Fase 51c), cuando el
+    documento se soltó sobre una partida ya existente, activa además
+    `proponer_mediciones_partida` — añadir líneas de medición a esa partida
+    en vez de crear una nueva."""
     credenciales = await credenciales_gemini(session)
     if not credenciales.api_key:
         raise GeminiError(
@@ -580,12 +745,24 @@ async def chat_documento(
 
     payload: dict = {
         "systemInstruction": {
-            "parts": [{"text": _prompt_documento(permitir_propuesta, partida_destino)}]
+            "parts": [
+                {
+                    "text": _prompt_documento(
+                        permitir_propuesta,
+                        partida_destino,
+                        contexto=contexto,
+                        partidas_certificacion=partidas_certificacion,
+                        hay_documentos=bool(documentos),
+                    )
+                }
+            ]
         },
         "contents": contents,
     }
     if permitir_propuesta:
-        payload["tools"] = _herramientas_documento(partida_destino)
+        payload["tools"] = _herramientas_documento(
+            contexto, partida_destino, partidas_certificacion
+        )
 
     async def _llamar(cuerpo: dict) -> dict:
         try:
@@ -714,6 +891,35 @@ async def chat_documento(
                     or f"Añadir {len(mediciones)} línea(s) de medición a «{partida_destino['resumen']}»",
                     partida_id=uuid.UUID(partida_destino["id"]),
                     mediciones_propuestas=mediciones,
+                )
+            return {"ok": propuesta is not None}, propuesta, True
+
+        if nombre == "proponer_medicion_certificacion":
+            if not partidas_certificacion:
+                return {"error": "No hay partidas de certificación en esta conversación"}, None, False
+            ids_validos = {p["id"] for p in partidas_certificacion}
+            brutos = argumentos.get("lineas") or []
+            propuestas_lineas: list[LineaCertificacionPropuestaOut] = []
+            for bruto in brutos:
+                pid = bruto.get("partida_id")
+                monto = bruto.get("medicion_actual")
+                if pid not in ids_validos or monto is None:
+                    continue
+                try:
+                    propuestas_lineas.append(
+                        LineaCertificacionPropuestaOut(
+                            partida_id=uuid.UUID(pid), medicion_actual=Decimal(str(monto))
+                        )
+                    )
+                except (ValueError, ValidationError):
+                    continue
+            propuesta = None
+            if propuestas_lineas:
+                propuesta = PropuestaAccionOut(
+                    tipo="actualizar_mediciones_certificacion",
+                    descripcion=argumentos.get("descripcion")
+                    or f"Rellenar la medición de {len(propuestas_lineas)} partida(s)",
+                    lineas_certificacion_propuestas=propuestas_lineas,
                 )
             return {"ok": propuesta is not None}, propuesta, True
 

@@ -81,6 +81,21 @@
      encima (el `.modal-pantalla-backdrop` de una ficha, sobre todo) sepa
      cuánto hueco ceder — sin esto se quedaba reservando el ancho de la barra
      aunque ya no hubiera barra que mostrar. */
+  /* Visualización: desviación de coste en obra.
+   *
+   * Pareja divergente para "sobrecoste / por debajo de lo previsto". NO se usa
+   * rojo-verde: la validación da ΔE 4,2 en deuteranopia entre --c-danger y
+   * --c-success, o sea que un ~8 % de los hombres no distingue las dos barras.
+   * Rojo contra azul de marca da ΔE 20,8 y pasa las seis comprobaciones
+   * (banda de luminosidad, croma, CVD, visión normal y contraste). El signo y
+   * el importe van escritos en cada barra: el color nunca es el único canal.
+   */
+  --c-viz-sobrecoste: #b91c1c;
+  --c-viz-ahorro: #3b6ea8;
+  /* Pista sin rellenar de los medidores: paso claro de la misma rampa, para
+     que el estado se lea a lo largo de toda la barra. */
+  --c-viz-pista: #e7e9ed;
+
   --sidebar-w-actual: var(--sidebar-w);
   --topbar-h: 56px;
 }
@@ -117,6 +132,14 @@
     --c-warning: #fbbf24;
     --c-warning-soft: #2a2213;
 
+    /* Divergente en oscuro: pasos propios, no un volteo automático. Los
+       tokens de estado del tema oscuro (#f87171) caen fuera de la banda
+       L 0,48–0,67 que exige una marca de gráfico, así que se re-escalonan.
+       Validado: ΔE 20,9 en deuteranopia sobre #181d26. */
+    --c-viz-sobrecoste: #e05a52;
+    --c-viz-ahorro: #5599dd;
+    --c-viz-pista: #2a303d;
+
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow: 0 2px 10px rgb(0 0 0 / 0.4);
   }
@@ -152,6 +175,14 @@
   --c-danger-soft: #2a1717;
   --c-warning: #fbbf24;
   --c-warning-soft: #2a2213;
+
+  /* Divergente en oscuro: pasos propios, no un volteo automático. Los
+     tokens de estado del tema oscuro (#f87171) caen fuera de la banda
+     L 0,48–0,67 que exige una marca de gráfico, así que se re-escalonan.
+     Validado: ΔE 20,9 en deuteranopia sobre #181d26. */
+  --c-viz-sobrecoste: #e05a52;
+  --c-viz-ahorro: #5599dd;
+  --c-viz-pista: #2a303d;
 
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow: 0 2px 10px rgb(0 0 0 / 0.4);

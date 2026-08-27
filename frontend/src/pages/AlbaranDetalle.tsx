@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Plus, Trash2, X } from 'lucide-react'
 
+import { ContactosAsociados } from '../components/ContactosAsociados'
+import { Documentos } from '../components/Documentos'
+import type { PestanaFicha } from '../components/FichaDetalle'
+import { FichaDetalle } from '../components/FichaDetalle'
+import { Historial } from '../components/Historial'
+import { NotasCrm } from '../components/NotasCrm'
+import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
 import type {
@@ -71,15 +78,8 @@ export function AlbaranDetalle() {
     await cargar()
   }
 
-  return (
-    <ModalPantalla
-      title={
-        <>
-          {albaran.proveedor_razon_social} <span className="table__code">{albaran.codigo}</span>
-        </>
-      }
-      onClose={cerrar}
-    >
+  const pestanaDatos = (
+    <>
       <div className="page-head">
         <p className="page-lead" style={{ marginBottom: 0 }}>
           {albaran.numero_proveedor && <>Nº proveedor {albaran.numero_proveedor} · </>}
@@ -181,7 +181,76 @@ export function AlbaranDetalle() {
           }}
         />
       )}
-    </ModalPantalla>
+    </>
+  )
+
+  const pestanas: PestanaFicha[] = [
+    { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    {
+      id: 'contactos',
+      etiqueta: 'Contactos',
+      icono: 'contactos',
+      contenido: <ContactosAsociados entidad="albaran" entidadId={id} />,
+    },
+    {
+      id: 'crm',
+      etiqueta: 'CRM',
+      icono: 'crm',
+      contenido: <NotasCrm entidad="albaran" entidadId={id} />,
+    },
+    {
+      id: 'documentos',
+      etiqueta: 'Documentos',
+      icono: 'documentos',
+      contenido: <Documentos entidad="albaran" entidadId={id} />,
+    },
+    {
+      id: 'trazabilidad',
+      etiqueta: 'Trazabilidad',
+      icono: 'trazabilidad',
+      contenido: (
+        <Trazabilidad
+          origen={[
+            {
+              tipo: 'tercero',
+              etiqueta: albaran.proveedor_razon_social,
+              ruta: `/terceros/${albaran.proveedor_id}`,
+              estadoEtiqueta: 'Proveedor',
+            },
+            ...(albaran.pedido_id
+              ? [
+                  {
+                    tipo: 'pedido' as const,
+                    etiqueta: 'Pedido de origen',
+                    ruta: `/pedidos/${albaran.pedido_id}`,
+                  },
+                ]
+              : []),
+          ]}
+          cargarAsociados={() =>
+            cargarAsociadosDeObra(albaran.obra_id, { tipo: 'albaran', id })
+          }
+        />
+      ),
+    },
+    {
+      id: 'historial',
+      etiqueta: 'Historial',
+      icono: 'historial',
+      contenido: <Historial cargar={() => api.albaranes.historial(id)} />,
+    },
+  ]
+
+  return (
+    <FichaDetalle
+      titulo={
+        <>
+          {albaran.proveedor_razon_social} <span className="table__code">{albaran.codigo}</span>
+        </>
+      }
+      pestanas={pestanas}
+      onClose={cerrar}
+    />
   )
 }
 

@@ -303,23 +303,6 @@ async def aplicar_mediciones_directo(
 # --- Conversación sobre un documento arrastrado (Fase "Arrastrar al presupuesto") ---
 
 
-_EXTENSIONES_EXCEL = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
-
-
-async def _leer_documento(fichero: UploadFile) -> tuple[bytes, str]:
-    """Bytes + tipo MIME real de un `UploadFile` — el navegador a veces no
-    sabe el tipo correcto de un .xlsx y manda algo genérico; la extensión es
-    la señal fiable, igual que con el BC3."""
-    contenido = await fichero.read()
-    mime_type = fichero.content_type or "application/octet-stream"
-    if mime_type not in documento.MIME_PERMITIDOS:
-        for extension, mime_real in _EXTENSIONES_EXCEL.items():
-            if (fichero.filename or "").lower().endswith(extension):
-                mime_type = mime_real
-                break
-    return contenido, mime_type
-
-
 @router.post("/documentos/conversar", response_model=RespuestaDocumento)
 async def documento_conversar(
     ficheros: list[UploadFile] = File(...),
@@ -352,7 +335,7 @@ async def documento_conversar(
             detail=f"'mensajes' no es una lista de mensajes válida: {exc}",
         ) from exc
 
-    documentos = [await _leer_documento(f) for f in ficheros]
+    documentos = [await documento.leer_documento_upload(f) for f in ficheros]
     try:
         respuesta, propuesta = await documento.conversar(
             session,
@@ -382,7 +365,7 @@ async def previsualizar_excel(
     """La misma tabla de texto que ve Gemini de un Excel (Fase 41), para
     enseñarla en el visor del documento en vez de dejarlo sin vista previa —
     no hace ninguna llamada a la IA, es solo parsear el fichero."""
-    contenido, mime_type = await _leer_documento(fichero)
+    contenido, mime_type = await documento.leer_documento_upload(fichero)
     if mime_type not in gemini.MIME_EXCEL:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

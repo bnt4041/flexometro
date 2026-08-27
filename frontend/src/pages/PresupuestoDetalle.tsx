@@ -11,11 +11,13 @@ import {
   X,
 } from 'lucide-react'
 
+import { AceptarPresupuestoModal } from '../components/AceptarPresupuesto'
 import { CamposLibres } from '../components/CamposLibres'
 import { Comparativo } from '../components/Comparativo'
 import { ContactosAsociados } from '../components/ContactosAsociados'
 import { CopiarPresupuestoModal } from '../components/CopiarPresupuestoModal'
 import { DescompuestoPartida } from '../components/DescompuestoPartida'
+import { DevolverOferta } from '../components/DevolverOferta'
 import { DescripcionEditor } from '../components/DescripcionEditor'
 import { Documentos } from '../components/Documentos'
 import { ExportarModal } from '../components/ExportarModal'
@@ -28,6 +30,7 @@ import { ID_RAIZ } from '../components/RejillaPresupuesto'
 import { ReajusteModal } from '../components/ReajusteModal'
 import { MedicionesPartida } from '../components/MedicionesPartida'
 import { RejillaPresupuesto } from '../components/RejillaPresupuesto'
+import { Trazabilidad, cargarAsociadosDeObra, obraDePresupuesto } from '../components/Trazabilidad'
 import {
   Checkbox,
   EmptyState,
@@ -192,6 +195,10 @@ export function PresupuestoDetalle() {
 
   const pestanaDatos = (
     <>
+      {/* Solo aparece si este presupuesto salió de una solicitud de precios de
+          otra empresa: es desde aquí desde donde se le devuelve la oferta. */}
+      <DevolverOferta presupuestoId={id} />
+
       <div className="barra-acciones">
         <span className="barra-acciones__grupo">
           <span className={`chip chip--estado-${presupuesto!.estado}`}>
@@ -688,6 +695,41 @@ export function PresupuestoDetalle() {
       ),
     },
     {
+      id: 'trazabilidad',
+      etiqueta: 'Trazabilidad',
+      icono: 'trazabilidad',
+      contenido: (
+        <Trazabilidad
+          origen={[
+            ...(presupuesto.raiz_id
+              ? [
+                  {
+                    tipo: 'presupuesto' as const,
+                    etiqueta: 'Versión anterior',
+                    ruta: `/presupuestos/${presupuesto.raiz_id}`,
+                  },
+                ]
+              : []),
+            ...(cliente
+              ? [
+                  {
+                    tipo: 'tercero' as const,
+                    etiqueta: cliente.razon_social,
+                    ruta: `/terceros/${cliente.id}`,
+                    estadoEtiqueta: 'Cliente',
+                  },
+                ]
+              : []),
+          ]}
+          cargarAsociados={async () => {
+            const obraId = await obraDePresupuesto(id)
+            if (!obraId) return []
+            return cargarAsociadosDeObra(obraId, { tipo: 'presupuesto', id })
+          }}
+        />
+      ),
+    },
+    {
       id: 'historial',
       etiqueta: 'Historial',
       icono: 'historial',
@@ -864,6 +906,7 @@ export function PresupuestoDetalle() {
       <CambiarEstadoModal
         presupuestoId={id}
         estadoActual={presupuesto.estado}
+        nombre={presupuesto.nombre}
         onClose={() => setCambiandoEstado(false)}
         onGuardado={() => {
           setCambiandoEstado(false)
@@ -1152,17 +1195,24 @@ function EditarPresupuestoModal({
 function CambiarEstadoModal({
   presupuestoId,
   estadoActual,
+  nombre,
   onClose,
   onGuardado,
 }: {
   presupuestoId: string
   estadoActual: EstadoPresupuesto
+  nombre: string
   onClose: () => void
   onGuardado: () => void
 }) {
   const [estado, setEstado] = useState(estadoActual)
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
+
+  // Aprobar es aceptar, y aceptar es poner en obra: no basta con un PATCH de
+  // estado, hay que decir en qué obra se ejecuta. Se delega en el modal de
+  // aceptación, que lo hace todo en una sola llamada.
+  const esAceptar = estado === 'aprobado' && estadoActual !== 'aprobado'
 
   async function guardar() {
     setGuardando(true)
@@ -1174,6 +1224,17 @@ function CambiarEstadoModal({
       setError(err instanceof Error ? err.message : 'Error desconocido')
       setGuardando(false)
     }
+  }
+
+  if (esAceptar) {
+    return (
+      <AceptarPresupuestoModal
+        presupuestoId={presupuestoId}
+        nombreSugerido={nombre}
+        onClose={onClose}
+        onAceptado={onGuardado}
+      />
+    )
   }
 
   return (

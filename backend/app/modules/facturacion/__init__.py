@@ -10,7 +10,7 @@ SPEC = ModuleSpec(
     ),
     icon="receipt",
     router=router,
-    depends_on=("obras", "terceros"),
+    depends_on=("obras", "terceros", "ia"),
     tipo_documento_numeracion="factura",
     nav=(
         NavItem(label="Certificaciones", path="/certificaciones", icon="clipboard-check"),

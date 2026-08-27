@@ -8,6 +8,7 @@ import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
+import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_CERTIFICACION, api, descargar } from '../lib/api'
@@ -243,6 +244,19 @@ export function CertificacionDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="certificacion" entidadId={id} />,
+    },
+    {
+      id: 'trazabilidad',
+      etiqueta: 'Trazabilidad',
+      icono: 'trazabilidad',
+      contenido: (
+        <Trazabilidad
+          origen={[]}
+          cargarAsociados={() =>
+            cargarAsociadosDeObra(certificacion.obra_id, { tipo: 'certificacion', id })
+          }
+        />
+      ),
     },
     {
       id: 'historial',

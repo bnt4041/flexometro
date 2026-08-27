@@ -20,7 +20,10 @@ token de acceso de un proveedor no se genera hasta que se le manda a él, así
 que mientras el paquete es un borrador no hay ningún enlace vivo.
 """
 
+import logging
 import uuid
+
+import httpx
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -28,6 +31,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.database import fijar_organizacion_activa
+from app.core.keycloak_admin import KeycloakAdminClient, KeycloakAdminError
 from app.core.mailer import MailerError, enviar_correo
 from app.core.numeracion import siguiente_referencia_libre
 from app.core.tenancy import datos_autoria, require_organization_id, require_principal
@@ -43,10 +48,14 @@ from app.modules.compras.models import (
 )
 from app.modules.compras.publico_acceso import generar_token
 from app.modules.core import correo
+from app.modules.core import notificaciones_service
+from app.modules.core.models import Organization
 from app.modules.core.settings_service import configuracion_smtp_de
 from app.modules.presupuestos import presupuesto_service
 from app.modules.presupuestos.models_presupuesto import Capitulo, Partida, Presupuesto
 from app.modules.terceros.models import Tercero
+
+logger = logging.getLogger("obras.compras.solicitud")
 
 TIPO_DOCUMENTO = "solicitud_precios"
 
@@ -327,12 +336,27 @@ async def anadir_destinatario(
 async def quitar_destinatario(
     session: AsyncSession, destinatario: SolicitudDestinatario
 ) -> None:
-    """Solo mientras no haya salido: si ya tiene enlace o ha contestado,
-    quitarlo se llevaría por delante su oferta y su acceso."""
-    if destinatario.estado != EstadoDestinatario.BORRADOR:
-        raise DestinatarioNoEditable(
-            "Este proveedor ya recibió la solicitud: no se puede quitar de la lista"
+    """Saca a un proveedor de la solicitud, en cualquier estado.
+
+    Se lleva por delante su acceso y lo que hubiera ofertado (por cascada), y
+    deja sin adjudicar las líneas que se le hubieran adjudicado — pero NO su
+    presupuesto-oferta, que es un documento aparte y se queda en Presupuestos
+    de proveedor. Tampoco deshace un precio ya aplicado sobre una partida: eso
+    ya está en el presupuesto de cliente y se cambia allí.
+
+    Quien llama debe advertir de lo que se pierde: aquí no se pregunta.
+    """
+    # `SolicitudLinea.adjudicada_a_id` es SET NULL, así que las líneas
+    # adjudicadas a este proveedor se quedan sin adjudicar solas. Se hace
+    # explícito para que el comparativo vuelva a ofrecer el botón de adjudicar
+    # dentro de la misma transacción, sin depender de recargar.
+    for linea in (
+        await session.execute(
+            select(SolicitudLinea).where(SolicitudLinea.adjudicada_a_id == destinatario.id)
         )
+    ).scalars():
+        linea.adjudicada_a_id = None
+
     await session.delete(destinatario)
     await session.flush()
 
@@ -402,13 +426,19 @@ async def actualizar_datos(
     await session.flush()
 
 
-async def eliminar_borrador(session: AsyncSession, solicitud: SolicitudPrecios) -> None:
-    """Solo mientras no haya salido a nadie: borrar un paquete ya enviado se
-    llevaría por delante ofertas que los proveedores han rellenado."""
-    if solicitud.estado != EstadoSolicitud.BORRADOR:
-        raise DestinatarioNoEditable(
-            "Este paquete ya se envió: no se puede eliminar sin perder las ofertas recibidas"
-        )
+async def eliminar(session: AsyncSession, solicitud: SolicitudPrecios) -> None:
+    """Borra la solicitud entera, en cualquier estado.
+
+    Por cascada se van sus líneas, sus destinatarios, lo que hubieran ofertado
+    y sus enlaces —que dejan de funcionar al momento—. Lo que NO se toca:
+
+    - Los presupuestos-oferta ya generados, que siguen en Presupuestos de
+      proveedor: son documentos por derecho propio.
+    - Los precios ya adjudicados sobre partidas del presupuesto de cliente:
+      eso ya está aplicado y se cambia desde el presupuesto.
+
+    Quien llama debe advertir de lo que se pierde: aquí no se pregunta.
+    """
     await session.delete(solicitud)
     await session.flush()
 
@@ -528,6 +558,13 @@ async def enviar_a(
 
     url = await _emitir_acceso(session, destinatario, fecha_limite=solicitud.fecha_limite)
 
+    # Si el proveedor ya tiene Flexómetro, el aviso le llega dentro de su
+    # aplicación y allí puede convertirlo en un presupuesto suyo.
+    en_su_flexometro = await avisar_si_tiene_cuenta(
+        session, solicitud, destinatario, url=url, correo_destino=correo_destino
+    )
+    portada = get_settings().frontend_url.rstrip("/")
+
     cuerpo = correo.render_solicitud_precios(
         emisor_nombre=emisor_nombre or "",
         proveedor_nombre=proveedor.razon_social if proveedor else None,
@@ -537,7 +574,13 @@ async def enviar_a(
         num_lineas=total_lineas,
         notas=solicitud.notas,
         fecha_limite=solicitud.fecha_limite.isoformat() if solicitud.fecha_limite else None,
-        url_oferta=url,
+        # A quien ya tiene Flexómetro no se le manda el enlace externo: sería
+        # sacarle de su propia aplicación, donde el aviso ya le espera y donde
+        # puede trabajarlo con sus precios. El correo solo avisa.
+        url_oferta=None if en_su_flexometro else url,
+        url_aplicacion=portada if en_su_flexometro else None,
+        # Y a quien NO la tiene, una invitación discreta al pie.
+        url_landing=None if en_su_flexometro else portada,
     )
 
     config = await configuracion_smtp_de(session, org_id)
@@ -551,6 +594,103 @@ async def enviar_a(
     _marcar_enviado(solicitud, destinatario)
     await session.flush()
     return url
+
+
+async def _organizacion_del_correo(session: AsyncSession, email: str) -> uuid.UUID | None:
+    """La organización de Flexómetro de ese correo, si la tiene.
+
+    El directorio de usuarios vive entero en Keycloak (no hay tabla de
+    usuarios), así que se pregunta allí. Best-effort a conciencia: si Keycloak
+    no contesta, no está configurado, o el correo pertenece a varios usuarios,
+    se devuelve `None` y el envío sigue por correo como siempre — que un
+    proveedor no reciba la notificación es un incordio, que no le llegue nada
+    es un fallo.
+    """
+    try:
+        cliente = KeycloakAdminClient(get_settings())
+        usuario = await cliente.buscar_por_email(email)
+    except (KeycloakAdminError, httpx.HTTPError) as exc:
+        # Que Keycloak no conteste no puede tumbar un envío: se sigue por
+        # correo, que es lo que había antes de existir las notificaciones.
+        # El `except` es estrecho a propósito: un fallo de programación aquí
+        # dentro debe reventar y verse, no quedarse en un aviso silencioso
+        # que haga creer que "es que ese proveedor no tiene cuenta".
+        logger.warning("No se pudo consultar Keycloak por %s: %s", email, exc)
+        return None
+    if usuario is None:
+        return None
+
+    slugs = (usuario.get("attributes") or {}).get("organizacion") or []
+    if isinstance(slugs, str):
+        slugs = [s.strip() for s in slugs.split(",") if s.strip()]
+    if len(slugs) != 1:
+        # Sin organización, o con varias: no hay forma de saber en cuál
+        # quiere recibirlo.
+        return None
+
+    return await session.scalar(
+        select(Organization.id).where(
+            Organization.slug == slugs[0], Organization.is_active.is_(True)
+        )
+    )
+
+
+async def avisar_si_tiene_cuenta(
+    session: AsyncSession,
+    solicitud: SolicitudPrecios,
+    destinatario: SolicitudDestinatario,
+    *,
+    url: str,
+    correo_destino: str,
+) -> bool:
+    """Si el proveedor ya tiene Flexómetro, le deja el aviso dentro de SU
+    aplicación además del correo. Devuelve si lo ha dejado.
+
+    La notificación se crea en la organización del proveedor, no en la del
+    emisor: es su bandeja. Lleva el enlace en claro porque es exactamente lo
+    que le habría llegado por correo, y ahí vive protegido por el RLS de su
+    propia organización.
+    """
+    org_proveedor = await _organizacion_del_correo(session, correo_destino)
+    # Pedirse precio a uno mismo no tiene sentido y además cruzaría el aviso
+    # con el paquete original.
+    if org_proveedor is None or org_proveedor == require_organization_id():
+        return False
+
+    org_emisor = require_organization_id()
+    emisor = await session.scalar(
+        text("SELECT name FROM core.organization WHERE id = :o"), {"o": str(org_emisor)}
+    )
+    token = url.rsplit("/", 1)[-1]
+
+    # La fila va en la organización del PROVEEDOR, y el `WITH CHECK` de su
+    # política RLS lo impide mientras el contexto sea el del emisor — que es
+    # justo lo que tiene que hacer. Así que se cruza a propósito, para este
+    # único INSERT, y se vuelve pase lo que pase.
+    #
+    # Aquí basta con mover la variable de PostgreSQL y NO el ContextVar de
+    # `tenancy`: `crear` recibe la organización explícita y `Notificacion` no
+    # lleva `AutoriaMixin`, así que nada de lo que se escribe sale del
+    # contexto. Mover el ContextVar sería peor — el resto de `enviar_a`
+    # (numeración, autoría) seguiría después creyendo que es del proveedor.
+    await fijar_organizacion_activa(session, org_proveedor)
+    try:
+        await notificaciones_service.crear(
+            session,
+            organization_id=org_proveedor,
+            tipo=notificaciones_service.TIPO_SOLICITUD_PRECIOS,
+            titulo=f"{emisor or 'Una empresa'} te pide precio: {solicitud.titulo}",
+            cuerpo=(
+                "Puedes aceptarla y se convertirá en un presupuesto tuyo, con sus partidas "
+                "y mediciones, para que lo valores con tus precios."
+            ),
+            enlace=f"/oferta/{token}",
+            importante=True,
+            token_acceso=token,
+        )
+    finally:
+        await fijar_organizacion_activa(session, org_emisor)
+    return True
 
 
 async def generar_enlace(
@@ -581,6 +721,40 @@ async def obtener_destinatario(
             SolicitudDestinatario.organization_id == org_id,
         )
     )
+
+
+async def listar_por_obra(
+    session: AsyncSession, obra_id: uuid.UUID
+) -> list[SolicitudPrecios]:
+    """Los paquetes de precios de TODOS los presupuestos que ejecuta la obra.
+
+    Las solicitudes se piden mientras se presupuesta, pero es en obra donde
+    hacen falta: saber a qué proveedor se adjudicó cada partida es lo que
+    convierte el comparativo en el punto de partida de las compras.
+
+    Vive aquí y no en `obras` por la dirección de dependencias: `compras`
+    importa `obras`, no al revés (`ModuleRegistry._detect_cycles()` lo
+    prohíbe). Mismo truco que `compras/costes.py`, que sirve
+    `/api/obras/{id}/costes`.
+    """
+    from app.modules.obras.models import ObraPresupuesto
+
+    org_id = require_organization_id()
+    filas = (
+        await session.execute(
+            select(SolicitudPrecios)
+            .join(
+                ObraPresupuesto,
+                ObraPresupuesto.presupuesto_id == SolicitudPrecios.presupuesto_id,
+            )
+            .where(
+                ObraPresupuesto.obra_id == obra_id,
+                SolicitudPrecios.organization_id == org_id,
+            )
+            .order_by(ObraPresupuesto.orden, SolicitudPrecios.codigo)
+        )
+    ).scalars()
+    return list(filas)
 
 
 async def listar_por_presupuesto(

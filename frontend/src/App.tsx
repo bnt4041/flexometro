@@ -28,9 +28,13 @@ import { CertificacionDetalle } from './pages/CertificacionDetalle'
 import { Comparador } from './pages/Comparador'
 import { ContactoDetalle } from './pages/ContactoDetalle'
 import { Contactos } from './pages/Contactos'
+import { ContratoCrear, Contratos } from './pages/Contratos'
+import { ContratoDetalle } from './pages/ContratoDetalle'
 import { CosteReal } from './pages/CosteReal'
 import { FacturaDetalle } from './pages/FacturaDetalle'
 import { Facturas, FacturaSueltaCrear } from './pages/Facturas'
+import { FacturaRecibidaDetalle } from './pages/FacturaRecibidaDetalle'
+import { FacturaRecibidaCrear, FacturasRecibidas } from './pages/FacturasRecibidas'
 import { IaPatrones } from './pages/IaPatrones'
 import { ImportarBC3 } from './pages/ImportarBC3'
 import { Landing } from './pages/Landing'
@@ -39,6 +43,8 @@ import { ObraDetalle } from './pages/ObraDetalle'
 import { OfertaProveedor } from './pages/OfertaProveedor'
 import { Personal } from './pages/Personal'
 import { Placeholder } from './pages/Placeholder'
+import { PedidoCrear, Pedidos } from './pages/Pedidos'
+import { PedidoDetalle } from './pages/PedidoDetalle'
 import { PresupuestoCrear, Presupuestos } from './pages/Presupuestos'
 import { PresupuestoDetalle } from './pages/PresupuestoDetalle'
 import { PresupuestosProveedor } from './pages/PresupuestosProveedor'
@@ -63,7 +69,10 @@ const PANTALLAS: Record<string, ComponentType> = {
   '/importar-bc3': ImportarBC3,
   '/obras': Obras,
   '/personal': Personal,
+  '/pedidos': Pedidos,
+  '/contratos': Contratos,
   '/albaranes': Albaranes,
+  '/facturas-recibidas': FacturasRecibidas,
   '/presupuestos-proveedor': PresupuestosProveedor,
   '/certificaciones': Certificaciones,
   '/facturas': Facturas,
@@ -93,6 +102,18 @@ const MODALES: Record<
   '/obras': [
     { path: 'nueva', modulo: 'obras', componente: ObraCrear },
     { path: ':id', modulo: 'obras', componente: ObraDetalle },
+  ],
+  '/pedidos': [
+    { path: 'nuevo', modulo: 'compras', componente: PedidoCrear },
+    { path: ':id', modulo: 'compras', componente: PedidoDetalle },
+  ],
+  '/contratos': [
+    { path: 'nuevo', modulo: 'contratos', componente: ContratoCrear },
+    { path: ':id', modulo: 'contratos', componente: ContratoDetalle },
+  ],
+  '/facturas-recibidas': [
+    { path: 'nueva', modulo: 'compras', componente: FacturaRecibidaCrear },
+    { path: ':id', modulo: 'compras', componente: FacturaRecibidaDetalle },
   ],
   '/albaranes': [
     { path: 'nuevo', modulo: 'compras', componente: AlbaranCrear },

@@ -43,6 +43,20 @@
                 Se agradece respuesta antes del <strong>{{ fecha_limite }}</strong>.
               </p>
               {% endif %}
+              {% if url_aplicacion %}
+              {# Ya tiene Flexómetro: el aviso le espera dentro, y mandarle el
+                 enlace externo sería sacarle de su propia aplicación. #}
+              <p style="margin:0 0 16px;">
+                Como ya usas <strong>Flexómetro</strong>, lo tienes en tu bandeja de avisos:
+                acéptalo y se convertirá en un presupuesto tuyo, con sus partidas y mediciones,
+                para que lo valores con tus precios y se lo devuelvas.
+              </p>
+              <p style="margin:0 0 24px;">
+                <a href="{{ url_aplicacion }}" style="display:inline-block; background:#f5a904; color:#1b293e; text-decoration:none; padding:10px 20px; border-radius:6px; font-weight:700;">
+                  Abrir Flexómetro
+                </a>
+              </p>
+              {% else %}
               <p style="margin:0 0 24px;">
                 <a href="{{ url_oferta }}" style="display:inline-block; background:#f5a904; color:#1b293e; text-decoration:none; padding:10px 20px; border-radius:6px; font-weight:700;">
                   Ver partidas y poner precio
@@ -53,6 +67,14 @@
                 tuyo — no lo reenvíes. Puedes entrar, ir guardando y volver más tarde hasta que
                 envíes tu oferta.
               </p>
+              {% if url_landing %}
+              <p style="margin:20px 0 0; padding-top:16px; border-top:1px solid #e5e7eb; font-size:13px; color:#5b6472;">
+                ¿Te resulta cómodo presupuestar así? Flexómetro es el ERP de construcción con el
+                que {{ emisor_nombre }} lo hace: mediciones, descompuestos y comparativos de
+                proveedor. <a href="{{ url_landing }}" style="color:#9a6300;">Échale un vistazo</a>.
+              </p>
+              {% endif %}
+              {% endif %}
             </td>
           </tr>
         </table>

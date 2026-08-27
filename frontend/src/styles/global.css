@@ -595,6 +595,15 @@ textarea.input {
   background: var(--c-surface);
 }
 
+/* Un documento arrastrado sobre la tabla (p. ej. `NuevaCertificacionModal`
+   pidiendo a la IA que rellene las mediciones) — mismo acento que el resto
+   de estados "activo", sin inventar un color nuevo. */
+.table-wrap--arrastrando {
+  border-color: var(--c-accent);
+  border-style: dashed;
+  background: var(--c-accent-soft);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -900,6 +909,14 @@ textarea.input {
   z-index: 40;
   display: flex;
   transition: left 180ms ease;
+}
+
+/* El chat de documentos con la IA (`DocumentoIAModal`) se puede abrir desde
+ * dentro de un diálogo pequeño (`.modal`, z-index 50) — p. ej. "Nueva
+ * certificación" — y ahí tiene que quedar POR ENCIMA de ese diálogo, no
+ * debajo como el resto de `.modal-pantalla`. */
+.modal-pantalla-backdrop--elevado {
+  z-index: 65;
 }
 
 .modal-pantalla {
@@ -1311,6 +1328,618 @@ textarea.input {
 .rejilla-barra__estado {
   margin-left: auto;
   font-size: var(--fs-xs);
+}
+
+/* ===== Tareas de obra ===== */
+
+.page-head__acciones {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Un texto que abre una ficha, sin parecer un botón. */
+.enlace-plano {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--c-accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.enlace-plano:hover {
+  text-decoration: underline;
+}
+
+/* Tablero kanban. Tres columnas con scroll horizontal propio: en una pantalla
+   estrecha se desplaza el tablero, nunca la página. */
+.tablero {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
+  gap: var(--sp-3);
+  overflow-x: auto;
+  padding-bottom: var(--sp-2);
+  /* Columnas de la misma altura, no ajustadas a su contenido: en una columna
+     corta la zona donde soltar terminaría justo debajo de la última tarjeta y
+     acertar sería un ejercicio de precisión. */
+  align-items: stretch;
+}
+
+.tablero__columna {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  min-height: 140px;
+}
+
+.tablero__columna--destino {
+  border-color: var(--c-accent);
+}
+
+.tablero__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-text-muted);
+}
+
+.tablero__cuenta {
+  font-variant-numeric: tabular-nums;
+}
+
+.tablero__pila {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* Ocupa el hueco que sobra para que todo el blanco de la columna acepte la
+     tarjeta, no solo la franja pegada a las tarjetas. */
+  flex: 1;
+  min-height: 40px;
+}
+
+/* Dónde caería la tarjeta que se arrastra. Un filete, no un recuadro: el
+   recuadro empuja la lista y todo salta mientras se arrastra. */
+.tablero__hueco {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--c-accent-strong);
+  margin: 1px 0;
+}
+
+.tablero__anadir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--c-text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.tablero__anadir:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.tarjeta-tarea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  cursor: grab;
+}
+
+.tarjeta-tarea:hover {
+  border-color: var(--c-border-strong);
+}
+
+.tarjeta-tarea--arrastrando {
+  opacity: 0.4;
+}
+
+/* Fecha pasada y sin terminar. Un filete lateral, no un fondo: la tarjeta
+   tiene que seguir leyéndose igual que las demás. */
+.tarjeta-tarea--vencida {
+  box-shadow: inset 3px 0 0 var(--c-danger);
+}
+
+.tarjeta-tarea__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.tarjeta-tarea__titulo {
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+
+.tarjeta-tarea__nota {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+}
+
+.tarjeta-tarea__pie {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: 2px;
+}
+
+.tarjeta-tarea__dato {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+}
+
+/* La prioridad lleva SIEMPRE su palabra escrita, no solo color: es una escala
+   de estado y el color no puede ser el único canal. */
+.tarjeta-tarea__prioridad {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tarjeta-tarea__prioridad--alta {
+  color: var(--c-danger);
+}
+
+.tarjeta-tarea__prioridad--normal {
+  color: var(--c-text-subtle);
+}
+
+.tarjeta-tarea__prioridad--baja {
+  color: var(--c-text-subtle);
+  font-weight: 400;
+}
+
+.chip--prioridad-alta {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.chip--prioridad-normal {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+}
+
+.chip--prioridad-baja {
+  background: var(--c-surface-2);
+  color: var(--c-text-subtle);
+}
+
+.table tr.fila-vencida td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-danger);
+}
+
+/* Widget de tareas del cuadro de mandos. */
+.tareas-widget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  height: 100%;
+}
+
+.tareas-widget__cifras {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+}
+
+.tareas-widget__cifra {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tareas-widget__cifra strong {
+  font-size: var(--fs-xl);
+  font-weight: 650;
+}
+
+.tareas-widget__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  overflow-y: auto;
+}
+
+.tareas-widget__fila {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.tareas-widget__fila span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Cuadro de mandos de la obra ===== */
+
+/* Tarjetas KPI. Una cifra suelta es una tarjeta, no un gráfico de una barra.
+   El valor va con cifras proporcionales, no tabulares: a este tamaño
+   `tabular-nums` deja los números sueltos y con aire de más. */
+.tarjetas-kpi {
+  display: grid;
+  /* 230px es el mínimo para que un importe de siete cifras entre en una línea
+     sin partirse: con 190px «17.850,00 €» ya se rompía y las tarjetas quedaban
+     de alturas distintas. */
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--sp-3);
+}
+
+.tarjeta-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.tarjeta-kpi__etiqueta {
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tarjeta-kpi__valor {
+  /* No es la cifra protagonista de la pantalla (no hay ninguna), así que no
+     necesita tamaño de titular; con --fs-2xl un importe de millones se salía
+     de la tarjeta, y en obra eso es un caso corriente. */
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  line-height: 1.2;
+  /* Cifras proporcionales a propósito: `tabular-nums` a este tamaño deja los
+     números con aire de más. Se reserva para columnas que se alinean. */
+  white-space: nowrap;
+}
+
+.tarjeta-kpi__valor--ojo {
+  color: var(--c-warning);
+}
+
+.tarjeta-kpi__nota {
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+}
+
+/* Medidores: una razón contra un límite. La pista sin rellenar es un paso
+   claro de la misma rampa, para que el estado se lea a lo largo de toda la
+   barra y no solo en el trozo pintado. */
+.medidores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-4);
+  margin-top: var(--sp-4);
+}
+
+.medidor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.medidor__cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.medidor__etiqueta {
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+}
+
+.medidor__pct {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.medidor__pista {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--c-viz-pista);
+  overflow: hidden;
+}
+
+.medidor__relleno {
+  height: 100%;
+  /* Extremo redondeado de 4px anclado a la base: el arranque queda a escuadra
+     contra el cero y solo se redondea la punta del dato. */
+  border-radius: 0 4px 4px 0;
+  background: var(--c-viz-ahorro);
+  transition: width 0.25s ease;
+}
+
+.medidor__relleno--pasado {
+  background: var(--c-viz-sobrecoste);
+}
+
+.medidor__detalle {
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Desviación por capítulo: barra divergente con el cero en el centro.
+   Es la única forma de aquí que pide un gráfico, porque lo que hay que leer
+   es la polaridad (por encima o por debajo de lo previsto). */
+.desviacion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.desviacion__barra-superior {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.desviacion__leyenda {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+}
+
+.desviacion__muestra {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.desviacion__muestra--ahorro {
+  background: var(--c-viz-ahorro);
+}
+
+.desviacion__muestra--sobrecoste {
+  background: var(--c-viz-sobrecoste);
+}
+
+.desviacion__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.desviacion__fila {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.4fr) minmax(120px, 3fr) minmax(90px, auto);
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.desviacion__nombre {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desviacion__pista {
+  position: relative;
+  height: 14px;
+}
+
+/* `Tooltip` envuelve a su hijo en un `.tooltip-envoltorio` inline-flex sin
+   ancho propio. Como celda de la rejilla se encogería a cero —y la pista no
+   tiene ancho intrínseco, porque sus barras van posicionadas— así que aquí el
+   envoltorio y la pista pasan a bloque para ocupar toda la columna. */
+.desviacion__fila > .tooltip-envoltorio,
+.desviacion__fila > .tooltip-envoltorio > .desviacion__pista {
+  display: block;
+  width: 100%;
+}
+
+/* Eje del cero: filete continuo, un tono por encima de la superficie. Nunca
+   discontinuo — el trazo a rayas se lee como "umbral" y aquí solo es el cero. */
+.desviacion__cero {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--c-border-strong);
+}
+
+.desviacion__marca {
+  position: absolute;
+  top: 3px;
+  height: 8px;
+  /* 3px para que una desviación diminuta siga leyéndose como barra y no como
+     un punto suelto junto al eje. */
+  min-width: 3px;
+}
+
+/* 1px de hueco contra el eje del cero, para que el filete siga viéndose por
+   debajo de la barra. Un píxel no cambia cómo se lee el valor y sin él el eje
+   desaparece en toda fila que tenga dato. */
+.desviacion__marca--sobrecoste {
+  background: var(--c-viz-sobrecoste);
+  border-radius: 0 4px 4px 0;
+  margin-left: 1px;
+}
+
+.desviacion__marca--ahorro {
+  background: var(--c-viz-ahorro);
+  border-radius: 4px 0 0 4px;
+  margin-right: 1px;
+}
+
+.desviacion__valor {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-content: flex-end;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.desviacion__valor--sobrecoste {
+  color: var(--c-viz-sobrecoste);
+}
+
+.desviacion__valor--ahorro {
+  color: var(--c-viz-ahorro);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .medidor__relleno {
+    transition: none;
+  }
+}
+
+/* --- Cuadre de compras de la obra --- */
+/* Cuatro cifras en fila: entregado, facturado, por pagar y albaranes sin
+   factura. Las dos últimas se resaltan cuando no son cero, porque son las que
+   piden una acción. */
+.cuadre {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+.cuadre__dato {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cuadre__etiqueta {
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cuadre__dato strong {
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.cuadre--ojo {
+  color: var(--c-warning);
+}
+
+/* Lista de casillas con scroll propio: los albaranes de una obra pueden ser
+   muchos y el modal no debe crecer sin fin. */
+.lista-marcable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 180px;
+  overflow-y: auto;
+  padding: var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+}
+
+/* Resumen del árbol de obra: pares etiqueta/valor en columna, con el bloque de
+   anexos separado porque es la cifra que hay que justificar. */
+.resumen-obra {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+}
+
+.resumen-obra dt {
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.resumen-obra dd {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.resumen-obra dd .muted {
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+.resumen-obra__separado {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-border);
+}
+
+/* Título de la partida que se está midiendo, a la izquierda de la barra: el
+   widget de mediciones se ve fuera del árbol y sin él no se sabe de qué
+   partida son los parciales. */
+.rejilla-barra__titulo {
+  font-weight: 650;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+/* --- Árbol de obra --- */
+/* Lo que entró después de arrancar (un anexo, o creado a mano) se distingue de
+   lo contratado al principio. Es un tinte lateral, no un fondo: la fila tiene
+   que seguir leyéndose igual que las demás. */
+.rejilla__fila.fila-anexo td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-warning);
+}
+
+.rejilla__aviso.arbol-obra__anexo {
+  color: var(--c-warning);
 }
 
 /* Buscador del banco de precios (Fase 50): pregunta al servidor, porque con
@@ -1958,6 +2587,84 @@ kbd {
   color: var(--c-danger);
 }
 
+/* Procedencia de un presupuesto dentro de la obra. El principal es lo firmado
+   al arrancar; el anexo es lo que se contrató después, y conviene que se
+   distinga de un vistazo. */
+.chip--vinculo-principal {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.chip--vinculo-anexo {
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+}
+
+/* Aceptar un presupuesto: elegir entre obra nueva y obra existente. */
+.aceptar__intro {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.aceptar__destinos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+.aceptar__destino {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aceptar__destino:hover:not(:disabled) {
+  border-color: var(--c-accent);
+}
+
+.aceptar__destino:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.aceptar__destino--activo {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.aceptar__destino-titulo {
+  font-weight: 650;
+}
+
+.aceptar__destino-nota {
+  font-size: var(--fs-xs);
+  color: var(--c-text-muted);
+}
+
+.aceptar__destino--activo .aceptar__destino-nota {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.aceptar__hecho {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-weight: 600;
+  color: var(--c-success);
+}
+
 .notice--ok {
   background: var(--c-success-soft);
   color: var(--c-success);
@@ -2358,6 +3065,47 @@ kbd {
   padding-right: var(--sp-6);
 }
 
+/* --- Trazabilidad: de dónde viene un documento y qué está enlazado --- */
+
+.trazabilidad__titulo {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  margin-bottom: var(--sp-3);
+}
+
+.trazabilidad__lista {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.trazabilidad__fila {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.trazabilidad__enlace {
+  font-weight: 600;
+}
+
+.trazabilidad__importe {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chip--traza {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+  min-width: 90px;
+  text-align: center;
+}
+
 .creditos-ia__barra {
   height: 8px;
   border-radius: 999px;
@@ -2608,6 +3356,104 @@ input[type='file'].input {
   width: min(400px, 100%);
 }
 
+/* --- Árbol de selección de una solicitud de precios --- */
+.arbol-solicitud__marca {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1.5px solid var(--c-border);
+  border-radius: 4px;
+  background: var(--c-surface);
+  color: transparent;
+  cursor: pointer;
+}
+
+.arbol-solicitud__marca:hover {
+  border-color: var(--c-accent-strong);
+}
+
+.arbol-solicitud__marca[data-estado='si'] {
+  background: var(--c-accent-strong);
+  border-color: var(--c-accent-strong);
+  color: var(--c-accent-contrast);
+}
+
+/* Un capítulo del que se pide parte de sus partidas, no todas. */
+.arbol-solicitud__marca[data-estado='parcial'] {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.arbol-solicitud__componente td {
+  color: var(--c-text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* --- Separata del proveedor (espacio sin sesión) ---
+ * Reutilizaba `portada-sesion`, que es la tarjeta de login: centrada y de
+ * 400px. Esto no es una portada, es un documento de trabajo que el proveedor
+ * rellena, así que necesita ancho y alineación a la izquierda. */
+.separata {
+  min-height: 100%;
+  padding: var(--sp-6) var(--sp-5);
+  background: var(--c-bg);
+}
+
+.separata__caja {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: var(--sp-6);
+  width: min(1000px, 100%);
+  margin: 0 auto;
+}
+
+/* `logo.png` es 1774x887 (2:1) con mucho aire alrededor del logotipo, así
+ * que necesita bastante altura para que se lea; la versión `-recorte` está
+ * ajustada pero es para fondo oscuro y aquí el fondo es blanco. */
+.separata__logo {
+  height: 68px;
+  width: auto;
+  display: block;
+  margin: calc(var(--sp-3) * -1) 0 var(--sp-4) calc(var(--sp-3) * -1);
+}
+
+.separata__titulo {
+  margin: 0 0 var(--sp-1);
+}
+
+.separata__capitulo td {
+  background: var(--c-surface-2);
+  font-weight: 650;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--c-text-muted);
+}
+
+.mediciones-oferta {
+  padding: var(--sp-3) 0;
+}
+
+.mediciones-oferta .table {
+  background: var(--c-surface-2);
+}
+
+.separata__obra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-6);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-5);
+  background: var(--c-surface-2);
+  border-radius: var(--radius);
+}
+
 .topbar__usuario {
   display: flex;
   align-items: center;
@@ -2685,6 +3531,70 @@ input[type='file'].input {
 .chip--estado-anulada {
   background: var(--c-danger-soft);
   color: var(--c-danger);
+}
+
+/* --- Estados de pedido — con prefijo, a diferencia de los de arriba:
+   "confirmado"/"cancelado" ya significan otra cosa en otras entidades, y
+   aquí además hace falta "servido parcial" a medio camino entre confirmado
+   y servido. --- */
+
+.chip--estado-pedido-pendiente {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+}
+
+.chip--estado-pedido-confirmado {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.chip--estado-pedido-servido_parcial {
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+}
+
+.chip--estado-pedido-servido {
+  background: var(--c-success-soft);
+  color: var(--c-success);
+}
+
+.chip--estado-pedido-cancelado {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+/* --- Estados de contrato --- */
+
+.chip--estado-contrato-borrador {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+}
+
+.chip--estado-contrato-firmado {
+  background: var(--c-success-soft);
+  color: var(--c-success);
+}
+
+.chip--estado-contrato-rescindido {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.chip--estado-contrato-finalizado {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+/* --- Estados de factura recibida --- */
+
+.chip--estado-fr-pendiente {
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
+}
+
+.chip--estado-fr-pagada {
+  background: var(--c-success-soft);
+  color: var(--c-success);
 }
 
 /* --- Estados de certificación --- */
@@ -3009,4 +3919,172 @@ input[type='file'].input {
   .landing__beneficios-inner {
     padding: var(--sp-6) var(--sp-4);
   }
+}
+
+/* Barra de lectura con IA de la separata del proveedor. */
+.separata__ia {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--c-accent-soft);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+}
+
+/* --- Campana de avisos (barra superior) --- */
+.campana {
+  position: relative;
+}
+
+.campana__boton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.campana__boton:hover {
+  background: var(--c-surface-2);
+  color: var(--c-text);
+}
+
+.campana__contador {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--c-danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.campana__panel {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 60;
+  width: min(380px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.campana__item {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.campana__item:last-child {
+  border-bottom: none;
+}
+
+.campana__titulo {
+  font-weight: 600;
+  margin-bottom: var(--sp-1);
+}
+
+.campana__fecha {
+  font-size: var(--fs-xs);
+  margin: var(--sp-1) 0;
+}
+
+/* El texto enriquecido de una partida dentro de la separata: que no meta
+   márgenes enormes entre párrafos dentro de una celda de tabla. */
+.separata__texto p {
+  margin: 0;
+}
+
+.separata__texto p + p,
+.separata__texto ul,
+.separata__texto ol {
+  margin-top: var(--sp-1);
+}
+
+.campana__acciones {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* Aviso de "este presupuesto salió de una solicitud de otra empresa". */
+.devolver-oferta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--c-accent-soft);
+  border-radius: var(--radius);
+}
+
+/* --- Comparativo de ofertas --- */
+.comparativo td,
+.comparativo th {
+  vertical-align: top;
+}
+
+/* La columna de lo nuestro se separa de las de proveedor: es la referencia
+   contra la que se lee todo lo demás, no una oferta más. */
+.comparativo__nuestro {
+  background: var(--c-surface-2);
+  border-right: 2px solid var(--c-border);
+}
+
+.comparativo__precio {
+  font-weight: 600;
+}
+
+/* El precio más bajo de la fila. */
+.comparativo__mejor .comparativo__precio {
+  color: var(--c-success);
+  font-weight: 700;
+}
+
+.comparativo__dif {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  margin: 2px 0 var(--sp-1);
+}
+
+.comparativo__dif--baja {
+  color: var(--c-success);
+}
+
+.comparativo__dif--alta {
+  color: var(--c-danger);
+}
+
+.comparativo__obs {
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-1);
+  white-space: normal;
+}
+
+.comparativo tfoot td {
+  border-top: 2px solid var(--c-border);
+  background: var(--c-surface-2);
 }

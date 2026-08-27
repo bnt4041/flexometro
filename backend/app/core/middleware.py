@@ -42,12 +42,25 @@ RUTAS_PUBLICAS_PERMITIDAS = frozenset(
         "/api/publico/oferta/{token}",
         "/api/publico/oferta/{token}/lineas",
         "/api/publico/oferta/{token}/enviar",
-        # Documentos que el EMISOR adjuntó al borrador antes de enviarlo — de
-        # solo lectura para el proveedor, nunca de subida (eso es la lectura
-        # con IA del PDF del proveedor, fuera de esta fase, y sigue sin
-        # declararse de antemano).
+        # Documentos que el EMISOR adjuntó al borrador antes de enviarlo: de
+        # solo lectura para el proveedor. Subir es cosa aparte, y solo por la
+        # ruta de IA de más abajo, que no guarda el fichero.
         "/api/publico/oferta/{token}/documentos",
         "/api/publico/oferta/{token}/documentos/{documento_id}/descargar",
+        # El estado de mediciones que aporta el proveedor. Vive en su propia
+        # tabla (`compras.oferta_medicion`), no en la del presupuesto del
+        # emisor: es SU medición y no debe tocar el presupuesto de cliente.
+        "/api/publico/oferta/{token}/lineas/{linea_id}/mediciones",
+        "/api/publico/oferta/{token}/mediciones/{medicion_id}",
+        # Cómo desglosa el proveedor su precio. También en tabla propia
+        # (`compras.oferta_descompuesto`) y sin referencia al banco de
+        # precios: el banco es del emisor.
+        "/api/publico/oferta/{token}/lineas/{linea_id}/descompuesto",
+        "/api/publico/oferta/{token}/descompuesto/{componente_id}",
+        # Lectura con IA del documento de precios del proveedor. La paga el
+        # EMISOR (el contexto público está fijado a su organización), y por eso
+        # lleva tope de usos por enlace: ver MAX_USOS_IA en publico_router.
+        "/api/publico/oferta/{token}/ia/documento",
     }
 )
 

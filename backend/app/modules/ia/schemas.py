@@ -318,6 +318,17 @@ class CapituloBancoPropuestoOut(BaseModel):
     total_fichas: int = 0
 
 
+class LineaCertificacionPropuestaOut(BaseModel):
+    """Medición actual (acumulada, no solo del período) que la IA propone
+    para una partida ya presupuestada, leída de un documento arrastrado a
+    `NuevaCertificacionModal` — no hay línea de certificación todavía (se
+    crean todas juntas al confirmar el formulario), así que se identifica
+    por `partida_id`, no por un id de línea."""
+
+    partida_id: uuid.UUID
+    medicion_actual: Decimal
+
+
 class PropuestaAccionOut(BaseModel):
     tipo: Literal[
         "copiar_partida",
@@ -327,6 +338,10 @@ class PropuestaAccionOut(BaseModel):
         "anadir_componentes_ficha",
         "organizar_capitulos_banco",
         "anadir_mediciones_partida",
+        # Fase "IA en obra y certificaciones": rellena `medicion_actual` de
+        # una o varias partidas de un presupuesto para preparar una
+        # certificación — ver `LineaCertificacionPropuestaOut`.
+        "actualizar_mediciones_certificacion",
     ]
     descripcion: str
     # copiar_partida: partida origen. anadir_mediciones_partida: partida
@@ -357,6 +372,11 @@ class PropuestaAccionOut(BaseModel):
     # existente indicada en `partida_id` — no crea nada más, solo añade
     # líneas a su estado de mediciones.
     mediciones_propuestas: list[LineaMedicionSugeridaOut] = Field(default_factory=list)
+    # actualizar_mediciones_certificacion: medición actual propuesta por
+    # partida, para rellenar el formulario de una certificación nueva.
+    lineas_certificacion_propuestas: list[LineaCertificacionPropuestaOut] = Field(
+        default_factory=list
+    )
 
 
 class RespuestaAyudaLinea(BaseModel):

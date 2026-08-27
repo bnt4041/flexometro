@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react'
 
+import { Campana } from '../components/Campana'
 import logoOscuro from '../assets/logo-sobre-oscuro.png'
 import { Icon } from '../components/Icon'
 import { Tooltip } from '../components/ui'
@@ -202,6 +203,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <div className="topbar__usuario">
+            <Campana />
             <span className="muted topbar__usuario-nombre">{principal?.username ?? 'sin sesión'}</span>
             {principal?.roles.includes('admin') && <span className="badge">admin</span>}
             <Tooltip texto={t('nav.salir')}>

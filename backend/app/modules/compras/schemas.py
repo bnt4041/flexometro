@@ -4,7 +4,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.compras.models import EstadoAlbaran
+from app.core.enums import TipoIVA
+from app.modules.compras.models import EstadoAlbaran, EstadoFacturaRecibida
 
 
 class AlbaranLineaBase(BaseModel):
@@ -56,6 +57,9 @@ class AlbaranBase(BaseModel):
     fecha: date
     estado: EstadoAlbaran = EstadoAlbaran.BORRADOR
     notas: str | None = None
+    # De qué pedido viene esta entrega — opcional, se puede seguir dando de
+    # alta un albarán directo, sin pedido de por medio.
+    pedido_id: uuid.UUID | None = None
 
 
 class AlbaranCreate(AlbaranBase):
@@ -70,6 +74,7 @@ class AlbaranUpdate(BaseModel):
     fecha: date | None = None
     estado: EstadoAlbaran | None = None
     notas: str | None = None
+    pedido_id: uuid.UUID | None = None
 
 
 class AlbaranOut(AlbaranBase):
@@ -114,3 +119,80 @@ class InformeCosteObra(BaseModel):
     obra_nombre: str
     capitulos: list[CosteCapitulo]
     totales: CosteCapitulo
+
+
+# --- Facturas de proveedor ---
+#
+# No las emitimos nosotros: no llevan serie ni numeración legal. Lo que las
+# identifica frente al proveedor es SU número.
+
+
+class FacturaRecibidaBase(BaseModel):
+    numero_proveedor: str = Field(min_length=1, max_length=60)
+    fecha: date
+    fecha_vencimiento: date | None = None
+    base_imponible: Decimal = Field(ge=0)
+    tipo_iva: TipoIVA = TipoIVA.GENERAL
+    inversion_sujeto_pasivo: bool = False
+    notas: str | None = None
+
+
+class FacturaRecibidaCreate(FacturaRecibidaBase):
+    obra_id: uuid.UUID
+    proveedor_id: uuid.UUID
+    # Si vienen, mandan sobre lo calculado: es lo que dice el papel, y un
+    # céntimo de diferencia por el redondeo del proveedor no puede impedir
+    # registrar su factura.
+    cuota_iva: Decimal | None = Field(default=None, ge=0)
+    total: Decimal | None = Field(default=None, ge=0)
+    albaran_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class FacturaRecibidaUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    numero_proveedor: str | None = Field(default=None, min_length=1, max_length=60)
+    fecha: date | None = None
+    fecha_vencimiento: date | None = None
+    base_imponible: Decimal | None = Field(default=None, ge=0)
+    tipo_iva: TipoIVA | None = None
+    inversion_sujeto_pasivo: bool | None = None
+    cuota_iva: Decimal | None = Field(default=None, ge=0)
+    total: Decimal | None = Field(default=None, ge=0)
+    estado: EstadoFacturaRecibida | None = None
+    fecha_pago: date | None = None
+    notas: str | None = None
+    # A None se dejan como están; una lista (incluso vacía) los reemplaza.
+    albaran_ids: list[uuid.UUID] | None = None
+
+
+class FacturaRecibidaOut(FacturaRecibidaBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    codigo: str
+    obra_id: uuid.UUID
+    proveedor_id: uuid.UUID
+    cuota_iva: Decimal
+    total: Decimal
+    estado: EstadoFacturaRecibida
+    fecha_pago: date | None
+    created_at: datetime
+    updated_at: datetime
+    creado_por_nombre: str | None = None
+    # Resueltos en el router: el listado los enseña sin pedirlos uno a uno.
+    proveedor_razon_social: str = ""
+    albaran_ids: list[uuid.UUID] = Field(default_factory=list)
+    albaran_codigos: list[str] = Field(default_factory=list)
+
+
+class TotalesComprasObra(BaseModel):
+    """Lo comprado en la obra, para cuadrar entregas con facturas."""
+
+    albaranes_total: Decimal
+    facturas_base: Decimal
+    facturas_total: Decimal
+    pendiente_de_pago: Decimal
+    # Albaranes que no aparecen en ninguna factura: material entregado que
+    # nadie ha facturado todavía.
+    albaranes_sin_facturar: int

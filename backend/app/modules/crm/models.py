@@ -29,6 +29,10 @@ class EntidadNota(StrEnum):
     OBRA = "obra"
     CERTIFICACION = "certificacion"
     FACTURA = "factura"
+    PEDIDO = "pedido"
+    CONTRATO = "contrato"
+    ALBARAN = "albaran"
+    FACTURA_RECIBIDA = "factura_recibida"
 
 
 class TipoNota(StrEnum):

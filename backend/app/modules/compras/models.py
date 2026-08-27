@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import enum_column
+from app.core.enums import TipoIVA, enum_column
 from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 SCHEMA = "compras"
@@ -46,6 +46,7 @@ class Albaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
         UniqueConstraint("organization_id", "codigo", name="albaran_codigo_unique"),
         Index("ix_compras_albaran_obra", "obra_id"),
         Index("ix_compras_albaran_proveedor", "proveedor_id"),
+        Index("ix_compras_albaran_pedido", "pedido_id"),
         {"schema": SCHEMA},
     )
 
@@ -72,6 +73,14 @@ class Albaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
         default=EstadoAlbaran.BORRADOR,
     )
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # De qué pedido viene esta entrega — opcional: un albarán se puede seguir
+    # dando de alta directo, sin pedido de por medio, igual que hasta ahora.
+    # SET NULL: borrar el pedido no borra la entrega ya recibida en obra.
+    pedido_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     lineas: Mapped[list["AlbaranLinea"]] = relationship(
         back_populates="albaran",
@@ -121,6 +130,230 @@ class AlbaranLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     albaran: Mapped[Albaran] = relationship(back_populates="lineas")
+
+
+# --- Pedidos a proveedor (orden de compra en firme) ---
+
+
+class EstadoPedido(StrEnum):
+    PENDIENTE = "pendiente"
+    CONFIRMADO = "confirmado"
+    SERVIDO_PARCIAL = "servido_parcial"
+    SERVIDO = "servido"
+    CANCELADO = "cancelado"
+
+
+class Pedido(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
+    """Una orden de compra en firme a un proveedor.
+
+    Distinto de `SolicitudPrecios` (que es solo pedir precio, comparar
+    ofertas) y de `Albaran` (que es lo que entra físicamente en obra): el
+    pedido es el paso intermedio, "esto es lo que se le encarga", tanto si
+    viene de confirmar la oferta ganadora de una solicitud (`origen_*`
+    rellenos) como si se hace directo a un proveedor conocido (ambos NULL).
+    """
+
+    __tablename__ = "pedido"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "codigo", name="pedido_codigo_unique"),
+        Index("ix_compras_pedido_obra", "obra_id"),
+        Index("ix_compras_pedido_proveedor", "proveedor_id"),
+        {"schema": SCHEMA},
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    obra_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("obras.obra.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    proveedor_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # De qué solicitud de precios / oferta ganadora viene, si viene de ahí —
+    # SET NULL: borrar la solicitud o la oferta no borra el pedido ya hecho,
+    # solo pierde el rastro de dónde salió.
+    origen_solicitud_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.solicitud_precios.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    origen_oferta_presupuesto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.presupuesto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_entrega_prevista: Mapped[date | None] = mapped_column(Date, nullable=True)
+    estado: Mapped[EstadoPedido] = mapped_column(
+        enum_column(EstadoPedido, "estado_pedido"),
+        nullable=False,
+        default=EstadoPedido.PENDIENTE,
+    )
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    lineas: Mapped[list["PedidoLinea"]] = relationship(
+        back_populates="pedido",
+        cascade="all, delete-orphan",
+        order_by="PedidoLinea.orden",
+    )
+
+
+class PedidoLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea del pedido — mismo esquema que `AlbaranLinea`: cantidad de
+    un concepto (o de un material fuera de banco) a un precio."""
+
+    __tablename__ = "pedido_linea"
+    __table_args__ = (
+        Index("ix_compras_pedido_linea_pedido", "pedido_id"),
+        {"schema": SCHEMA},
+    )
+
+    pedido_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    concepto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    descripcion: Mapped[str] = mapped_column(String(250), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    cantidad: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    precio_unitario: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    importe: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    pedido: Mapped[Pedido] = relationship(back_populates="lineas")
+
+
+# --- Facturas de proveedor ---
+
+
+class EstadoFacturaRecibida(StrEnum):
+    PENDIENTE = "pendiente"
+    PAGADA = "pagada"
+
+
+class FacturaRecibida(
+    UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base
+):
+    """Una factura que nos manda un proveedor, imputada a una obra.
+
+    **No la emitimos nosotros**, así que no lleva serie ni numeración legal: lo
+    que la identifica de cara al proveedor es SU número (`numero_proveedor`).
+    `codigo` es solo la referencia interna correlativa, igual que en `Albaran`.
+    Por eso tampoco hay `notificado_n8n_en` ni nada del circuito Veri*Factu —
+    ese es un deber del que emite.
+
+    `total` se guarda materializado en vez de recalcularse al leer: es el dato
+    que viene en el papel, y si el proveedor lo redondea de otra forma manda el
+    suyo, no nuestra aritmética.
+    """
+
+    __tablename__ = "factura_recibida"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "codigo", name="factura_recibida_codigo_unique"
+        ),
+        # El mismo proveedor no puede mandar dos veces la misma factura. Pillarlo
+        # aquí evita pagar dos veces por un registro duplicado a mano.
+        UniqueConstraint(
+            "organization_id",
+            "proveedor_id",
+            "numero_proveedor",
+            name="factura_recibida_numero_proveedor_unique",
+        ),
+        Index("ix_compras_factura_recibida_obra", "obra_id"),
+        Index("ix_compras_factura_recibida_proveedor", "proveedor_id"),
+        {"schema": SCHEMA},
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    # El número que trae la factura del proveedor. Obligatorio, al contrario
+    # que en el albarán: sin él no se puede reclamar ni cuadrar nada.
+    numero_proveedor: Mapped[str] = mapped_column(String(60), nullable=False)
+
+    obra_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("obras.obra.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    proveedor_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_vencimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    base_imponible: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    tipo_iva: Mapped[TipoIVA] = mapped_column(
+        enum_column(TipoIVA, "tipo_iva"), nullable=False, default=TipoIVA.GENERAL
+    )
+    # Obra subcontratada: la factura llega sin IVA y lo autorrepercutimos
+    # nosotros (art. 84.Uno.2.º f LIVA). Es corriente en subcontratación.
+    inversion_sujeto_pasivo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    cuota_iva: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    estado: Mapped[EstadoFacturaRecibida] = mapped_column(
+        enum_column(EstadoFacturaRecibida, "estado_factura_recibida"),
+        nullable=False,
+        default=EstadoFacturaRecibida.PENDIENTE,
+    )
+    fecha_pago: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    albaranes: Mapped[list["FacturaRecibidaAlbaran"]] = relationship(
+        back_populates="factura",
+        cascade="all, delete-orphan",
+    )
+
+
+class FacturaRecibidaAlbaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Qué albaranes cubre una factura recibida.
+
+    Es lo que permite cuadrar lo recibido con lo facturado: material que entró
+    en obra y todavía nadie ha facturado, o una factura que no se corresponde
+    con ninguna entrega. Una factura puede cubrir varios albaranes (lo normal
+    en una mensual) y se deja que un albarán aparezca en varias, porque una
+    entrega grande se factura a veces en partes.
+    """
+
+    __tablename__ = "factura_recibida_albaran"
+    __table_args__ = (
+        UniqueConstraint(
+            "factura_id", "albaran_id", name="factura_recibida_albaran_unico"
+        ),
+        Index("ix_compras_factura_recibida_albaran_factura", "factura_id"),
+        Index("ix_compras_factura_recibida_albaran_albaran", "albaran_id"),
+        {"schema": SCHEMA},
+    )
+
+    factura_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_recibida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # CASCADE también aquí: si se borra el albarán, lo que desaparece es el
+    # vínculo, no la factura — que sigue existiendo y habiendo que pagarla.
+    albaran_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.albaran.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    factura: Mapped[FacturaRecibida] = relationship(back_populates="albaranes")
 
 
 # --- Solicitud de precios a proveedor (la "separata") ---
@@ -362,6 +595,103 @@ class OfertaLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
 
     destinatario: Mapped[SolicitudDestinatario] = relationship(back_populates="ofertas")
     linea: Mapped[SolicitudLinea] = relationship(back_populates="ofertas")
+    mediciones: Mapped[list["OfertaMedicion"]] = relationship(
+        back_populates="oferta",
+        cascade="all, delete-orphan",
+        order_by="OfertaMedicion.orden",
+    )
+    descompuesto: Mapped[list["OfertaDescompuesto"]] = relationship(
+        back_populates="oferta",
+        cascade="all, delete-orphan",
+        order_by="OfertaDescompuesto.orden",
+    )
+
+
+class OfertaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """El estado de mediciones que aporta el PROVEEDOR para una línea.
+
+    Mismo paradigma que `presupuestos.LineaMedicion` —comentario, uds, largo,
+    ancho, alto, y el parcial como producto de lo informado— pero en su propia
+    tabla y no en la del emisor: son la medición del proveedor, que puede no
+    coincidir con la que se le pidió, y no deben tocar el presupuesto de
+    cliente. Al cerrar la oferta se vuelcan como líneas de medición de su
+    presupuesto-oferta.
+
+    Sin fórmulas a propósito: el catálogo de fórmulas es del emisor.
+
+    Sin `AutoriaMixin`, por el mismo motivo que `OfertaLinea`: esto lo rellena
+    el proveedor, que no es un usuario del sistema.
+    """
+
+    __tablename__ = "oferta_medicion"
+    __table_args__ = (
+        Index("ix_compras_oferta_medicion_oferta", "oferta_linea_id"),
+        {"schema": SCHEMA},
+    )
+
+    oferta_linea_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.oferta_linea.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    comentario: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    uds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    longitud: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    anchura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    altura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    parcial: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    oferta: Mapped[OfertaLinea] = relationship(back_populates="mediciones")
+
+
+class OfertaDescompuesto(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Cómo desglosa el proveedor su precio: mano de obra, materiales, medios.
+
+    Mismo paradigma que `presupuestos.PartidaDescomposicion` —código,
+    descripción, unidad, naturaleza, rendimiento, factor y precio— pero **sin
+    ninguna referencia al banco de precios**: el banco es del emisor, y dar de
+    alta conceptos desde aquí lo llenaría de fichas de sus proveedores. Todo
+    va como texto congelado, que es lo que el proveedor está declarando.
+
+    Si una línea tiene descompuesto, su `precio_ofertado` sale de la suma
+    (rendimiento × factor × precio), igual que una partida con descompuesto
+    propio en un presupuesto normal.
+
+    Sin `AutoriaMixin`, por el mismo motivo que `OfertaLinea`: lo rellena el
+    proveedor, que no es un usuario del sistema.
+    """
+
+    __tablename__ = "oferta_descompuesto"
+    __table_args__ = (
+        Index("ix_compras_oferta_descompuesto_oferta", "oferta_linea_id"),
+        {"schema": SCHEMA},
+    )
+
+    oferta_linea_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.oferta_linea.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    codigo: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False, default="")
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    naturaleza: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    rendimiento: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("1")
+    )
+    factor: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False, default=Decimal("1"))
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    oferta: Mapped[OfertaLinea] = relationship(back_populates="descompuesto")
 
 
 class AccesoToken(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):

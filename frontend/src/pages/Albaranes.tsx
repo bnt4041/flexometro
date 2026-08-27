@@ -6,7 +6,7 @@ import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip, formatoImporte 
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
 import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
-import type { AlbaranResumen, ObraResumen, Tercero } from '../lib/api'
+import type { AlbaranResumen, ObraResumen, PedidoResumen, Tercero } from '../lib/api'
 
 // El listado ya no pagina en el servidor: el `DataTable` pagina, ordena y
 // filtra en el navegador sobre este lote — 500 es el máximo que admite el
@@ -123,6 +123,8 @@ export function AlbaranCrear() {
   const [proveedorId, setProveedorId] = useState('')
   const [numeroProveedor, setNumeroProveedor] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
+  const [pedidos, setPedidos] = useState<PedidoResumen[]>([])
+  const [pedidoId, setPedidoId] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -139,6 +141,20 @@ export function AlbaranCrear() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
   }, [])
 
+  // Pedidos de este proveedor y obra, para poder decir de cuál viene esta
+  // entrega — opcional, se sigue pudiendo dar de alta un albarán directo.
+  useEffect(() => {
+    setPedidoId('')
+    if (!obraId || !proveedorId) {
+      setPedidos([])
+      return
+    }
+    void api.pedidos
+      .list({ obra_id: obraId, proveedor_id: proveedorId, limit: 100 })
+      .then((page) => setPedidos(page.items))
+      .catch(() => setPedidos([]))
+  }, [obraId, proveedorId])
+
   function cerrar() {
     navigate('/albaranes')
   }
@@ -151,6 +167,7 @@ export function AlbaranCrear() {
         proveedor_id: proveedorId,
         numero_proveedor: numeroProveedor || null,
         fecha,
+        pedido_id: pedidoId || null,
       })
       onCambio()
       navigate(`/albaranes/${albaran.id}`)
@@ -198,6 +215,24 @@ export function AlbaranCrear() {
                   value={numeroProveedor}
                   onChange={(e) => setNumeroProveedor(e.target.value)}
                 />
+              </Field>
+              <Field
+                label="De qué pedido viene"
+                hint={pedidos.length === 0 ? 'Sin pedidos abiertos con este proveedor en esta obra' : 'Opcional'}
+              >
+                <select
+                  className="select"
+                  value={pedidoId}
+                  onChange={(e) => setPedidoId(e.target.value)}
+                  disabled={pedidos.length === 0}
+                >
+                  <option value="">— Sin pedido —</option>
+                  {pedidos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.codigo}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label="Fecha">
                 <input

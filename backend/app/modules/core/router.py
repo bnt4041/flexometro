@@ -12,6 +12,7 @@ from app.modules.core import (
     ajustes_router,
     billing_router,
     creditos_router,
+    notificaciones_router,
     cuenta_router,
     diccionario_router,
     moneda_router,
@@ -315,3 +316,4 @@ router.include_router(traduccion_router.tenant_router)
 router.include_router(moneda_router.router)
 router.include_router(moneda_router.tenant_router)
 router.include_router(creditos_router.router)
+router.include_router(notificaciones_router.router)

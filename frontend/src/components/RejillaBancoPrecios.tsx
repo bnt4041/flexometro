@@ -728,6 +728,7 @@ export function RejillaBancoPrecios({
           ficheros={documentoIA}
           entidad="concepto"
           entidadId={filaParaSubir.current?.id ?? ''}
+          conversar={(ficheros, mensajes) => api.ia.documentoConversar(ficheros, mensajes)}
           onClose={() => setDocumentoIA(null)}
           onCambio={onCambio}
         />

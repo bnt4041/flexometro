@@ -8,6 +8,7 @@ import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
+import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_FACTURA, ETIQUETA_SITUACION_COBRO, api, descargar } from '../lib/api'
@@ -305,6 +306,35 @@ export function FacturaDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="factura" entidadId={id} />,
+    },
+    {
+      id: 'trazabilidad',
+      etiqueta: 'Trazabilidad',
+      icono: 'trazabilidad',
+      contenido: (
+        <Trazabilidad
+          origen={[
+            {
+              tipo: 'tercero',
+              etiqueta: factura.cliente_razon_social,
+              ruta: `/terceros/${factura.cliente_id}`,
+              estadoEtiqueta: 'Cliente',
+            },
+            ...(factura.certificacion_id
+              ? [
+                  {
+                    tipo: 'certificacion' as const,
+                    etiqueta: 'Certificación de origen',
+                    ruta: `/certificaciones/${factura.certificacion_id}`,
+                  },
+                ]
+              : []),
+          ]}
+          cargarAsociados={() =>
+            cargarAsociadosDeObra(factura.obra_id, { tipo: 'factura', id })
+          }
+        />
+      ),
     },
     {
       id: 'historial',

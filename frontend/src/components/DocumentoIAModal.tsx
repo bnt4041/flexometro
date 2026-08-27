@@ -30,16 +30,20 @@ function tipoDe(fichero: File): 'imagen' | 'pdf' | 'excel' | 'otro' {
  *  media conversación con el botón "+"; guardarlos en Documentos es un botón
  *  aparte, no algo que dispare la conversación.
  *
- *  Si se sabe sobre qué presupuesto se abrió (`presupuestoId`), la IA puede
- *  además terminar proponiendo un capítulo nuevo con lo que lea de los
- *  documentos — igual que "Ayuda con IA", nunca lo crea ella sola: la
- *  propuesta se enseña como tarjeta aparte y hay que confirmarla. */
+ *  Genérico a propósito ("IA en obra y certificaciones"): quien lo abre
+ *  (presupuesto, obra o una certificación en preparación) inyecta `conversar`
+ *  (qué endpoint habla con la IA) y, si hay algo que confirmar, `aplicarPropuesta`
+ *  (qué hacer con la propuesta) — este componente no sabe contra qué backend
+ *  habla ninguno de los dos, solo pinta el chat, el visor y la tarjeta de
+ *  propuesta según su `tipo`. Sin `aplicarPropuesta` la propuesta se enseña
+ *  de todos modos, pero sin botón para confirmarla. */
 export function DocumentoIAModal({
   ficheros: ficherosIniciales,
   entidad,
   entidadId,
-  presupuestoId,
-  partidaId,
+  conversar,
+  aplicarPropuesta,
+  resolverPartida,
   onClose,
   onGuardado,
   onCambio,
@@ -47,11 +51,19 @@ export function DocumentoIAModal({
   ficheros: File[]
   entidad: EntidadDocumento
   entidadId: string
-  presupuestoId?: string
-  // Fase 51c: si el documento se soltó sobre una partida ya existente, la
-  // IA además puede proponerle mediciones directamente en vez de solo
-  // crear capítulos nuevos — ver `proponer_mediciones_partida` en el backend.
-  partidaId?: string | null
+  conversar: (
+    ficheros: File[],
+    mensajes: { rol: 'user' | 'assistant'; contenido: string }[],
+  ) => Promise<{ respuesta: string; propuesta: PropuestaIA | null }>
+  // Si no se da, la propuesta se enseña de todos modos pero sin botón para
+  // confirmarla (p. ej. abierto fuera de contexto) — devuelve el mensaje de
+  // confirmación que se añade al chat.
+  aplicarPropuesta?: (propuesta: PropuestaIA) => Promise<string>
+  // Solo para `actualizar_mediciones_certificacion`: la propuesta solo trae
+  // el id de cada partida (no hay línea de certificación todavía de la que
+  // leer código/resumen) — quien abre el modal ya tiene la lista de
+  // partidas cargada y puede traducir el id a algo legible.
+  resolverPartida?: (partidaId: string) => string
   onClose: () => void
   onGuardado?: () => void
   onCambio?: () => void
@@ -120,11 +132,9 @@ export function DocumentoIAModal({
     setMensajes(historial)
     setEnviando(true)
     try {
-      const { respuesta, propuesta: nueva } = await api.ia.documentoConversar(
+      const { respuesta, propuesta: nueva } = await conversar(
         ficherosActuales,
         historial.map((m) => ({ rol: m.rol, contenido: m.contenido })),
-        presupuestoId,
-        partidaId ?? undefined,
       )
       setMensajes((actual) => [...actual, { rol: 'assistant', contenido: respuesta }])
       if (nueva) setPropuesta(nueva)
@@ -135,10 +145,13 @@ export function DocumentoIAModal({
     }
   }
 
-  // Se dispara sola en cuanto se abre, para que la IA diga qué es el
-  // documento sin que el usuario tenga que preguntarlo primero.
+  // Se dispara sola en cuanto se abre CON documentos, para que la IA diga
+  // qué son sin que el usuario tenga que preguntarlo primero. Si se abre
+  // vacía (entrada conversacional, "pedir a la IA" sin arrastrar nada antes),
+  // no hay nada que leer todavía — se espera al primer documento, que llega
+  // por `anadirFicheros`.
   useEffect(() => {
-    void enviarMensaje(PRIMER_MENSAJE, [])
+    if (ficherosIniciales.length > 0) void enviarMensaje(PRIMER_MENSAJE, [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -151,15 +164,21 @@ export function DocumentoIAModal({
 
   function anadirFicheros(nuevos: File[]) {
     if (nuevos.length === 0) return
+    const eraConversacionVacia = ficheros.length === 0
     const combinados = [...ficheros, ...nuevos]
     setFicheros(combinados)
     setActivo(ficheros.length) // salta al primero de los recién añadidos
     setGuardado(false)
     const nombres = nuevos.map((f) => f.name).join(', ')
+    // Si la conversación empezó vacía (sin documento todavía), este es el
+    // primer fichero: misma pregunta que el arranque normal, no "he añadido
+    // otro" — no había ninguno antes, aunque ya hubiera texto suelto.
     void enviarMensaje(
-      nuevos.length === 1
-        ? `He añadido otro documento: ${nombres}. ¿Qué es y qué contiene?`
-        : `He añadido más documentos: ${nombres}. ¿Qué son y qué contienen?`,
+      eraConversacionVacia
+        ? PRIMER_MENSAJE
+        : nuevos.length === 1
+          ? `He añadido otro documento: ${nombres}. ¿Qué es y qué contiene?`
+          : `He añadido más documentos: ${nombres}. ¿Qué son y qué contienen?`,
       mensajes,
       combinados,
     )
@@ -201,53 +220,11 @@ export function DocumentoIAModal({
   }
 
   async function confirmarPropuesta() {
-    if (!propuesta || !presupuestoId || confirmando) return
+    if (!propuesta || !aplicarPropuesta || confirmando) return
     setConfirmando(true)
     setError(null)
     try {
-      let mensaje: string
-      if (propuesta.tipo === 'crear_capitulos') {
-        // Precios reales del banco (Fase 51): un capítulo por llamada, en
-        // secuencia — mismo endpoint y mismo patrón que "Ayuda con IA"
-        // sobre un presupuesto, aquí resuelto desde el documento en vez de
-        // la conversación.
-        const hechos: string[] = []
-        for (const capitulo of propuesta.capitulos_propuestos) {
-          const resultado = await api.presupuestos.aplicarCapituloIA(presupuestoId, {
-            capitulo_resumen: capitulo.resumen,
-            partidas: capitulo.partidas,
-          })
-          hechos.push(
-            `«${resultado.resumen}» (${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'})`,
-          )
-        }
-        mensaje = `Hecho: capítulo${hechos.length === 1 ? '' : 's'} creado${hechos.length === 1 ? '' : 's'} ${hechos.join(', ')}.`
-      } else if (propuesta.tipo === 'anadir_mediciones_partida') {
-        if (!propuesta.partida_id) throw new Error('La propuesta no trae la partida de destino')
-        const creadas = await api.ia.mediciones.aplicarDirecto(
-          propuesta.partida_id,
-          propuesta.mediciones_propuestas.map(({ comentario, uds, longitud, anchura, altura }) => ({
-            comentario,
-            uds,
-            longitud,
-            anchura,
-            altura,
-          })),
-        )
-        mensaje = `Hecho: ${creadas.length} línea${creadas.length === 1 ? '' : 's'} de medición añadida${creadas.length === 1 ? '' : 's'} a la partida.`
-      } else {
-        // Un único endpoint atómico (capítulo + partidas + rastro en el
-        // historial) en vez de crear el capítulo y luego cada partida por
-        // separado: si algo falla a media lista no queda un capítulo
-        // huérfano, y el historial del presupuesto deja constancia de que
-        // fue la IA.
-        const resultado = await api.presupuestos.aplicarPropuestaIA(presupuestoId, {
-          capitulo_resumen: propuesta.capitulo_resumen || 'Importado de documento',
-          partidas: propuesta.partidas_propuestas,
-        })
-        mensaje = `Hecho: capítulo «${resultado.resumen}» creado con ${resultado.partidas} partida${resultado.partidas === 1 ? '' : 's'}.`
-      }
-
+      const mensaje = await aplicarPropuesta(propuesta)
       await guardarDocumentoSiHaceFalta()
       setPropuesta(null)
       setMensajes((actual) => [...actual, { rol: 'assistant', contenido: mensaje }])
@@ -273,11 +250,14 @@ export function DocumentoIAModal({
   return (
     <ModalPantalla
       title={
-        ficheros.length === 1
-          ? `Documento — ${ficheros[0].name}`
-          : `Documentos — ${ficheros.length} ficheros`
+        ficheros.length === 0
+          ? 'Preguntar a la IA'
+          : ficheros.length === 1
+            ? `Documento — ${ficheros[0].name}`
+            : `Documentos — ${ficheros.length} ficheros`
       }
       onClose={onClose}
+      elevado
     >
       <div className="documento-ia">
         <div className="documento-ia__panel">
@@ -302,7 +282,16 @@ export function DocumentoIAModal({
             </div>
           )}
           <div className="documento-ia__visor">
-            {tipoActivo === 'imagen' && urls[activo] ? (
+            {ficheros.length === 0 ? (
+              <div className="documento-ia__sin-visor">
+                <Sparkles size={40} aria-hidden="true" />
+                <p>Sin documento todavía</p>
+                <p className="muted">
+                  Escribe tu pregunta o instrucción directamente, o adjunta uno con «Añadir
+                  documento» si quieres que la IA lo lea — no hace falta las dos cosas.
+                </p>
+              </div>
+            ) : tipoActivo === 'imagen' && urls[activo] ? (
               <img src={urls[activo]!} alt={ficheroActivo.name} />
             ) : tipoActivo === 'pdf' && urls[activo] ? (
               <iframe src={urls[activo]!} title={ficheroActivo.name} />
@@ -407,6 +396,25 @@ export function DocumentoIAModal({
                     </tbody>
                   </table>
                 )
+              ) : propuesta.tipo === 'actualizar_mediciones_certificacion' ? (
+                propuesta.lineas_certificacion_propuestas.length > 0 && (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Partida</th>
+                        <th className="table__num">Medición acumulada propuesta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {propuesta.lineas_certificacion_propuestas.map((l, i) => (
+                        <tr key={i}>
+                          <td>{resolverPartida?.(l.partida_id) ?? l.partida_id}</td>
+                          <td className="table__num">{l.medicion_actual}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
               ) : (
                 propuesta.partidas_propuestas.length > 0 && (
                   <ul className="chat-ia__componentes">
@@ -418,7 +426,7 @@ export function DocumentoIAModal({
                   </ul>
                 )
               )}
-              {presupuestoId ? (
+              {aplicarPropuesta ? (
                 <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
                   <button
                     className="btn btn--sm"
@@ -428,7 +436,9 @@ export function DocumentoIAModal({
                     <Check size={14} aria-hidden="true" />
                     {propuesta.tipo === 'anadir_mediciones_partida'
                       ? 'Confirmar y añadir a la partida'
-                      : 'Confirmar y crear aquí'}
+                      : propuesta.tipo === 'actualizar_mediciones_certificacion'
+                        ? 'Confirmar y rellenar'
+                        : 'Confirmar y crear aquí'}
                   </button>
                   <button
                     className="btn btn--sm"
@@ -440,9 +450,7 @@ export function DocumentoIAModal({
                   </button>
                 </div>
               ) : (
-                <p className="muted">
-                  Abre este documento desde un presupuesto para poder confirmarlo.
-                </p>
+                <p className="muted">No se puede confirmar esta propuesta desde aquí.</p>
               )}
             </div>
           )}

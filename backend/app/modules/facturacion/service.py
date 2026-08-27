@@ -301,6 +301,97 @@ def importes_certificacion(certificacion: Certificacion) -> dict[str, Decimal]:
     }
 
 
+async def resumen_de_ventas(session: AsyncSession, obra_id: uuid.UUID) -> dict:
+    """Lo certificado y lo facturado en una obra, en dos consultas agregadas.
+
+    Existe porque el listado de certificaciones no lleva importes (salen de sus
+    líneas) y el cuadro de mandos los necesita: pedir el detalle de cada
+    certificación serían tantas peticiones como certificaciones.
+
+    Solo cuentan las facturas EMITIDAS. Una en borrador no se ha cobrado ni se
+    va a cobrar todavía, y sumarla daría una cifra de negocio falsa.
+    """
+    org_id = require_organization_id()
+
+    # Certificado a origen: la suma de los importes de período de todas las
+    # líneas. Cada certificación ya certifica solo su diferencia respecto a la
+    # anterior, así que sumarlas da el acumulado sin contar nada dos veces.
+    fila = (
+        await session.execute(
+            select(
+                func.coalesce(func.sum(CertificacionLinea.importe_periodo), 0),
+                func.count(func.distinct(Certificacion.id)),
+            )
+            .select_from(Certificacion)
+            .join(
+                CertificacionLinea,
+                CertificacionLinea.certificacion_id == Certificacion.id,
+                isouter=True,
+            )
+            .where(
+                Certificacion.obra_id == obra_id,
+                Certificacion.organization_id == org_id,
+            )
+        )
+    ).one()
+    certificado = redondear_precio(Decimal(fila[0]))
+
+    # La retención va por certificación, así que su porcentaje no se puede
+    # aplicar al total: se acumula una a una.
+    retenido = Decimal("0.00")
+    certificaciones = (
+        await session.execute(
+            select(Certificacion)
+            .options(selectinload(Certificacion.lineas))
+            .where(
+                Certificacion.obra_id == obra_id,
+                Certificacion.organization_id == org_id,
+            )
+        )
+    ).scalars()
+    for certificacion in certificaciones:
+        retenido += importes_certificacion(certificacion)["importe_retenido"]
+
+    facturas = (
+        await session.execute(
+            select(
+                func.coalesce(func.sum(Factura.base_imponible), 0),
+                func.coalesce(func.sum(Factura.total), 0),
+                func.count(Factura.id),
+            ).where(
+                Factura.obra_id == obra_id,
+                Factura.organization_id == org_id,
+                Factura.estado == EstadoFactura.EMITIDA,
+            )
+        )
+    ).one()
+
+    cobrado = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(Cobro.importe), 0))
+            .join(Factura, Factura.id == Cobro.factura_id)
+            .where(
+                Factura.obra_id == obra_id,
+                Factura.organization_id == org_id,
+                Factura.estado == EstadoFactura.EMITIDA,
+            )
+        )
+        or 0
+    )
+
+    facturado_total = Decimal(facturas[1])
+    return {
+        "certificado": certificado,
+        "retenido": redondear_precio(retenido),
+        "certificaciones": int(fila[1] or 0),
+        "facturado_base": Decimal(facturas[0]),
+        "facturado_total": facturado_total,
+        "facturas": int(facturas[2] or 0),
+        "cobrado": redondear_precio(cobrado),
+        "pendiente_de_cobro": redondear_precio(facturado_total - cobrado),
+    }
+
+
 async def certificacion_facturada(session: AsyncSession, certificacion_id: uuid.UUID) -> bool:
     org_id = require_organization_id()
     existe = await session.scalar(

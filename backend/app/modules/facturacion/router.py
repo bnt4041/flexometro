@@ -12,7 +12,7 @@ from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.facturacion import informes, service, ventas_concepto, webhook
+from app.modules.facturacion import ia_certificacion, informes, service, ventas_concepto, webhook
 from app.modules.facturacion.models import Certificacion, EstadoFactura, Factura
 from app.modules.facturacion.schemas import (
     AnularFactura,
@@ -29,6 +29,7 @@ from app.modules.facturacion.schemas import (
     FacturaSuelta,
     FacturaUpdate,
     GenerarDesdeCertificacion,
+    ResumenVentasObra,
 )
 from app.modules.presupuestos.schemas import VentasOut
 
@@ -61,6 +62,28 @@ async def _detalle_certificacion(session: AsyncSession, certificacion) -> Certif
         facturada=facturada,
         **importes,
     )
+
+
+# Prefijo /api/obras a propósito, igual que `costes_router` en compras: la URL
+# habla de lo que el usuario consulta, y el router vive aquí porque
+# `facturacion` es quien ve certificaciones y facturas. `obras` no podría
+# servirla: la dependencia va facturacion -> obras, no al revés.
+resumen_obra_router = APIRouter(
+    prefix="/api/obras", tags=["facturacion"], dependencies=[guard]
+)
+
+
+@resumen_obra_router.get("/{obra_id}/ventas", response_model=ResumenVentasObra)
+async def resumen_de_ventas(
+    obra_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _alcance: Alcance = Depends(require_permiso("facturacion", "ver")),
+) -> ResumenVentasObra:
+    from app.modules.obras.service import obtener_obra
+
+    if await obtener_obra(session, obra_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obra no encontrada")
+    return ResumenVentasObra(**await service.resumen_de_ventas(session, obra_id))
 
 
 @certificaciones_router.get("", response_model=Page[CertificacionOut])
@@ -467,6 +490,8 @@ async def ventas_de_concepto(
 
 router = APIRouter()
 router.include_router(certificaciones_router)
+router.include_router(resumen_obra_router)
+router.include_router(ia_certificacion.ia_certificacion_router)
 router.include_router(facturas_router)
 router.include_router(cobros_router)
 router.include_router(ventas_router)
