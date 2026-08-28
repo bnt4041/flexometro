@@ -15,7 +15,13 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.compras import costes, oferta_service, service, solicitud_service
-from app.modules.compras.models import Albaran, OfertaLinea, SolicitudDestinatario, SolicitudLinea
+from app.modules.compras.models import (
+    Albaran,
+    OfertaLinea,
+    SolicitudDestinatario,
+    SolicitudLinea,
+    TipoAlbaran,
+)
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.compras.factura_recibida_router import (
@@ -69,6 +75,7 @@ solicitudes_router = APIRouter(
 async def listar(
     obra_id: uuid.UUID | None = None,
     proveedor_id: uuid.UUID | None = None,
+    tipo: TipoAlbaran | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -79,6 +86,7 @@ async def listar(
         session,
         obra_id=obra_id,
         proveedor_id=proveedor_id,
+        tipo=tipo,
         limit=limit,
         offset=offset,
         creado_por_subject=principal.subject if alcance == Alcance.PROPIOS else None,
@@ -87,7 +95,7 @@ async def listar(
     items = [
         AlbaranResumen(
             **AlbaranOut.model_validate(albaran).model_dump(),
-            proveedor_razon_social=razon_social,
+            tercero_razon_social=razon_social,
             total=totales.get(albaran.id, Decimal("0.00")),
         )
         for albaran, razon_social in filas
@@ -120,7 +128,7 @@ async def crear(
     albaran, razon_social = resultado
     return AlbaranDetalle(
         **AlbaranOut.model_validate(albaran).model_dump(),
-        proveedor_razon_social=razon_social,
+        tercero_razon_social=razon_social,
         lineas=[AlbaranLineaOut.model_validate(l) for l in albaran.lineas],
         total=service.total_de(albaran.lineas),
     )
@@ -147,7 +155,7 @@ async def detalle(
     albaran, razon_social = await _albaran_propio(session, albaran_id, alcance, principal)
     return AlbaranDetalle(
         **AlbaranOut.model_validate(albaran).model_dump(),
-        proveedor_razon_social=razon_social,
+        tercero_razon_social=razon_social,
         lineas=[AlbaranLineaOut.model_validate(l) for l in albaran.lineas],
         total=service.total_de(albaran.lineas),
     )

@@ -2,9 +2,9 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.modules.compras.models import EstadoPedido
+from app.modules.compras.models import EstadoPedido, TipoPedido
 
 
 class PedidoLineaBase(BaseModel):
@@ -48,20 +48,37 @@ class PedidoLineaOut(BaseModel):
 
 
 class PedidoBase(BaseModel):
+    tipo: TipoPedido = TipoPedido.PROVEEDOR
     obra_id: uuid.UUID
-    proveedor_id: uuid.UUID
+    proveedor_id: uuid.UUID | None = None
+    cliente_id: uuid.UUID | None = None
     fecha: date
     fecha_entrega_prevista: date | None = None
     estado: EstadoPedido = EstadoPedido.PENDIENTE
     notas: str | None = None
 
+    @model_validator(mode="after")
+    def _tercero_segun_tipo(self) -> "PedidoBase":
+        if self.tipo == TipoPedido.CLIENTE:
+            if self.cliente_id is None or self.proveedor_id is not None:
+                raise ValueError(
+                    "Un pedido de cliente necesita cliente_id, y no proveedor_id"
+                )
+        else:
+            if self.proveedor_id is None or self.cliente_id is not None:
+                raise ValueError(
+                    "Un pedido a proveedor necesita proveedor_id, y no cliente_id"
+                )
+        return self
+
 
 class PedidoCreate(PedidoBase):
     codigo: str | None = Field(default=None, max_length=32)
     # De qué solicitud/oferta viene, si viene de ahí (vía "confirmar oferta
-    # ganadora"). Si se dan `lineas` explícitas, mandan ellas siempre; si no
-    # se dan y `origen_oferta_presupuesto_id` sí, se copian de las partidas
-    # de esa oferta.
+    # ganadora") — solo aplica a `tipo=proveedor`. Si se dan `lineas`
+    # explícitas, mandan ellas siempre; si no se dan y
+    # `origen_oferta_presupuesto_id` sí, se copian de las partidas de esa
+    # oferta (o del presupuesto de cliente, en un pedido de cliente).
     origen_solicitud_id: uuid.UUID | None = None
     origen_oferta_presupuesto_id: uuid.UUID | None = None
     lineas: list[PedidoLineaCreate] = Field(default_factory=list)
@@ -89,11 +106,12 @@ class PedidoOut(PedidoBase):
 
 
 class PedidoResumen(PedidoOut):
-    proveedor_razon_social: str
+    # El cliente o el proveedor, según `tipo`.
+    tercero_razon_social: str
     total: Decimal
 
 
 class PedidoDetalle(PedidoOut):
-    proveedor_razon_social: str
+    tercero_razon_social: str
     lineas: list[PedidoLineaOut] = Field(default_factory=list)
     total: Decimal = Decimal("0.00")

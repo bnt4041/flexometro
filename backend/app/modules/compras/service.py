@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.core.numeracion import siguiente_referencia, siguiente_referencia_libre
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
-from app.modules.compras.models import Albaran, AlbaranLinea
+from app.modules.compras.models import Albaran, AlbaranLinea, TipoAlbaran
 from app.modules.compras.schemas import (
     AlbaranCreate,
     AlbaranLineaCreate,
@@ -89,6 +89,24 @@ async def _validar_proveedor(session: AsyncSession, proveedor_id: uuid.UUID) -> 
         raise ProveedorInvalido("El tercero indicado no tiene el rol de proveedor")
 
 
+async def _validar_cliente(session: AsyncSession, cliente_id: uuid.UUID) -> None:
+    """Mismo criterio que `_validar_proveedor`, para un pedido de cliente
+    (`Pedido.tipo == 'cliente'`)."""
+    from app.modules.terceros.models import Tercero
+
+    org_id = require_organization_id()
+    fila = await session.execute(
+        select(Tercero.es_cliente).where(
+            Tercero.id == cliente_id, Tercero.organization_id == org_id
+        )
+    )
+    resultado = fila.first()
+    if resultado is None:
+        raise ProveedorInvalido("El cliente indicado no existe en esta organización")
+    if not resultado[0]:
+        raise ProveedorInvalido("El tercero indicado no tiene el rol de cliente")
+
+
 async def _datos_linea(
     session: AsyncSession, datos: AlbaranLineaCreate
 ) -> tuple[str, str, Decimal]:
@@ -145,9 +163,14 @@ def _nueva_linea(org_id: uuid.UUID, albaran_id: uuid.UUID, datos: AlbaranLineaCr
 async def crear_albaran(session: AsyncSession, datos: AlbaranCreate) -> Albaran:
     org_id = require_organization_id()
     await _validar_obra(session, datos.obra_id)
-    await _validar_proveedor(session, datos.proveedor_id)
-    if datos.pedido_id is not None:
-        await _validar_pedido(session, datos.pedido_id, datos.obra_id, datos.proveedor_id)
+    if datos.tipo == TipoAlbaran.CLIENTE:
+        assert datos.cliente_id is not None  # ya garantizado por el validador del schema
+        await _validar_cliente(session, datos.cliente_id)
+    else:
+        assert datos.proveedor_id is not None
+        await _validar_proveedor(session, datos.proveedor_id)
+        if datos.pedido_id is not None:
+            await _validar_pedido(session, datos.pedido_id, datos.obra_id, datos.proveedor_id)
 
     async def _existe(codigo: str) -> bool:
         return (
@@ -190,6 +213,7 @@ async def listar_albaranes(
     *,
     obra_id: uuid.UUID | None = None,
     proveedor_id: uuid.UUID | None = None,
+    tipo: TipoAlbaran | None = None,
     limit: int = 50,
     offset: int = 0,
     creado_por_subject: str | None = None,
@@ -199,13 +223,15 @@ async def listar_albaranes(
     org_id = require_organization_id()
     base = (
         select(Albaran, Tercero.razon_social)
-        .join(Tercero, Tercero.id == Albaran.proveedor_id)
+        .join(Tercero, Tercero.id == func.coalesce(Albaran.cliente_id, Albaran.proveedor_id))
         .where(Albaran.organization_id == org_id)
     )
     if obra_id is not None:
         base = base.where(Albaran.obra_id == obra_id)
     if proveedor_id is not None:
         base = base.where(Albaran.proveedor_id == proveedor_id)
+    if tipo is not None:
+        base = base.where(Albaran.tipo == tipo)
     if creado_por_subject is not None:
         base = base.where(Albaran.creado_por_subject == creado_por_subject)
 
@@ -227,7 +253,7 @@ async def obtener_albaran(
     fila = (
         await session.execute(
             select(Albaran, Tercero.razon_social)
-            .join(Tercero, Tercero.id == Albaran.proveedor_id)
+            .join(Tercero, Tercero.id == func.coalesce(Albaran.cliente_id, Albaran.proveedor_id))
             .options(selectinload(Albaran.lineas))
             .where(Albaran.id == albaran_id, Albaran.organization_id == org_id)
         )

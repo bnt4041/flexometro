@@ -16,7 +16,13 @@ SPEC = ModuleSpec(
     depends_on=("terceros",),
     tipo_documento_numeracion="presupuesto",
     nav=(
-        NavItem(label="Banco de precios", path="/banco-precios", icon="layers"),
-        NavItem(label="Presupuestos", path="/presupuestos", icon="calculator"),
+        # El banco de precios es un recurso de toda la cuenta, no de un
+        # cliente o proveedor concreto — vive en la sección "Organización".
+        NavItem(label="Banco de precios", path="/banco-precios", icon="layers", section="Organización"),
+        # El presupuesto es lo que se le hace a un cliente — vive en
+        # "Clientes" junto a sus pedidos, contratos, certificaciones y
+        # facturas (ver `facturacion/__init__.py`, que es el módulo dueño de
+        # esa sección).
+        NavItem(label="Presupuestos", path="/presupuestos", icon="calculator", section="Clientes"),
     ),
 )

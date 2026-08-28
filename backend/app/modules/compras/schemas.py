@@ -2,10 +2,10 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums import TipoIVA
-from app.modules.compras.models import EstadoAlbaran, EstadoFacturaRecibida
+from app.modules.compras.models import EstadoAlbaran, EstadoFacturaRecibida, TipoAlbaran
 
 
 class AlbaranLineaBase(BaseModel):
@@ -51,8 +51,10 @@ class AlbaranLineaOut(BaseModel):
 
 
 class AlbaranBase(BaseModel):
+    tipo: TipoAlbaran = TipoAlbaran.PROVEEDOR
     obra_id: uuid.UUID
-    proveedor_id: uuid.UUID
+    proveedor_id: uuid.UUID | None = None
+    cliente_id: uuid.UUID | None = None
     numero_proveedor: str | None = Field(default=None, max_length=60)
     fecha: date
     estado: EstadoAlbaran = EstadoAlbaran.BORRADOR
@@ -60,6 +62,20 @@ class AlbaranBase(BaseModel):
     # De qué pedido viene esta entrega — opcional, se puede seguir dando de
     # alta un albarán directo, sin pedido de por medio.
     pedido_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _tercero_segun_tipo(self) -> "AlbaranBase":
+        if self.tipo == TipoAlbaran.CLIENTE:
+            if self.cliente_id is None or self.proveedor_id is not None:
+                raise ValueError(
+                    "Un albarán de cliente necesita cliente_id, y no proveedor_id"
+                )
+        else:
+            if self.proveedor_id is None or self.cliente_id is not None:
+                raise ValueError(
+                    "Un albarán de proveedor necesita proveedor_id, y no cliente_id"
+                )
+        return self
 
 
 class AlbaranCreate(AlbaranBase):
@@ -88,12 +104,12 @@ class AlbaranOut(AlbaranBase):
 
 
 class AlbaranResumen(AlbaranOut):
-    proveedor_razon_social: str
+    tercero_razon_social: str
     total: Decimal
 
 
 class AlbaranDetalle(AlbaranOut):
-    proveedor_razon_social: str
+    tercero_razon_social: str
     lineas: list[AlbaranLineaOut] = Field(default_factory=list)
     total: Decimal = Decimal("0.00")
 

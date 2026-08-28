@@ -16,7 +16,7 @@ from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.compras import pedido_service as service
 from app.modules.compras import service as compras_service
-from app.modules.compras.models import Pedido
+from app.modules.compras.models import Pedido, TipoPedido
 from app.modules.compras.pedido_schemas import (
     PedidoCreate,
     PedidoDetalle,
@@ -42,6 +42,7 @@ pedido_lineas_router = APIRouter(
 async def listar(
     obra_id: uuid.UUID | None = None,
     proveedor_id: uuid.UUID | None = None,
+    tipo: TipoPedido | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -52,6 +53,7 @@ async def listar(
         session,
         obra_id=obra_id,
         proveedor_id=proveedor_id,
+        tipo=tipo,
         limit=limit,
         offset=offset,
         creado_por_subject=principal.subject if alcance == Alcance.PROPIOS else None,
@@ -60,7 +62,7 @@ async def listar(
     items = [
         PedidoResumen(
             **PedidoOut.model_validate(pedido).model_dump(),
-            proveedor_razon_social=razon_social,
+            tercero_razon_social=razon_social,
             total=totales.get(pedido.id, Decimal("0.00")),
         )
         for pedido, razon_social in filas
@@ -71,7 +73,7 @@ async def listar(
 def _detalle_de(pedido: Pedido, razon_social: str) -> PedidoDetalle:
     return PedidoDetalle(
         **PedidoOut.model_validate(pedido).model_dump(),
-        proveedor_razon_social=razon_social,
+        tercero_razon_social=razon_social,
         lineas=[PedidoLineaOut.model_validate(l) for l in pedido.lineas],
         total=service.total_de(pedido.lineas),
     )

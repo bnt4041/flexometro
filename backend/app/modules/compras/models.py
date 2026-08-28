@@ -38,21 +38,35 @@ class EstadoAlbaran(StrEnum):
     FACTURADO = "facturado"
 
 
+class TipoAlbaran(StrEnum):
+    CLIENTE = "cliente"
+    PROVEEDOR = "proveedor"
+
+
 class Albaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
-    """Un albarán de proveedor recibido en una obra."""
+    """Un albarán — de proveedor (material recibido en obra) o de cliente
+    (lo entregado/ejecutado que se le hace llegar), según `tipo`. Mismo
+    objeto con `tipo`, igual que `compras.Pedido`/`contratos.Contrato`."""
 
     __tablename__ = "albaran"
     __table_args__ = (
         UniqueConstraint("organization_id", "codigo", name="albaran_codigo_unique"),
         Index("ix_compras_albaran_obra", "obra_id"),
         Index("ix_compras_albaran_proveedor", "proveedor_id"),
+        Index("ix_compras_albaran_cliente", "cliente_id"),
         Index("ix_compras_albaran_pedido", "pedido_id"),
         {"schema": SCHEMA},
     )
 
     codigo: Mapped[str] = mapped_column(String(32), nullable=False)
-    # El número que trae el propio albarán del proveedor; no es el mismo
-    # concepto que `codigo`, que es la referencia interna correlativa.
+    tipo: Mapped[TipoAlbaran] = mapped_column(
+        enum_column(TipoAlbaran, "tipo_albaran"),
+        nullable=False,
+        default=TipoAlbaran.PROVEEDOR,
+    )
+    # El número que trae el albarán de la OTRA parte (el del proveedor, o el
+    # que nos dé el cliente de acuse de recibo) — no es el mismo concepto que
+    # `codigo`, que es siempre la referencia interna correlativa.
     numero_proveedor: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
     obra_id: Mapped[uuid.UUID] = mapped_column(
@@ -60,10 +74,16 @@ class Albaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
         ForeignKey("obras.obra.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    proveedor_id: Mapped[uuid.UUID] = mapped_column(
+    # Uno de los dos, según `tipo` — validado en el schema, no aquí.
+    proveedor_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
+    )
+    cliente_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=True,
     )
 
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
@@ -143,14 +163,27 @@ class EstadoPedido(StrEnum):
     CANCELADO = "cancelado"
 
 
-class Pedido(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
-    """Una orden de compra en firme a un proveedor.
+class TipoPedido(StrEnum):
+    CLIENTE = "cliente"
+    PROVEEDOR = "proveedor"
 
-    Distinto de `SolicitudPrecios` (que es solo pedir precio, comparar
-    ofertas) y de `Albaran` (que es lo que entra físicamente en obra): el
-    pedido es el paso intermedio, "esto es lo que se le encarga", tanto si
+
+class Pedido(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
+    """Un pedido en firme — a un proveedor (orden de compra) o de un cliente
+    (su encargo), según `tipo`. Mismo objeto con `tipo`, igual que
+    `contratos.Contrato`.
+
+    De proveedor: distinto de `SolicitudPrecios` (que es solo pedir precio,
+    comparar ofertas) y de `Albaran` (que es lo que entra físicamente en
+    obra) — es el paso intermedio, "esto es lo que se le encarga", tanto si
     viene de confirmar la oferta ganadora de una solicitud (`origen_*`
     rellenos) como si se hace directo a un proveedor conocido (ambos NULL).
+
+    De cliente: lo que el cliente encarga, normalmente antes o junto con el
+    contrato que lo formaliza — `origen_oferta_presupuesto_id` aquí apunta,
+    si lo hay, al presupuesto de CLIENTE ya aprobado, no a una oferta de
+    proveedor; `origen_solicitud_id` no aplica (es un concepto de compras) y
+    se queda NULL.
     """
 
     __tablename__ = "pedido"
@@ -158,28 +191,45 @@ class Pedido(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixi
         UniqueConstraint("organization_id", "codigo", name="pedido_codigo_unique"),
         Index("ix_compras_pedido_obra", "obra_id"),
         Index("ix_compras_pedido_proveedor", "proveedor_id"),
+        Index("ix_compras_pedido_cliente", "cliente_id"),
         {"schema": SCHEMA},
     )
 
     codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    tipo: Mapped[TipoPedido] = mapped_column(
+        enum_column(TipoPedido, "tipo_pedido"),
+        nullable=False,
+        default=TipoPedido.PROVEEDOR,
+    )
     obra_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("obras.obra.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    proveedor_id: Mapped[uuid.UUID] = mapped_column(
+    # Uno de los dos, según `tipo` — validado en el schema, no aquí (mismo
+    # criterio que `contratos.Contrato.cliente_id`/`proveedor_id`).
+    proveedor_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
+    )
+    cliente_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("terceros.tercero.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     # De qué solicitud de precios / oferta ganadora viene, si viene de ahí —
-    # SET NULL: borrar la solicitud o la oferta no borra el pedido ya hecho,
-    # solo pierde el rastro de dónde salió.
+    # solo aplica a `tipo=proveedor`. SET NULL: borrar la solicitud o la
+    # oferta no borra el pedido ya hecho, solo pierde el rastro de dónde salió.
     origen_solicitud_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.solicitud_precios.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # De proveedor: la oferta ganadora. De cliente: el presupuesto ya
+    # aprobado del que sale el encargo. Mismo campo, distinto significado
+    # según `tipo` — evita duplicar una columna que en los dos casos es "el
+    # presupuesto detrás de este pedido".
     origen_oferta_presupuesto_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("presupuestos.presupuesto.id", ondelete="SET NULL"),

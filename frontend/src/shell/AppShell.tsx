@@ -26,6 +26,42 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
   const { principal, modules, salir, cambiarOrganizacion } = useWorkspace()
   const active = modules.filter((m) => m.is_active && m.nav.length > 0)
+
+  // Cada `NavItem` cae en la sección de su propio módulo (`module.name`)
+  // salvo que declare `item.section`, en cuyo caso se cuelga de esa cabecera
+  // en su lugar — así un mismo objeto (un pedido, un contrato) puede tener
+  // un atajo tanto en "Compras" como en "Clientes" sin duplicar el módulo.
+  //
+  // Dos pasadas, a propósito: la primera fija un grupo por cada módulo activo
+  // en SU orden de registro (con ese módulo como dueño del engranaje de
+  // ajustes, si numera algo) — así la posición y el engranaje de una sección
+  // no dependen de qué módulo llega antes al recorrer la navegación, solo de
+  // cuál es su dueño real. La segunda reparte cada `NavItem` (propio o
+  // prestado) en la sección que le toque.
+  type ModuloActivo = (typeof active)[number]
+  const gruposPorTitulo = new Map<
+    string,
+    { titulo: string; items: { item: ModuloActivo['nav'][number]; codigoModulo: string }[]; moduloAjustes: ModuloActivo | null }
+  >()
+  for (const module of active) {
+    if (!gruposPorTitulo.has(module.name)) {
+      gruposPorTitulo.set(module.name, {
+        titulo: module.name,
+        items: [],
+        moduloAjustes: module.tipo_documento_numeracion !== null ? module : null,
+      })
+    }
+  }
+  for (const module of active) {
+    for (const item of module.nav) {
+      const titulo = item.section ?? module.name
+      if (!gruposPorTitulo.has(titulo)) {
+        gruposPorTitulo.set(titulo, { titulo, items: [], moduloAjustes: null })
+      }
+      gruposPorTitulo.get(titulo)!.items.push({ item, codigoModulo: module.code })
+    }
+  }
+  const grupos = [...gruposPorTitulo.values()].filter((g) => g.items.length > 0)
   const varias = (principal?.organizaciones.length ?? 0) > 1
   const esSuperadmin = principal?.roles.includes('superadmin') ?? false
   const esAdminOrganizacion =
@@ -60,25 +96,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           <img src={logoOscuro} alt="Flexómetro" className="brand__mark" />
         </div>
         <nav className="nav">
-          {active.map((module) => (
-            <div key={module.code}>
+          {grupos.map((grupo) => (
+            <div key={grupo.titulo}>
               <div className="nav__group-label">
-                {module.name}
-                {esAdminOrganizacion && module.tipo_documento_numeracion !== null && (
-                  <Tooltip texto={t('nav.ajustesDe', { modulo: module.name })}>
+                {grupo.titulo}
+                {esAdminOrganizacion && grupo.moduloAjustes && (
+                  <Tooltip texto={t('nav.ajustesDe', { modulo: grupo.titulo })}>
                     <NavLink
-                      to={`/ajustes/modulo/${module.code}`}
+                      to={`/ajustes/modulo/${grupo.moduloAjustes.code}`}
                       className="nav__group-ajustes"
-                      aria-label={t('nav.ajustesDe', { modulo: module.name })}
+                      aria-label={t('nav.ajustesDe', { modulo: grupo.titulo })}
                     >
                       <Settings size={14} aria-hidden="true" />
                     </NavLink>
                   </Tooltip>
                 )}
               </div>
-              {module.nav.map((item) => (
+              {grupo.items.map(({ item, codigoModulo }) => (
                 <NavLink
-                  key={item.path}
+                  key={`${codigoModulo}-${item.path}`}
                   to={item.path}
                   className={({ isActive }) =>
                     isActive ? 'nav__link nav__link--active' : 'nav__link'

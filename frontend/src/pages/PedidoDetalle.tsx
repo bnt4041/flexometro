@@ -18,7 +18,7 @@ import {
   Tooltip,
   formatoImporte,
 } from '../components/ui'
-import { ETIQUETA_ESTADO_PEDIDO, api } from '../lib/api'
+import { ETIQUETA_ESTADO_PEDIDO, ETIQUETA_TIPO_PEDIDO, api } from '../lib/api'
 import type {
   Concepto,
   EstadoPedido,
@@ -97,7 +97,7 @@ export function PedidoDetalle() {
               {' '}
               ·{' '}
               <Link to={`/presupuestos/${pedido.origen_oferta_presupuesto_id}`}>
-                desde oferta
+                {pedido.tipo === 'proveedor' ? 'desde oferta' : 'desde presupuesto'}
               </Link>
             </>
           )}
@@ -136,7 +136,9 @@ export function PedidoDetalle() {
 
       <div className="table-wrap">
         {pedido.lineas.length === 0 ? (
-          <EmptyState title="Sin líneas">Añade lo que se le encarga al proveedor.</EmptyState>
+          <EmptyState title="Sin líneas">
+            Añade lo que se encarga {pedido.tipo === 'proveedor' ? 'al proveedor' : 'del cliente'}.
+          </EmptyState>
         ) : (
           <table className="table">
             <thead>
@@ -229,15 +231,15 @@ export function PedidoDetalle() {
           origen={[
             {
               tipo: 'tercero',
-              etiqueta: pedido.proveedor_razon_social,
-              ruta: `/terceros/${pedido.proveedor_id}`,
-              estadoEtiqueta: 'Proveedor',
+              etiqueta: pedido.tercero_razon_social,
+              ruta: `/terceros/${pedido.cliente_id ?? pedido.proveedor_id}`,
+              estadoEtiqueta: ETIQUETA_TIPO_PEDIDO[pedido.tipo],
             },
             ...(pedido.origen_oferta_presupuesto_id
               ? [
                   {
                     tipo: 'presupuesto' as const,
-                    etiqueta: 'Oferta ganadora',
+                    etiqueta: pedido.tipo === 'proveedor' ? 'Oferta ganadora' : 'Presupuesto de origen',
                     ruta: `/presupuestos/${pedido.origen_oferta_presupuesto_id}`,
                   },
                 ]
@@ -261,7 +263,7 @@ export function PedidoDetalle() {
     <FichaDetalle
       titulo={
         <>
-          {pedido.proveedor_razon_social} <span className="table__code">{pedido.codigo}</span>
+          {pedido.tercero_razon_social} <span className="table__code">{pedido.codigo}</span>
         </>
       }
       pestanas={pestanas}

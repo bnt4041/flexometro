@@ -43,6 +43,7 @@ class NavItemOut(BaseModel):
     label: str
     path: str
     icon: str
+    section: str | None = None
 
 
 class ModuleOut(BaseModel):
@@ -182,7 +183,10 @@ async def list_modules(
             depends_on=list(spec.depends_on),
             always_active=spec.always_active,
             is_active=spec.code in active,
-            nav=[NavItemOut(label=n.label, path=n.path, icon=n.icon) for n in spec.nav],
+            nav=[
+                NavItemOut(label=n.label, path=n.path, icon=n.icon, section=n.section)
+                for n in spec.nav
+            ],
             tipo_documento_numeracion=spec.tipo_documento_numeracion,
         )
         for spec in registry.all()

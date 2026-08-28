@@ -30,6 +30,7 @@ import { PresupuestosObra } from '../components/PresupuestosObra'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
+import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_OBRA, api } from '../lib/api'
 import type {
@@ -514,6 +515,23 @@ export function ObraDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="obra" entidadId={id} />,
+    },
+    {
+      id: 'trazabilidad',
+      etiqueta: 'Trazabilidad',
+      icono: 'trazabilidad',
+      contenido: (
+        <Trazabilidad
+          origen={vinculos.map((v) => ({
+            tipo: 'presupuesto' as const,
+            etiqueta: `${v.presupuesto_codigo} · ${v.presupuesto_nombre}`,
+            ruta: `/presupuestos/${v.presupuesto_id}`,
+            fecha: v.fecha_vinculacion,
+            estadoEtiqueta: v.tipo === 'principal' ? 'Principal' : 'Anexo',
+          }))}
+          cargarAsociados={() => cargarAsociadosDeObra(id, undefined, 'presupuesto')}
+        />
+      ),
     },
     {
       id: 'historial',

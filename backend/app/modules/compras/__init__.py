@@ -15,6 +15,10 @@ SPEC = ModuleSpec(
     # solo hace falta navegación a lo que es propio de este módulo.
     nav=(
         NavItem(label="Pedidos", path="/pedidos", icon="truck"),
+        # Un pedido puede ser a proveedor o de cliente (`Pedido.tipo`) — el
+        # mismo listado, con un atajo también desde "Clientes" para quien
+        # busca ahí primero.
+        NavItem(label="Pedidos", path="/pedidos", icon="truck", section="Clientes"),
         NavItem(label="Albaranes", path="/albaranes", icon="truck"),
         NavItem(label="Facturas recibidas", path="/facturas-recibidas", icon="receipt"),
         # Las ofertas que devuelven los proveedores al responder una

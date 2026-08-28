@@ -5,8 +5,8 @@ import { Plus, X } from 'lucide-react'
 import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
-import { ETIQUETA_ESTADO_PEDIDO, api } from '../lib/api'
-import type { ObraResumen, PedidoResumen, PresupuestoResumen, Tercero } from '../lib/api'
+import { ETIQUETA_ESTADO_PEDIDO, ETIQUETA_TIPO_PEDIDO, api } from '../lib/api'
+import type { ObraResumen, PedidoResumen, PresupuestoResumen, Tercero, TipoPedido } from '../lib/api'
 
 // El listado ya no pagina en el servidor: el `DataTable` pagina, ordena y
 // filtra en el navegador sobre este lote — 500 es el máximo que admite el
@@ -45,15 +45,24 @@ export function Pedidos() {
     () => [
       { id: 'codigo', encabezado: 'Código', accessor: (p) => p.codigo, anchoInicial: 110 },
       {
-        id: 'proveedor',
-        encabezado: 'Proveedor',
-        accessor: (p) => p.proveedor_razon_social,
+        id: 'tipo',
+        encabezado: 'Tipo',
+        accessor: (p) => p.tipo,
+        render: (p) => ETIQUETA_TIPO_PEDIDO[p.tipo],
+        tipo: 'select',
+        opciones: Object.entries(ETIQUETA_TIPO_PEDIDO).map(([value, label]) => ({ value, label })),
+        anchoInicial: 100,
+      },
+      {
+        id: 'tercero',
+        encabezado: 'Cliente / proveedor',
+        accessor: (p) => p.tercero_razon_social,
         render: (p) => (
           <Link className="table__link" to={`${p.id}`}>
-            {p.proveedor_razon_social}
+            {p.tercero_razon_social}
           </Link>
         ),
-        anchoInicial: 260,
+        anchoInicial: 240,
       },
       { id: 'fecha', encabezado: 'Fecha', accessor: (p) => p.fecha, tipo: 'fecha', anchoInicial: 140 },
       {
@@ -87,11 +96,10 @@ export function Pedidos() {
         <div>
           <h1 className="page-title">Pedidos</h1>
           <p className="page-lead">
-            Órdenes de compra en firme a proveedor — desde confirmar una oferta ganadora, o
-            directas.
+            Lo que se encarga en firme — a un proveedor (orden de compra) o de un cliente.
           </p>
         </div>
-        <Tooltip texto="Crear un pedido a proveedor">
+        <Tooltip texto="Crear un pedido">
           <Link className="btn btn--primary" to="nuevo">
             <Plus size={16} aria-hidden="true" />
             Nuevo pedido
@@ -122,43 +130,56 @@ export function PedidoCrear() {
   const navigate = useNavigate()
   const { onCambio } = useContextoPedidos()
   const [obras, setObras] = useState<ObraResumen[]>([])
-  const [proveedores, setProveedores] = useState<Tercero[]>([])
+  const [tipo, setTipo] = useState<TipoPedido>('proveedor')
+  const [terceros, setTerceros] = useState<Tercero[]>([])
   const [obraId, setObraId] = useState('')
-  const [proveedorId, setProveedorId] = useState('')
+  const [terceroId, setTerceroId] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   const [fechaEntrega, setFechaEntrega] = useState('')
-  const [ofertas, setOfertas] = useState<PresupuestoResumen[]>([])
-  const [ofertaId, setOfertaId] = useState('')
+  const [presupuestos, setPresupuestos] = useState<PresupuestoResumen[]>([])
+  const [presupuestoId, setPresupuestoId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
-    void Promise.all([
-      api.obras.list({ limit: 200 }),
-      api.terceros.list({ rol: 'proveedor', activo: true, limit: 500 }),
-    ])
-      .then(([obrasPage, provPage]) => {
-        setObras(obrasPage.items)
-        setProveedores(provPage.items)
-        if (obrasPage.items.length > 0) setObraId(obrasPage.items[0].id)
-        if (provPage.items.length > 0) setProveedorId(provPage.items[0].id)
+    void api.obras
+      .list({ limit: 200 })
+      .then((page) => {
+        setObras(page.items)
+        if (page.items.length > 0) setObraId(page.items[0].id)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
   }, [])
 
-  // Ofertas ganadoras disponibles de este proveedor — para generar el
-  // pedido confirmando una en vez de escribir las líneas a mano.
   useEffect(() => {
-    setOfertaId('')
-    if (!proveedorId) {
-      setOfertas([])
+    setTerceroId('')
+    void api.terceros
+      .list({ rol: tipo, activo: true, limit: 500 })
+      .then((page) => {
+        setTerceros(page.items)
+        if (page.items.length > 0) setTerceroId(page.items[0].id)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
+  }, [tipo])
+
+  // De proveedor: sus ofertas ganadoras (presupuestos tipo=proveedor), para
+  // generar el pedido confirmando una en vez de escribir las líneas a mano.
+  // De cliente: sus presupuestos aprobados, por si el pedido viene de uno ya
+  // cerrado — mismo mecanismo, el otro lado del negocio.
+  useEffect(() => {
+    setPresupuestoId('')
+    if (!terceroId) {
+      setPresupuestos([])
       return
     }
     void api.presupuestos
-      .list({ tipo: 'proveedor', limit: 200 })
-      .then((page) => setOfertas(page.items.filter((p) => p.proveedor_id === proveedorId)))
-      .catch(() => setOfertas([]))
-  }, [proveedorId])
+      .list({ tipo, limit: 200 })
+      .then((page) => {
+        const campo = tipo === 'proveedor' ? 'proveedor_id' : 'cliente_id'
+        setPresupuestos(page.items.filter((p) => p[campo] === terceroId))
+      })
+      .catch(() => setPresupuestos([]))
+  }, [tipo, terceroId])
 
   function cerrar() {
     navigate('/pedidos')
@@ -169,11 +190,13 @@ export function PedidoCrear() {
     setGuardando(true)
     try {
       const pedido = await api.pedidos.create({
+        tipo,
         obra_id: obraId,
-        proveedor_id: proveedorId,
+        proveedor_id: tipo === 'proveedor' ? terceroId : null,
+        cliente_id: tipo === 'cliente' ? terceroId : null,
         fecha,
         fecha_entrega_prevista: fechaEntrega || null,
-        origen_oferta_presupuesto_id: ofertaId || null,
+        origen_oferta_presupuesto_id: presupuestoId || null,
       })
       onCambio()
       navigate(`/pedidos/${pedido.id}`)
@@ -189,13 +212,21 @@ export function PedidoCrear() {
       <ErrorNotice error={error} />
       <div className="card">
         <div className="form-section">
-          {obras.length === 0 || proveedores.length === 0 ? (
-            <EmptyState title="Hace falta una obra y un proveedor">
-              Crea antes al menos una obra y marca algún tercero con el rol de proveedor.
-            </EmptyState>
+          {obras.length === 0 ? (
+            <EmptyState title="Hace falta una obra">Crea antes al menos una obra.</EmptyState>
           ) : (
             <>
               <div className="form-grid">
+                <Field label="Tipo">
+                  <select
+                    className="select"
+                    value={tipo}
+                    onChange={(e) => setTipo(e.target.value as TipoPedido)}
+                  >
+                    <option value="proveedor">A un proveedor</option>
+                    <option value="cliente">De un cliente</option>
+                  </select>
+                </Field>
                 <Field label="Obra">
                   <select className="select" value={obraId} onChange={(e) => setObraId(e.target.value)}>
                     {obras.map((o) => (
@@ -205,18 +236,24 @@ export function PedidoCrear() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Proveedor">
-                  <select
-                    className="select"
-                    value={proveedorId}
-                    onChange={(e) => setProveedorId(e.target.value)}
-                  >
-                    {proveedores.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.razon_social}
-                      </option>
-                    ))}
-                  </select>
+                <Field label={tipo === 'proveedor' ? 'Proveedor' : 'Cliente'}>
+                  {terceros.length === 0 ? (
+                    <p className="muted">
+                      No hay ningún tercero con el rol de {tipo === 'proveedor' ? 'proveedor' : 'cliente'}
+                    </p>
+                  ) : (
+                    <select
+                      className="select"
+                      value={terceroId}
+                      onChange={(e) => setTerceroId(e.target.value)}
+                    >
+                      {terceros.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.razon_social}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </Field>
                 <Field label="Fecha">
                   <input
@@ -237,23 +274,25 @@ export function PedidoCrear() {
               </div>
               <div style={{ marginTop: 'var(--sp-4)' }}>
                 <Field
-                  label="Generar desde una oferta ganadora"
+                  label={
+                    tipo === 'proveedor' ? 'Generar desde una oferta ganadora' : 'Generar desde un presupuesto'
+                  }
                   hint={
-                    ofertas.length === 0
-                      ? 'Este proveedor no tiene ofertas resueltas — se creará vacío, añade las líneas después'
+                    presupuestos.length === 0
+                      ? 'No hay ninguno disponible — se creará vacío, añade las líneas después'
                       : 'Copia sus partidas como líneas del pedido; déjalo en blanco para añadirlas a mano'
                   }
                 >
                   <select
                     className="select"
-                    value={ofertaId}
-                    onChange={(e) => setOfertaId(e.target.value)}
-                    disabled={ofertas.length === 0}
+                    value={presupuestoId}
+                    onChange={(e) => setPresupuestoId(e.target.value)}
+                    disabled={presupuestos.length === 0}
                   >
-                    <option value="">— Sin oferta, líneas a mano —</option>
-                    {ofertas.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.codigo} · {o.nombre}
+                    <option value="">— Sin presupuesto, líneas a mano —</option>
+                    {presupuestos.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.codigo} · {p.nombre}
                       </option>
                     ))}
                   </select>
@@ -269,7 +308,7 @@ export function PedidoCrear() {
           </button>
           <button
             className="btn btn--primary"
-            disabled={obraId === '' || proveedorId === '' || guardando}
+            disabled={obraId === '' || terceroId === '' || guardando}
             onClick={() => void guardar()}
           >
             <Plus size={16} aria-hidden="true" />

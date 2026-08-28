@@ -4,6 +4,9 @@ export interface NavItem {
   label: string
   path: string
   icon: string
+  // Si viene, la entrada se cuelga de esta cabecera de sección en vez de la
+  // del propio módulo — ver `AppShell.tsx`.
+  section: string | null
 }
 
 export interface Module {
@@ -524,7 +527,16 @@ export interface ContactoAsociado {
 // presupuesto, por ejemplo) — lleva `descripcion` en vez de `cambios`.
 export type AccionAuditoria = 'creado' | 'modificado' | 'eliminado' | 'evento'
 
-export type TipoAparicion = 'presupuesto' | 'obra' | 'albaran' | 'factura' | 'concepto' | 'certificacion'
+export type TipoAparicion =
+  | 'presupuesto'
+  | 'obra'
+  | 'albaran'
+  | 'factura'
+  | 'concepto'
+  | 'certificacion'
+  | 'pedido'
+  | 'contrato'
+  | 'factura_recibida'
 
 export interface Aparicion {
   tipo: TipoAparicion
@@ -1329,6 +1341,7 @@ export interface TotalesComprasObra {
 // lo que se le encarga" — con o sin una oferta ganadora detrás.
 
 export type EstadoPedido = 'pendiente' | 'confirmado' | 'servido_parcial' | 'servido' | 'cancelado'
+export type TipoPedido = 'cliente' | 'proveedor'
 
 export interface PedidoLinea {
   id: string
@@ -1345,8 +1358,10 @@ export interface PedidoLinea {
 export interface Pedido {
   id: string
   codigo: string
+  tipo: TipoPedido
   obra_id: string
-  proveedor_id: string
+  proveedor_id: string | null
+  cliente_id: string | null
   origen_solicitud_id: string | null
   origen_oferta_presupuesto_id: string | null
   fecha: string
@@ -1359,12 +1374,13 @@ export interface Pedido {
 }
 
 export interface PedidoResumen extends Pedido {
-  proveedor_razon_social: string
+  /** El cliente o el proveedor, según `tipo`. */
+  tercero_razon_social: string
   total: string
 }
 
 export interface PedidoDetalle extends Pedido {
-  proveedor_razon_social: string
+  tercero_razon_social: string
   lineas: PedidoLinea[]
   total: string
 }
@@ -1399,11 +1415,15 @@ export interface ContratoResumen extends Contrato {
   tercero_razon_social: string
 }
 
+export type TipoAlbaran = 'cliente' | 'proveedor'
+
 export interface Albaran {
   id: string
   codigo: string
+  tipo: TipoAlbaran
   obra_id: string
-  proveedor_id: string
+  proveedor_id: string | null
+  cliente_id: string | null
   numero_proveedor: string | null
   fecha: string
   estado: EstadoAlbaran
@@ -1414,12 +1434,13 @@ export interface Albaran {
 }
 
 export interface AlbaranResumen extends Albaran {
-  proveedor_razon_social: string
+  /** El cliente o el proveedor, según `tipo`. */
+  tercero_razon_social: string
   total: string
 }
 
 export interface AlbaranDetalle extends Albaran {
-  proveedor_razon_social: string
+  tercero_razon_social: string
   lineas: AlbaranLinea[]
   total: string
 }
@@ -3372,12 +3393,19 @@ export const api = {
   },
 
   albaranes: {
-    list: (params: { obra_id?: string; proveedor_id?: string; limit?: number; offset?: number }) =>
-      request<Page<AlbaranResumen>>(`/api/albaranes${query(params)}`),
+    list: (params: {
+      obra_id?: string
+      proveedor_id?: string
+      tipo?: TipoAlbaran
+      limit?: number
+      offset?: number
+    }) => request<Page<AlbaranResumen>>(`/api/albaranes${query(params)}`),
     get: (id: string) => request<AlbaranDetalle>(`/api/albaranes/${id}`),
     create: (datos: {
+      tipo: TipoAlbaran
       obra_id: string
-      proveedor_id: string
+      proveedor_id?: string | null
+      cliente_id?: string | null
       numero_proveedor?: string | null
       fecha: string
       pedido_id?: string | null
@@ -3411,12 +3439,19 @@ export const api = {
   },
 
   pedidos: {
-    list: (params: { obra_id?: string; proveedor_id?: string; limit?: number; offset?: number }) =>
-      request<Page<PedidoResumen>>(`/api/pedidos${query(params)}`),
+    list: (params: {
+      obra_id?: string
+      proveedor_id?: string
+      tipo?: TipoPedido
+      limit?: number
+      offset?: number
+    }) => request<Page<PedidoResumen>>(`/api/pedidos${query(params)}`),
     get: (id: string) => request<PedidoDetalle>(`/api/pedidos/${id}`),
     create: (datos: {
+      tipo: TipoPedido
       obra_id: string
-      proveedor_id: string
+      proveedor_id?: string | null
+      cliente_id?: string | null
       fecha: string
       fecha_entrega_prevista?: string | null
       notas?: string | null
@@ -3809,6 +3844,16 @@ export const ETIQUETA_ESTADO_ALBARAN: Record<EstadoAlbaran, string> = {
   borrador: 'Borrador',
   conformado: 'Conformado',
   facturado: 'Facturado',
+}
+
+export const ETIQUETA_TIPO_ALBARAN: Record<TipoAlbaran, string> = {
+  cliente: 'Cliente',
+  proveedor: 'Proveedor',
+}
+
+export const ETIQUETA_TIPO_PEDIDO: Record<TipoPedido, string> = {
+  cliente: 'Cliente',
+  proveedor: 'Proveedor',
 }
 
 export const ETIQUETA_ESTADO_PEDIDO: Record<EstadoPedido, string> = {

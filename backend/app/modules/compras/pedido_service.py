@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.core.numeracion import siguiente_referencia_libre
 from app.core.redondeo import redondear_precio
 from app.core.tenancy import datos_autoria, require_organization_id
-from app.modules.compras.models import Pedido, PedidoLinea
+from app.modules.compras.models import Pedido, PedidoLinea, TipoPedido
 from app.modules.compras.pedido_schemas import (
     PedidoCreate,
     PedidoLineaCreate,
@@ -148,11 +148,16 @@ async def _lineas_desde_oferta(
 
 async def crear(session: AsyncSession, datos: PedidoCreate) -> Pedido:
     from app.modules.compras.models import SolicitudPrecios
-    from app.modules.compras.service import _validar_obra, _validar_proveedor
+    from app.modules.compras.service import _validar_cliente, _validar_obra, _validar_proveedor
 
     org_id = require_organization_id()
     await _validar_obra(session, datos.obra_id)
-    await _validar_proveedor(session, datos.proveedor_id)
+    if datos.tipo == TipoPedido.CLIENTE:
+        assert datos.cliente_id is not None  # ya garantizado por el validador del schema
+        await _validar_cliente(session, datos.cliente_id)
+    else:
+        assert datos.proveedor_id is not None
+        await _validar_proveedor(session, datos.proveedor_id)
 
     if datos.origen_solicitud_id is not None:
         existe_solicitud = await session.scalar(
@@ -207,6 +212,7 @@ async def listar(
     *,
     obra_id: uuid.UUID | None = None,
     proveedor_id: uuid.UUID | None = None,
+    tipo: TipoPedido | None = None,
     limit: int = 50,
     offset: int = 0,
     creado_por_subject: str | None = None,
@@ -216,13 +222,15 @@ async def listar(
     org_id = require_organization_id()
     base = (
         select(Pedido, Tercero.razon_social)
-        .join(Tercero, Tercero.id == Pedido.proveedor_id)
+        .join(Tercero, Tercero.id == func.coalesce(Pedido.cliente_id, Pedido.proveedor_id))
         .where(Pedido.organization_id == org_id)
     )
     if obra_id is not None:
         base = base.where(Pedido.obra_id == obra_id)
     if proveedor_id is not None:
         base = base.where(Pedido.proveedor_id == proveedor_id)
+    if tipo is not None:
+        base = base.where(Pedido.tipo == tipo)
     if creado_por_subject is not None:
         base = base.where(Pedido.creado_por_subject == creado_por_subject)
 
@@ -242,7 +250,7 @@ async def obtener(session: AsyncSession, pedido_id: uuid.UUID) -> tuple[Pedido, 
     fila = (
         await session.execute(
             select(Pedido, Tercero.razon_social)
-            .join(Tercero, Tercero.id == Pedido.proveedor_id)
+            .join(Tercero, Tercero.id == func.coalesce(Pedido.cliente_id, Pedido.proveedor_id))
             .options(selectinload(Pedido.lineas))
             .where(Pedido.id == pedido_id, Pedido.organization_id == org_id)
         )

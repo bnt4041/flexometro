@@ -139,6 +139,10 @@ export function Trazabilidad({
 export async function cargarAsociadosDeObra(
   obraId: string,
   excluir?: { tipo: NodoTrazabilidad['tipo']; id: string },
+  // Para la propia ficha de la obra: sus presupuestos vinculados ya se
+  // enseñan en "de dónde viene" (son el origen, no solo algo asociado), así
+  // que no hace falta repetirlos aquí también.
+  omitirTipo?: NodoTrazabilidad['tipo'],
 ): Promise<NodoTrazabilidad[]> {
   const fuera = (tipo: NodoTrazabilidad['tipo'], id: string) =>
     excluir?.tipo === tipo && excluir.id === id
@@ -156,7 +160,7 @@ export async function cargarAsociadosDeObra(
 
   const nodos: NodoTrazabilidad[] = []
 
-  if (presupuestos.status === 'fulfilled') {
+  if (presupuestos.status === 'fulfilled' && omitirTipo !== 'presupuesto') {
     for (const v of presupuestos.value) {
       if (fuera('presupuesto', v.presupuesto_id)) continue
       nodos.push({
@@ -173,7 +177,7 @@ export async function cargarAsociadosDeObra(
       if (fuera('pedido', p.id)) continue
       nodos.push({
         tipo: 'pedido',
-        etiqueta: `${p.codigo} · ${p.proveedor_razon_social}`,
+        etiqueta: `${p.codigo} · ${p.tercero_razon_social}`,
         ruta: `/pedidos/${p.id}`,
         fecha: p.fecha,
         estadoEtiqueta: ETIQUETA_ESTADO_PEDIDO[p.estado],
@@ -199,7 +203,7 @@ export async function cargarAsociadosDeObra(
       if (fuera('albaran', a.id)) continue
       nodos.push({
         tipo: 'albaran',
-        etiqueta: `${a.codigo} · ${a.proveedor_razon_social}`,
+        etiqueta: `${a.codigo} · ${a.tercero_razon_social}`,
         ruta: `/albaranes/${a.id}`,
         fecha: a.fecha,
         estadoEtiqueta: ETIQUETA_ESTADO_ALBARAN[a.estado],

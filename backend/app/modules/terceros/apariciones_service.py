@@ -19,14 +19,15 @@ resto de la aplicación, lo que se ve es lo de la empresa activa.
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.terceros.apariciones_schemas import AparicionOut, TipoAparicion
 
 
 async def apariciones_de(session: AsyncSession, tercero_id: uuid.UUID) -> list[AparicionOut]:
-    from app.modules.compras.models import Albaran
+    from app.modules.compras.models import Albaran, FacturaRecibida, Pedido
+    from app.modules.contratos.models import Contrato
     from app.modules.facturacion.models import Factura
     from app.modules.obras.models import Obra
     from app.modules.presupuestos.models import Concepto, PrecioSuministro
@@ -118,6 +119,72 @@ async def apariciones_de(session: AsyncSession, tercero_id: uuid.UUID) -> list[A
             )
         )
 
+    pedidos = list(
+        (
+            await session.execute(
+                select(Pedido)
+                .where(or_(Pedido.proveedor_id == tercero_id, Pedido.cliente_id == tercero_id))
+                .order_by(Pedido.fecha.desc())
+            )
+        ).scalars()
+    )
+    for pe in pedidos:
+        resultado.append(
+            AparicionOut(
+                tipo=TipoAparicion.PEDIDO,
+                id=str(pe.id),
+                codigo=pe.codigo,
+                titulo=pe.codigo,
+                subtitulo=pe.fecha.isoformat(),
+                estado=pe.estado.value,
+            )
+        )
+
+    facturas_recibidas = list(
+        (
+            await session.execute(
+                select(FacturaRecibida)
+                .where(FacturaRecibida.proveedor_id == tercero_id)
+                .order_by(FacturaRecibida.fecha.desc())
+            )
+        ).scalars()
+    )
+    for fr in facturas_recibidas:
+        resultado.append(
+            AparicionOut(
+                tipo=TipoAparicion.FACTURA_RECIBIDA,
+                id=str(fr.id),
+                codigo=fr.codigo,
+                titulo=fr.numero_proveedor,
+                subtitulo=fr.fecha.isoformat(),
+                estado=fr.estado.value,
+            )
+        )
+
+    # Un contrato con este tercero, de cliente o de proveedor — según cuál de
+    # las dos columnas coincida (nunca las dos a la vez, ver el validador del
+    # schema en `contratos.schemas`).
+    contratos = list(
+        (
+            await session.execute(
+                select(Contrato)
+                .where(or_(Contrato.cliente_id == tercero_id, Contrato.proveedor_id == tercero_id))
+                .order_by(Contrato.codigo.desc())
+            )
+        ).scalars()
+    )
+    for c in contratos:
+        resultado.append(
+            AparicionOut(
+                tipo=TipoAparicion.CONTRATO,
+                id=str(c.id),
+                codigo=c.codigo,
+                titulo=c.codigo,
+                subtitulo=c.fecha_firma.isoformat() if c.fecha_firma else None,
+                estado=c.estado.value,
+            )
+        )
+
     # Como proveedor de una tarifa en el banco de precios — no es una "ficha"
     # en el sentido de las demás, pero es tan aparición como cualquier otra:
     # borrar el tercero rompería esta tarifa igual que rompería un albarán.
@@ -151,6 +218,8 @@ async def apariciones_de_contacto(session: AsyncSession, contacto_id: uuid.UUID)
     ningún módulo: se vincula por `ContactoAsociado` (entidad/entidad_id
     genéricos, Fase 28), así que aquí no hay más remedio que agrupar por
     entidad y resolver cada tabla aparte."""
+    from app.modules.compras.models import Albaran, FacturaRecibida, Pedido
+    from app.modules.contratos.models import Contrato
     from app.modules.facturacion.models import Certificacion, Factura
     from app.modules.obras.models import Obra
     from app.modules.presupuestos.models_presupuesto import Presupuesto
@@ -227,6 +296,66 @@ async def apariciones_de_contacto(session: AsyncSession, contacto_id: uuid.UUID)
                     codigo=f.codigo,
                     titulo=f.concepto,
                     estado=f.estado.value,
+                )
+            )
+
+    pedido_ids = ids_por_entidad.get(EntidadContacto.PEDIDO)
+    if pedido_ids:
+        filas = (await session.execute(select(Pedido).where(Pedido.id.in_(pedido_ids)))).scalars()
+        for pe in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.PEDIDO,
+                    id=str(pe.id),
+                    codigo=pe.codigo,
+                    titulo=pe.codigo,
+                    estado=pe.estado.value,
+                )
+            )
+
+    contrato_ids = ids_por_entidad.get(EntidadContacto.CONTRATO)
+    if contrato_ids:
+        filas = (await session.execute(select(Contrato).where(Contrato.id.in_(contrato_ids)))).scalars()
+        for c in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.CONTRATO,
+                    id=str(c.id),
+                    codigo=c.codigo,
+                    titulo=c.codigo,
+                    estado=c.estado.value,
+                )
+            )
+
+    albaran_ids = ids_por_entidad.get(EntidadContacto.ALBARAN)
+    if albaran_ids:
+        filas = (await session.execute(select(Albaran).where(Albaran.id.in_(albaran_ids)))).scalars()
+        for a in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.ALBARAN,
+                    id=str(a.id),
+                    codigo=a.codigo,
+                    titulo=a.numero_proveedor or a.codigo,
+                    estado=a.estado.value,
+                )
+            )
+
+    factura_recibida_ids = ids_por_entidad.get(EntidadContacto.FACTURA_RECIBIDA)
+    if factura_recibida_ids:
+        filas = (
+            await session.execute(
+                select(FacturaRecibida).where(FacturaRecibida.id.in_(factura_recibida_ids))
+            )
+        ).scalars()
+        for fr in filas:
+            resultado.append(
+                AparicionOut(
+                    tipo=TipoAparicion.FACTURA_RECIBIDA,
+                    id=str(fr.id),
+                    codigo=fr.codigo,
+                    titulo=fr.numero_proveedor,
+                    estado=fr.estado.value,
                 )
             )
 

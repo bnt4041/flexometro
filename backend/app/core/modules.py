@@ -19,11 +19,20 @@ from app.core.database import get_session
 
 @dataclass(frozen=True)
 class NavItem:
-    """Entrada de menú que el módulo publica al shell del frontend."""
+    """Entrada de menú que el módulo publica al shell del frontend.
+
+    `section` agrupa la entrada bajo un título de sección distinto del
+    nombre de su propio módulo — por defecto (`None`) cada módulo pinta su
+    propia sección con `ModuleSpec.name`; con `section` puesto, la entrada se
+    cuelga de esa cabecera en su lugar (varias entradas de módulos distintos
+    con el mismo `section` acaban en la misma sección del menú). Sirve para
+    cuando el mismo objeto interesa desde dos ángulos del negocio (un pedido
+    puede ser a proveedor o de cliente) sin duplicar el módulo entero."""
 
     label: str
     path: str
     icon: str = "square"
+    section: str | None = None
 
 
 @dataclass(frozen=True)

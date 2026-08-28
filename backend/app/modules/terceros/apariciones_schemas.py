@@ -12,6 +12,9 @@ class TipoAparicion(StrEnum):
     # Solo la usan las apariciones de un Contacto (Fase 49) — un tercero no
     # se certifica, se le certifica una obra.
     CERTIFICACION = "certificacion"
+    PEDIDO = "pedido"
+    CONTRATO = "contrato"
+    FACTURA_RECIBIDA = "factura_recibida"
 
 
 class AparicionOut(BaseModel):

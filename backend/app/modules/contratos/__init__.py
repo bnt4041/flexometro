@@ -13,5 +13,9 @@ SPEC = ModuleSpec(
     # del grafo — no hace falta arrastrar más.
     depends_on=("obras", "terceros"),
     tipo_documento_numeracion="contrato",
-    nav=(NavItem(label="Contratos", path="/contratos", icon="file-text"),),
+    # Cuelga de la sección "Clientes" (el módulo `facturacion`, ver su
+    # `__init__.py`) en vez de tener su propia sección de un solo enlace:
+    # un contrato puede ser de cliente o de proveedor, pero es ahí donde
+    # tiene más sentido encontrarlo a simple vista.
+    nav=(NavItem(label="Contratos", path="/contratos", icon="file-text", section="Clientes"),),
 )

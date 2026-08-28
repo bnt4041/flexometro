@@ -34,7 +34,7 @@ export function ComprasObra({ obraId }: { obraId: string }) {
   const cargar = useCallback(async () => {
     try {
       const [alb, fac, tot] = await Promise.all([
-        api.albaranes.list({ obra_id: obraId, limit: 200 }),
+        api.albaranes.list({ obra_id: obraId, tipo: 'proveedor', limit: 200 }),
         api.facturasRecibidas.list({ obra_id: obraId, limit: 200 }),
         api.facturasRecibidas.totalesDeObra(obraId),
       ])
@@ -142,7 +142,7 @@ export function ComprasObra({ obraId }: { obraId: string }) {
                       <div className="table__code">nº {a.numero_proveedor}</div>
                     )}
                   </td>
-                  <td>{a.proveedor_razon_social}</td>
+                  <td>{a.tercero_razon_social}</td>
                   <td>{a.fecha}</td>
                   <td>
                     <span className={`chip chip--estado-${a.estado}`}>
@@ -296,7 +296,7 @@ function RegistrarFacturaModal({
 
   // Los proveedores salen de los albaranes de la obra: es de quien se recibe
   // material, y así no hay que cargar el fichero entero de terceros.
-  const proveedores = [...new Map(albaranes.map((a) => [a.proveedor_id, a.proveedor_razon_social]))]
+  const proveedores = [...new Map(albaranes.map((a) => [a.proveedor_id, a.tercero_razon_social]))]
 
   const listo = proveedorId !== '' && numero.trim() !== '' && base.trim() !== ''
 

@@ -7,8 +7,11 @@ import {
   ETIQUETA_ESTADO,
   ETIQUETA_ESTADO_ALBARAN,
   ETIQUETA_ESTADO_CERTIFICACION,
+  ETIQUETA_ESTADO_CONTRATO,
   ETIQUETA_ESTADO_FACTURA,
+  ETIQUETA_ESTADO_FACTURA_RECIBIDA,
   ETIQUETA_ESTADO_OBRA,
+  ETIQUETA_ESTADO_PEDIDO,
 } from '../lib/api'
 import type { Aparicion, TipoAparicion } from '../lib/api'
 
@@ -19,6 +22,9 @@ const ETIQUETA_TIPO: Record<TipoAparicion, string> = {
   factura: 'Factura',
   concepto: 'Banco de precios',
   certificacion: 'Certificación',
+  pedido: 'Pedido',
+  contrato: 'Contrato',
+  factura_recibida: 'Factura recibida',
 }
 
 // Mismo icono que usa cada módulo en su propia navegación (ver `nav` de
@@ -31,6 +37,9 @@ const ICONO_TIPO: Record<TipoAparicion, string> = {
   factura: 'receipt',
   concepto: 'layers',
   certificacion: 'clipboard-check',
+  pedido: 'truck',
+  contrato: 'file-text',
+  factura_recibida: 'receipt',
 }
 
 const RUTA_TIPO: Record<TipoAparicion, (id: string) => string> = {
@@ -40,6 +49,9 @@ const RUTA_TIPO: Record<TipoAparicion, (id: string) => string> = {
   factura: (id) => `/facturas/${id}`,
   concepto: (id) => `/banco-precios/${id}`,
   certificacion: (id) => `/certificaciones/${id}`,
+  pedido: (id) => `/pedidos/${id}`,
+  contrato: (id) => `/contratos/${id}`,
+  factura_recibida: (id) => `/facturas-recibidas/${id}`,
 }
 
 function etiquetaEstado(a: Aparicion): string | null {
@@ -58,16 +70,33 @@ function etiquetaEstado(a: Aparicion): string | null {
         ETIQUETA_ESTADO_CERTIFICACION[a.estado as keyof typeof ETIQUETA_ESTADO_CERTIFICACION] ??
         a.estado
       )
+    case 'pedido':
+      return ETIQUETA_ESTADO_PEDIDO[a.estado as keyof typeof ETIQUETA_ESTADO_PEDIDO] ?? a.estado
+    case 'contrato':
+      return ETIQUETA_ESTADO_CONTRATO[a.estado as keyof typeof ETIQUETA_ESTADO_CONTRATO] ?? a.estado
+    case 'factura_recibida':
+      return (
+        ETIQUETA_ESTADO_FACTURA_RECIBIDA[a.estado as keyof typeof ETIQUETA_ESTADO_FACTURA_RECIBIDA] ??
+        a.estado
+      )
     default:
       return a.estado
   }
 }
 
-// La certificación usa un prefijo de clase distinto (`chip--estado-cert-*`)
-// para no compartir color con el "borrador"/"emitida" de presupuesto y
-// factura, que significan otra cosa — ver `CertificacionDetalle.tsx`.
+// Cada tipo con estado propio usa su propio prefijo de clase (`chip--estado-
+// cert-*`, `chip--estado-pedido-*`...) para no compartir color entre
+// entidades donde el mismo valor ("borrador", "pendiente"...) significa otra
+// cosa — ver los `Detalle.tsx` de cada una.
+const PREFIJO_CLASE_ESTADO: Partial<Record<TipoAparicion, string>> = {
+  certificacion: 'chip--estado-cert-',
+  pedido: 'chip--estado-pedido-',
+  contrato: 'chip--estado-contrato-',
+  factura_recibida: 'chip--estado-fr-',
+}
+
 function claseEstado(a: Aparicion): string {
-  return a.tipo === 'certificacion' ? `chip--estado-cert-${a.estado}` : `chip--estado-${a.estado}`
+  return `${PREFIJO_CLASE_ESTADO[a.tipo] ?? 'chip--estado-'}${a.estado}`
 }
 
 /** Pestaña "Apariciones" de una ficha (Tercero, Fase 46; Contacto, Fase 49):
@@ -106,8 +135,8 @@ export function Apariciones({ cargar: cargarFilas }: { cargar: () => Promise<Apa
 
       {filas.length === 0 ? (
         <EmptyState title="No aparece en ninguna ficha todavía">
-          En cuanto se use en un presupuesto, obra, albarán, factura, certificación o tarifa del
-          banco de precios, aparecerá aquí.
+          En cuanto se use en un presupuesto, obra, pedido, contrato, albarán, factura (recibida o
+          emitida), certificación o tarifa del banco de precios, aparecerá aquí.
         </EmptyState>
       ) : (
         <div className="table-wrap">
