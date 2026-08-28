@@ -65,6 +65,7 @@ RUTAS_PUBLICAS_PERMITIDAS = frozenset(
         # sin token porque no está atada a ninguna obra ni organización, solo
         # a la clave de Gemini del .env — limitada por IP en vez de por enlace.
         "/api/publico/testmeter/escala",
+        "/api/publico/testmeter/planta",
     }
 )
 

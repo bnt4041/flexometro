@@ -8,6 +8,7 @@ class ConfiguracionIAOut(BaseModel):
 
     deepseek_configurada: bool
     deepseek_model: str
+    deepseek_vision_model: str
     deepseek_base_url: str
     gemini_configurada: bool
     gemini_model: str
@@ -19,6 +20,7 @@ class ConfiguracionIAUpdate(BaseModel):
 
     deepseek_api_key: str | None = None
     deepseek_model: str | None = Field(default=None, min_length=1, max_length=60)
+    deepseek_vision_model: str | None = Field(default=None, min_length=1, max_length=60)
     deepseek_base_url: str | None = Field(default=None, min_length=1, max_length=200)
     gemini_api_key: str | None = None
     gemini_model: str | None = Field(default=None, min_length=1, max_length=60)

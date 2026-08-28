@@ -33,6 +33,11 @@ class ConfiguracionIA(TimestampMixin, Base):
     deepseek_model: Mapped[str] = mapped_column(
         String(60), nullable=False, default="deepseek-chat"
     )
+    # Visión de DeepSeek: modelo aparte del de texto, pero MISMA clave y misma
+    # `base_url` — por eso no hay un `deepseek_vision_api_key` aquí.
+    deepseek_vision_model: Mapped[str] = mapped_column(
+        String(60), nullable=False, default="deepseek-v4-flash-vision-exp"
+    )
     deepseek_base_url: Mapped[str] = mapped_column(
         String(200), nullable=False, default="https://api.deepseek.com"
     )

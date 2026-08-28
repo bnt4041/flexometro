@@ -18,6 +18,10 @@ class CredencialesDeepSeek:
     api_key: str
     modelo: str
     base_url: str
+    #: Modelo de visión. Va en la misma dataclass y no en una aparte porque
+    #: comparte clave y `base_url` con el de texto: lo único que cambia es
+    #: qué `model` se manda en la petición.
+    modelo_vision: str = ""
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,7 @@ async def credenciales_deepseek(session: AsyncSession) -> CredencialesDeepSeek:
         api_key=config.deepseek_api_key or settings.deepseek_api_key,
         modelo=config.deepseek_model or settings.deepseek_model,
         base_url=config.deepseek_base_url or settings.deepseek_base_url,
+        modelo_vision=config.deepseek_vision_model or settings.deepseek_vision_model,
     )
 
 

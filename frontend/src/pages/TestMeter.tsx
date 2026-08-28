@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Camera, Check, Loader2, MapPin, RotateCcw, Undo2, X } from 'lucide-react'
 import * as THREE from 'three'
 
@@ -6,14 +7,26 @@ import logo from '../assets/logo.png'
 import { ErrorNotice } from '../components/ui'
 import { PlantaLevantamiento, areaDe, perimetroDe } from '../components/PlantaLevantamiento'
 import type { PuntoPlanta } from '../components/PlantaLevantamiento'
+import { CARACTERISTICA_CAMARA_XR, capturarFotogramaXR } from '../lib/camaraXR'
 import { apiPublico } from '../lib/api'
-import type { ResultadoMedicionIA } from '../lib/api'
+import type { ProveedorVision, ResultadoMedicionIA, RevisionPlanta } from '../lib/api'
 
 type Etapa = 'reconociendo' | 'listo' | 'levantando'
 
 const NARANJA = 0xf59e0b
 const NARANJA_CSS = '#f59e0b'
 const VERDE = 0x22c55e
+
+// `.btn` hereda `background: var(--c-surface)`, que en tema claro es un
+// fondo casi blanco — combinado con el `color: '#fff'` que necesitan estos
+// botones (van sobre el panel oscuro del plano, no sobre la página) salía
+// texto blanco sobre botón blanco. Fondo oscuro translúcido propio en vez de
+// heredar el del tema, para que se lea igual en claro y en oscuro.
+const BOTON_SOBRE_OSCURO: CSSProperties = {
+  color: '#fff',
+  background: 'rgba(255,255,255,0.12)',
+  borderColor: 'rgba(255,255,255,0.35)',
+}
 
 function formatoCota(metros: number): string {
   return metros < 1 ? `${Math.round(metros * 100)} cm` : `${metros.toFixed(2)} m`
@@ -49,16 +62,28 @@ export function TestMeter() {
   const ultimaPoseRef = useRef<THREE.Vector3 | null>(null)
   const marcarRef = useRef<(() => void) | null>(null)
   const redibujarEscenaRef = useRef<(() => void) | null>(null)
+  /** Una foto por esquina marcada, en orden. Se llenan durante la sesión y se
+   *  mandan enteras al cerrar el perímetro. */
+  const fotosRef = useRef<Blob[]>([])
+  /** La captura tiene que ocurrir DENTRO del bucle de render (la textura de
+   *  la cámara solo vale en ese frame), así que marcar una esquina no captura
+   *  directamente: deja este aviso y el bucle lo atiende en el frame
+   *  siguiente. Ver `camaraXR.ts`. */
+  const capturaPendienteRef = useRef(false)
 
   const [soportado, setSoportado] = useState<boolean | null>(null)
   const [etapa, setEtapa] = useState<Etapa>('listo')
   const [error, setError] = useState<string | null>(null)
   const [reconocido, setReconocido] = useState<ResultadoMedicionIA | null>(null)
+  const [proveedor, setProveedor] = useState<ProveedorVision>('deepseek')
 
   const [puntos, setPuntos] = useState<PuntoPlanta[]>([])
   const [cerrado, setCerrado] = useState(false)
   const [posicionActual, setPosicionActual] = useState<PuntoPlanta | null>(null)
   const [superficie, setSuperficie] = useState(false)
+  const [nFotos, setNFotos] = useState(0)
+  const [revisando, setRevisando] = useState(false)
+  const [revision, setRevision] = useState<RevisionPlanta | null>(null)
 
   useEffect(() => {
     const xr = (navigator as Navigator & { xr?: XRSystem }).xr
@@ -113,7 +138,7 @@ export function TestMeter() {
       return
     }
     try {
-      setReconocido(await apiPublico.testmeter.medirFoto(blob))
+      setReconocido(await apiPublico.testmeter.medirFoto(blob, proveedor))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
@@ -135,7 +160,11 @@ export function TestMeter() {
     try {
       sesion = await xr.requestSession('immersive-ar', {
         requiredFeatures: ['hit-test'],
-        optionalFeatures: ['dom-overlay'],
+        // `camera-access` va como OPCIONAL a propósito: si el dispositivo no
+        // lo soporta (Chrome Android 107+ es el único que lo trae), se sigue
+        // pudiendo levantar la planta — solo que sin fotos, y por tanto sin
+        // la revisión de elementos al cerrar.
+        optionalFeatures: ['dom-overlay', CARACTERISTICA_CAMARA_XR],
         domOverlay: { root: overlayRef.current },
       })
     } catch (err) {
@@ -228,6 +257,9 @@ export function TestMeter() {
       }
       setError(null)
       puntosRef.current = [...puntosRef.current, pos.clone()]
+      // No se captura aquí: la textura de la cámara solo es válida dentro del
+      // callback de animación, así que se deja pedido para el próximo frame.
+      capturaPendienteRef.current = true
       redibujarEscena()
       sincronizarPlanta()
     }
@@ -253,10 +285,37 @@ export function TestMeter() {
     let fuenteHitTest: XRHitTestSource | null = null
     let frames = 0
 
+    // Andamiaje de `camera-access`: el binding y el framebuffer de lectura se
+    // crean una sola vez y se reutilizan en cada captura (ver `camaraXR.ts`).
+    const gl = renderer.getContext()
+    const hayCamaraXR = sesion.enabledFeatures?.includes(CARACTERISTICA_CAMARA_XR) ?? false
+    const binding = hayCamaraXR ? new XRWebGLBinding(sesion, gl) : null
+    const framebufferLectura = hayCamaraXR ? gl.createFramebuffer() : null
+
     renderer.setAnimationLoop((_t, frame) => {
       if (!frame) return
       const referencia = renderer.xr.getReferenceSpace()
       if (!referencia) return
+
+      // Captura pedida al marcar la última esquina. Se hace antes de pintar
+      // la escena para no arrastrar el cambio de framebuffer al render.
+      if (capturaPendienteRef.current) {
+        capturaPendienteRef.current = false
+        if (binding && framebufferLectura) {
+          capturarFotogramaXR(frame, binding, gl, referencia, framebufferLectura)
+            .then((foto) => {
+              if (foto) {
+                fotosRef.current = [...fotosRef.current, foto]
+                setNFotos(fotosRef.current.length)
+              }
+            })
+            .catch(() => {
+              /* Una foto perdida no debe cortar el levantamiento: la planta
+                 se sigue midiendo igual, solo habrá menos material para la
+                 revisión final. */
+            })
+        }
+      }
 
       // El hit-test source se pide DENTRO del bucle (patrón de los ejemplos
       // oficiales): esperarlo con `await` antes de arrancar el bucle dejaba
@@ -299,23 +358,55 @@ export function TestMeter() {
   function deshacer() {
     if (cerradoRef.current) {
       cerradoRef.current = false
+      setRevision(null)
     } else {
       puntosRef.current = puntosRef.current.slice(0, -1)
+      // La foto de esa esquina se va con ella, para que la lista de fotos
+      // siga cuadrando con la de vértices.
+      fotosRef.current = fotosRef.current.slice(0, -1)
+      setNFotos(fotosRef.current.length)
     }
     redibujarEscenaRef.current?.()
     sincronizarPlanta()
   }
 
-  function cerrarPerimetro() {
+  /** Longitud de cada muro del perímetro cerrado, en metros — tal cual las
+   *  midió el AR. Es lo que viaja a la IA para que sepa a qué muro asignar
+   *  cada elemento; no se le pide que las recalcule. */
+  function murosDe(vertices: THREE.Vector3[]): number[] {
+    return vertices.map((a, i) => {
+      const b = vertices[(i + 1) % vertices.length]
+      return Math.hypot(b.x - a.x, b.z - a.z)
+    })
+  }
+
+  async function cerrarPerimetro() {
     if (puntosRef.current.length < 3) return
     cerradoRef.current = true
     redibujarEscenaRef.current?.()
     sincronizarPlanta()
+
+    const fotos = fotosRef.current
+    if (fotos.length === 0) return // sin `camera-access` no hay nada que revisar
+    setRevisando(true)
+    setError(null)
+    try {
+      setRevision(
+        await apiPublico.testmeter.revisarPlanta(fotos, murosDe(puntosRef.current), proveedor),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setRevisando(false)
+    }
   }
 
   function empezarDeCero() {
     puntosRef.current = []
     cerradoRef.current = false
+    fotosRef.current = []
+    setNFotos(0)
+    setRevision(null)
     redibujarEscenaRef.current?.()
     sincronizarPlanta()
   }
@@ -382,20 +473,54 @@ export function TestMeter() {
             />
           </div>
 
-          {reconocido && reconocido.elementos.length > 0 && (
+          {reconocido && (
             <div style={{ width: '100%', maxWidth: 520 }}>
-              <p className="notice" style={{ margin: 0 }}>
-                <strong>La IA reconoce:</strong>{' '}
-                {reconocido.elementos.map((e) => e.label).join(', ')}.
-                {reconocido.razonamiento && (
-                  <>
-                    <br />
-                    {reconocido.razonamiento}
-                  </>
-                )}
-              </p>
+              {reconocido.elementos.length > 0 && (
+                <p className="notice" style={{ margin: 0 }}>
+                  <strong>La IA reconoce:</strong>{' '}
+                  {reconocido.elementos.map((e) => e.label).join(', ')}.
+                  {reconocido.razonamiento && (
+                    <>
+                      <br />
+                      {reconocido.razonamiento}
+                    </>
+                  )}
+                </p>
+              )}
+              {reconocido.metricas && (
+                <p
+                  className="muted"
+                  style={{ margin: 'var(--sp-2) 0 0', fontSize: '0.85em', textAlign: 'center' }}
+                >
+                  <strong>{reconocido.metricas.modelo}</strong> ·{' '}
+                  {(reconocido.metricas.ms / 1000).toFixed(1)} s ·{' '}
+                  {reconocido.metricas.tokens_entrada + reconocido.metricas.tokens_salida} tokens (
+                  {reconocido.metricas.tokens_entrada} entrada /{' '}
+                  {reconocido.metricas.tokens_salida} salida
+                  {reconocido.metricas.tokens_razonamiento > 0 &&
+                    `, de ellos ${reconocido.metricas.tokens_razonamiento} razonando`}
+                  ) · {reconocido.elementos.length} elementos
+                </p>
+              )}
             </div>
           )}
+
+          <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: '0.85em' }}>
+              Motor de visión:
+            </span>
+            {(['gemini', 'deepseek'] as ProveedorVision[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={`btn btn--sm${proveedor === p ? ' btn--primary' : ''}`}
+                onClick={() => setProveedor(p)}
+                disabled={etapa === 'reconociendo'}
+              >
+                {p === 'gemini' ? 'Gemini' : 'DeepSeek'}
+              </button>
+            ))}
+          </div>
 
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button
@@ -458,7 +583,11 @@ export function TestMeter() {
               >
                 <div style={{ fontWeight: 700 }}>
                   {cerrado
-                    ? 'Perímetro cerrado'
+                    ? revisando
+                      ? 'Revisando las fotos con la IA…'
+                      : revision
+                        ? `Planta lista · ${revision.elementos.length} elemento(s) detectado(s)`
+                        : 'Perímetro cerrado'
                     : puntos.length === 0
                       ? 'Apunta a la primera esquina y toca'
                       : `Esquina ${puntos.length} marcada — ve a la siguiente`}
@@ -521,10 +650,15 @@ export function TestMeter() {
               >
                 <span style={{ opacity: 0.75 }}>
                   {puntos.length} {puntos.length === 1 ? 'esquina' : 'esquinas'}
-                  {perimetro > 0 && ` · ${formatoCota(perimetro)} de recorrido`}
+                  {nFotos > 0 && ` · ${nFotos} 📷`}
+                  {perimetro > 0 && ` · ${formatoCota(perimetro)}`}
                 </span>
-                {cerrado && area > 0 && (
-                  <strong style={{ color: '#fde68a' }}>{area.toFixed(2)} m²</strong>
+                {revisando ? (
+                  <span style={{ color: '#fde68a', display: 'inline-flex', gap: 4 }}>
+                    <Loader2 size={13} className="girando" aria-hidden="true" /> Revisando con IA…
+                  </span>
+                ) : (
+                  cerrado && area > 0 && <strong style={{ color: '#fde68a' }}>{area.toFixed(2)} m²</strong>
                 )}
               </div>
 
@@ -533,6 +667,7 @@ export function TestMeter() {
                   puntos={puntos}
                   cerrado={cerrado}
                   posicionActual={posicionActual}
+                  elementos={revision?.elementos ?? []}
                 />
               </div>
 
@@ -550,7 +685,7 @@ export function TestMeter() {
                   className="btn btn--sm"
                   onClick={deshacer}
                   disabled={puntos.length === 0 && !cerrado}
-                  style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.35)' }}
+                  style={BOTON_SOBRE_OSCURO}
                 >
                   <Undo2 size={14} aria-hidden="true" /> Deshacer
                 </button>
@@ -567,16 +702,11 @@ export function TestMeter() {
                   className="btn btn--sm"
                   onClick={empezarDeCero}
                   disabled={puntos.length === 0}
-                  style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.35)' }}
+                  style={BOTON_SOBRE_OSCURO}
                 >
                   <RotateCcw size={14} aria-hidden="true" /> Vaciar
                 </button>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={salir}
-                  style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.35)' }}
-                >
+                <button type="button" className="btn btn--sm" onClick={salir} style={BOTON_SOBRE_OSCURO}>
                   <X size={14} aria-hidden="true" /> Salir
                 </button>
               </div>

@@ -29,6 +29,7 @@ def _ia_out(config) -> ConfiguracionIAOut:
     return ConfiguracionIAOut(
         deepseek_configurada=bool(config.deepseek_api_key or settings.deepseek_api_key),
         deepseek_model=config.deepseek_model or settings.deepseek_model,
+        deepseek_vision_model=config.deepseek_vision_model or settings.deepseek_vision_model,
         deepseek_base_url=config.deepseek_base_url or settings.deepseek_base_url,
         gemini_configurada=bool(config.gemini_api_key or settings.gemini_api_key),
         gemini_model=config.gemini_model or settings.gemini_model,

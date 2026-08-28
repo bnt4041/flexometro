@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
+    # Visión de DeepSeek: modelo distinto del de texto, pero la MISMA clave y
+    # la misma `base_url` (API compatible con la de OpenAI: la imagen viaja
+    # como `image_url` con un data: URI en base64).
+    deepseek_vision_model: str = "deepseek-v4-flash-vision-exp"
 
     # Gemini es el proveedor de IA fijo para visión/multimodal en este stack
     # (DeepSeek cubre texto/estructura, ver app/modules/ia/deepseek.py): lectura

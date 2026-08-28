@@ -278,6 +278,9 @@ export interface UsoIA {
 export interface ConfiguracionIA {
   deepseek_configurada: boolean
   deepseek_model: string
+  /** Modelo de visión de DeepSeek: comparte clave y `base_url` con el de
+   *  texto — lo único que cambia es qué `model` se manda. */
+  deepseek_vision_model: string
   deepseek_base_url: string
   gemini_configurada: boolean
   gemini_model: string
@@ -2698,6 +2701,7 @@ export const api = {
       update: (datos: {
         deepseek_api_key?: string | null
         deepseek_model?: string
+        deepseek_vision_model?: string
         deepseek_base_url?: string
         gemini_api_key?: string | null
         gemini_model?: string
@@ -4581,9 +4585,13 @@ export const apiPublico = {
    *  organización — solo la clave de Gemini del `.env`. Va con `FormData`,
    *  igual que `leerDocumentoIA`. */
   testmeter: {
-    medirFoto: async (fichero: File | Blob): Promise<ResultadoMedicionIA> => {
+    medirFoto: async (
+      fichero: File | Blob,
+      proveedor: ProveedorVision = 'gemini',
+    ): Promise<ResultadoMedicionIA> => {
       const cuerpo = new FormData()
       cuerpo.append('fichero', fichero, 'foto.jpg')
+      cuerpo.append('proveedor', proveedor)
       const respuesta = await fetch('/api/publico/testmeter/escala', {
         method: 'POST',
         body: cuerpo,
@@ -4591,7 +4599,43 @@ export const apiPublico = {
       if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
       return respuesta.json() as Promise<ResultadoMedicionIA>
     },
+
+    /** Revisión de una planta ya levantada en AR: las fotos de cada esquina
+     *  más las longitudes que midió el AR. La IA no recalcula la geometría
+     *  (ver `planta.py`), solo dice qué elementos hay en cada muro. */
+    revisarPlanta: async (
+      fotos: Blob[],
+      muros: number[],
+      proveedor: ProveedorVision = 'deepseek',
+    ): Promise<RevisionPlanta> => {
+      const cuerpo = new FormData()
+      fotos.forEach((foto, i) => cuerpo.append('fotos', foto, `esquina-${i}.jpg`))
+      cuerpo.append('muros', JSON.stringify(muros))
+      cuerpo.append('proveedor', proveedor)
+      const respuesta = await fetch('/api/publico/testmeter/planta', {
+        method: 'POST',
+        body: cuerpo,
+      })
+      if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+      return respuesta.json() as Promise<RevisionPlanta>
+    },
   },
+}
+
+export interface ElementoEnMuro {
+  muro: number
+  tipo: string
+  ancho_cm: number | null
+  alto_cm: number | null
+  desde: number
+  hasta: number
+  confianza: 'alta' | 'media' | 'baja' | null
+}
+
+export interface RevisionPlanta {
+  elementos: ElementoEnMuro[]
+  observaciones: string | null
+  metricas: MetricasIA | null
 }
 
 export interface LecturaIA {
@@ -4611,11 +4655,25 @@ export interface ElementoMedido {
   confianza: 'alta' | 'media' | 'baja' | null
 }
 
+export type ProveedorVision = 'gemini' | 'deepseek'
+
+export interface MetricasIA {
+  proveedor: string
+  modelo: string
+  ms: number
+  tokens_entrada: number
+  tokens_salida: number
+  /** Solo DeepSeek: parte de los tokens de salida gastados en razonar antes
+   *  de responder. Se pagan igual. Gemini no lo desglosa y llega a 0. */
+  tokens_razonamiento: number
+}
+
 export interface ResultadoMedicionIA {
   elementos: ElementoMedido[]
   referencia: string | null
   razonamiento: string | null
   mensaje: string | null
+  metricas: MetricasIA | null
 }
 
 export interface DatosComponente {

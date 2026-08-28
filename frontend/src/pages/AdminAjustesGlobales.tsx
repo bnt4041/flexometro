@@ -27,6 +27,7 @@ function AjustesIA() {
   const [config, setConfig] = useState<ConfiguracionIA | null>(null)
   const [deepseekKey, setDeepseekKey] = useState('')
   const [deepseekModel, setDeepseekModel] = useState('')
+  const [deepseekVisionModel, setDeepseekVisionModel] = useState('')
   const [deepseekUrl, setDeepseekUrl] = useState('')
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiModel, setGeminiModel] = useState('')
@@ -39,6 +40,7 @@ function AjustesIA() {
       const datos = await api.admin.ajustesIA.get()
       setConfig(datos)
       setDeepseekModel(datos.deepseek_model)
+      setDeepseekVisionModel(datos.deepseek_vision_model)
       setDeepseekUrl(datos.deepseek_base_url)
       setGeminiModel(datos.gemini_model)
       setGeminiUrl(datos.gemini_base_url)
@@ -58,6 +60,7 @@ function AjustesIA() {
       await api.admin.ajustesIA.update({
         deepseek_api_key: deepseekKey || undefined,
         deepseek_model: deepseekModel,
+        deepseek_vision_model: deepseekVisionModel,
         deepseek_base_url: deepseekUrl,
         gemini_api_key: geminiKey || undefined,
         gemini_model: geminiModel,
@@ -95,6 +98,13 @@ function AjustesIA() {
         </Field>
         <Field label="DeepSeek — modelo">
           <input className="input" value={deepseekModel} onChange={(e) => setDeepseekModel(e.target.value)} />
+        </Field>
+        <Field label="DeepSeek — modelo de visión" hint="Misma clave y base URL que el de texto">
+          <input
+            className="input"
+            value={deepseekVisionModel}
+            onChange={(e) => setDeepseekVisionModel(e.target.value)}
+          />
         </Field>
         <Field ancho="doble" label="DeepSeek — base URL">
           <input className="input" value={deepseekUrl} onChange={(e) => setDeepseekUrl(e.target.value)} />

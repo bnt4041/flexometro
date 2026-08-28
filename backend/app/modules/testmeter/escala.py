@@ -29,6 +29,7 @@ así que la clave sale directa del `.env` en vez de pasar por
 import base64
 import json
 import logging
+import time
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -60,11 +61,27 @@ class ElementoMedido(BaseModel):
     confianza: str | None = None
 
 
+class MetricasIA(BaseModel):
+    """Coste y latencia de la llamada, para poder comparar proveedores desde
+    la propia pantalla en vez de a ciegas."""
+
+    proveedor: str
+    modelo: str
+    ms: int
+    tokens_entrada: int = 0
+    tokens_salida: int = 0
+    #: DeepSeek de visión es un modelo de razonamiento: parte de los tokens de
+    #: salida se van en pensar antes de responder, y esa parte se paga igual.
+    #: Gemini no desglosa esto, así que aquí va a 0.
+    tokens_razonamiento: int = 0
+
+
 class ResultadoEscalaOut(BaseModel):
     elementos: list[ElementoMedido] = []
     referencia: str | None = None
     razonamiento: str | None = None
     mensaje: str | None = None
+    metricas: MetricasIA | None = None
 
 
 class MedidaEntrePuntosOut(BaseModel):
@@ -119,16 +136,24 @@ _PROMPT = (
 )
 
 
-def _parsear(contenido: str) -> ResultadoEscalaOut:
+def _parsear(contenido: str, proveedor: str) -> ResultadoEscalaOut:
+    if not contenido.strip():
+        # Le pasa a DeepSeek de visión: agota el presupuesto de tokens
+        # razonando y corta antes de escribir el JSON. Sin este aviso, en la
+        # pantalla solo se vería "no ha encontrado nada", que despista.
+        raise GeminiError(
+            f"{proveedor} no llegó a responder: agotó el presupuesto de tokens razonando "
+            "antes de emitir el resultado. Prueba con una foto más sencilla o con el otro proveedor."
+        )
     try:
         bruto = json.loads(contenido)
     except json.JSONDecodeError as exc:
-        raise GeminiError(f"Gemini no devolvió un JSON válido: {exc}") from exc
+        raise GeminiError(f"{proveedor} no devolvió un JSON válido: {exc}") from exc
     try:
         resultado = ResultadoEscalaOut.model_validate(bruto)
     except ValidationError as exc:
         raise GeminiError(
-            f"La respuesta de Gemini no encaja en el esquema esperado: {exc}"
+            f"La respuesta de {proveedor} no encaja en el esquema esperado: {exc}"
         ) from exc
     # Una caja mal formada estropea el dibujo en el cliente; mejor descartar
     # ese elemento que pintar un rectángulo imposible sobre la foto.
@@ -159,6 +184,7 @@ async def detectar_escala(contenido: bytes, mime_type: str) -> ResultadoEscalaOu
         # que la misma foto dé la misma medida dos veces seguidas.
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
     }
+    arranque = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=60.0) as cliente:
             respuesta = await cliente.post(
@@ -170,10 +196,103 @@ async def detectar_escala(contenido: bytes, mime_type: str) -> ResultadoEscalaOu
     except httpx.HTTPError as exc:
         logger.warning("Fallo al llamar a Gemini: %s", exc)
         raise GeminiError(f"No se pudo contactar con Gemini: {exc}") from exc
+    ms = int((time.monotonic() - arranque) * 1000)
 
     cuerpo = respuesta.json()
     try:
         texto = cuerpo["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError) as exc:
         raise GeminiError(f"Respuesta de Gemini sin contenido interpretable: {cuerpo}") from exc
-    return _parsear(texto)
+
+    resultado = _parsear(texto, "Gemini")
+    uso = cuerpo.get("usageMetadata", {})
+    resultado.metricas = MetricasIA(
+        proveedor="gemini",
+        modelo=settings.gemini_model,
+        ms=ms,
+        tokens_entrada=int(uso.get("promptTokenCount", 0)),
+        tokens_salida=int(uso.get("candidatesTokenCount", 0)),
+    )
+    return resultado
+
+
+# DeepSeek de visión viene con el modo PENSANTE activado por defecto, y para
+# esta tarea es un mal negocio: medido, gastaba ~8.700 tokens razonando, tardaba
+# 76-100 s y a menudo agotaba el presupuesto ANTES de emitir el JSON (devolvía
+# contenido vacío). Apagarlo con `thinking: disabled` (parámetro documentado en
+# https://api-docs.deepseek.com/guides/thinking_mode/) lo deja en ~2,8 s y
+# ~1.285 tokens, con las cajas igual de precisas o más.
+#
+# Además, el modo pensante IGNORA `temperature` — así que apagarlo es también
+# lo que hace que el `temperature: 0` de abajo sirva de algo y que la misma
+# foto dé el mismo resultado dos veces.
+DEEPSEEK_SIN_PENSAR = {"type": "disabled"}
+DEEPSEEK_MAX_TOKENS = 4000
+
+
+async def detectar_escala_deepseek(contenido: bytes, mime_type: str) -> ResultadoEscalaOut:
+    """Misma tarea que `detectar_escala`, contra DeepSeek en vez de Gemini.
+
+    La API de DeepSeek es compatible con la de OpenAI, así que la imagen no va
+    como `inline_data` (formato de Gemini) sino como un `image_url` con un
+    data: URI en base64. La clave y la `base_url` son las MISMAS que las del
+    modelo de texto: lo único que cambia es qué `model` se manda.
+    """
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        raise GeminiError("DeepSeek no tiene clave configurada (DEEPSEEK_API_KEY en el .env)")
+
+    payload = {
+        "model": settings.deepseek_vision_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"text": _PROMPT, "type": "text"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{base64.b64encode(contenido).decode()}"
+                        },
+                    },
+                ],
+            }
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": DEEPSEEK_MAX_TOKENS,
+        "temperature": 0,
+        "thinking": DEEPSEEK_SIN_PENSAR,
+    }
+    arranque = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as cliente:
+            respuesta = await cliente.post(
+                f"{settings.deepseek_base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+            )
+            respuesta.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("Fallo al llamar a DeepSeek: %s", exc)
+        raise GeminiError(f"No se pudo contactar con DeepSeek: {exc}") from exc
+    ms = int((time.monotonic() - arranque) * 1000)
+
+    cuerpo = respuesta.json()
+    try:
+        texto = cuerpo["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError) as exc:
+        raise GeminiError(f"Respuesta de DeepSeek sin contenido interpretable: {cuerpo}") from exc
+
+    resultado = _parsear(texto, "DeepSeek")
+    uso = cuerpo.get("usage", {})
+    resultado.metricas = MetricasIA(
+        proveedor="deepseek",
+        modelo=settings.deepseek_vision_model,
+        ms=ms,
+        tokens_entrada=int(uso.get("prompt_tokens", 0)),
+        tokens_salida=int(uso.get("completion_tokens", 0)),
+        tokens_razonamiento=int(
+            (uso.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)
+        ),
+    )
+    return resultado
