@@ -1,29 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Sparkles, Trash2 } from 'lucide-react'
 
+import { AyudaIADocumentoModal } from '../components/AyudaIADocumentoModal'
 import { ContactosAsociados } from '../components/ContactosAsociados'
+import { DescompuestoDocumento } from '../components/DescompuestoDocumento'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
+import { MedicionesDocumento } from '../components/MedicionesDocumento'
 import { NotasCrm } from '../components/NotasCrm'
+import { RejillaDocumento } from '../components/RejillaDocumento'
 import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
-import {
-  EmptyState,
-  ErrorNotice,
-  Field,
-  Modal,
-  ModalPantalla,
-  Tooltip,
-  formatoImporte,
-} from '../components/ui'
+import { EmptyState, ErrorNotice, ModalPantalla, Tooltip } from '../components/ui'
+import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_PEDIDO, ETIQUETA_TIPO_PEDIDO, api } from '../lib/api'
-import type {
-  Concepto,
-  EstadoPedido,
-  PedidoDetalle as Detalle,
-} from '../lib/api'
+import type { EstadoPedido, PedidoCapituloConPartidas, PedidoDetalle as Detalle } from '../lib/api'
 import { useContextoPedidos } from './Pedidos'
 
 export function PedidoDetalle() {
@@ -31,8 +24,11 @@ export function PedidoDetalle() {
   const navigate = useNavigate()
   const { onCambio } = useContextoPedidos()
   const [pedido, setPedido] = useState<Detalle | null>(null)
+  const [capitulos, setCapitulos] = useState<PedidoCapituloConPartidas[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [anadiendo, setAnadiendo] = useState(false)
+  const [errorCapitulos, setErrorCapitulos] = useState<string | null>(null)
+  const [seleccionId, setSeleccionId] = useState<string | null>(null)
+  const [ayudaIAAbierta, setAyudaIAAbierta] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -43,9 +39,19 @@ export function PedidoDetalle() {
     }
   }, [id])
 
+  const cargarCapitulos = useCallback(async () => {
+    try {
+      setCapitulos(await api.pedidos.capitulos(id))
+      setErrorCapitulos(null)
+    } catch (err) {
+      setErrorCapitulos(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }, [id])
+
   useEffect(() => {
     void cargar()
-  }, [cargar])
+    void cargarCapitulos()
+  }, [cargar, cargarCapitulos])
 
   function cerrar() {
     navigate('/pedidos')
@@ -81,10 +87,8 @@ export function PedidoDetalle() {
     }
   }
 
-  async function eliminarLinea(lineaId: string) {
-    await api.pedidosLineas.remove(lineaId)
-    await cargar()
-  }
+  const partidaSeleccionada = seleccionId ? buscarPartida(capitulos, seleccionId) : null
+  const permiteDescompuesto = pedido.tipo === 'cliente'
 
   const pestanaDatos = (
     <>
@@ -125,78 +129,186 @@ export function PedidoDetalle() {
       </div>
 
       <ErrorNotice error={error} />
+      <ErrorNotice error={errorCapitulos} />
 
-      <div className="page-head" style={{ marginBottom: 'var(--sp-3)' }}>
-        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Líneas</h2>
-        <button className="btn" onClick={() => setAnadiendo(true)}>
-          <Plus size={16} aria-hidden="true" />
-          Añadir línea
-        </button>
-      </div>
-
-      <div className="table-wrap">
-        {pedido.lineas.length === 0 ? (
-          <EmptyState title="Sin líneas">
-            Añade lo que se encarga {pedido.tipo === 'proveedor' ? 'al proveedor' : 'del cliente'}.
-          </EmptyState>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Descripción</th>
-                <th className="table__num">Cantidad</th>
-                <th className="table__num">Precio</th>
-                <th className="table__num">Importe</th>
-                <th className="table__actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {pedido.lineas.map((l) => (
-                <tr key={l.id}>
-                  <td>
-                    {l.descripcion} <span className="muted">({l.unidad})</span>
-                  </td>
-                  <td className="table__num">{formatoImporte(l.cantidad, 3)}</td>
-                  <td className="table__num">{formatoImporte(l.precio_unitario, 4)}</td>
-                  <td className="table__num">
-                    <strong>{formatoImporte(l.importe)}</strong>
-                  </td>
-                  <td className="table__actions">
-                    <Tooltip texto="Quitar esta línea">
-                      <button
-                        className="btn btn--sm btn--danger btn--solo-icono"
-                        onClick={() => void eliminarLinea(l.id)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
+      <WidgetGrid
+        id="pedido-datos"
+        widgets={[
+          {
+            id: 'lineas',
+            titulo: 'Capítulos y partidas',
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 12,
+            minW: 4,
+            minH: 6,
+            contenido: (
+              <RejillaDocumento
+                capitulos={capitulos}
+                permiteDescompuesto={permiteDescompuesto}
+                onCrearCapitulo={() => api.pedidos.addCapitulo(id, { resumen: 'Nuevo capítulo' })}
+                onActualizarCapitulo={(capId, cambios) => api.pedidosCapitulos.update(capId, cambios)}
+                onEliminarCapitulo={(capId) => api.pedidosCapitulos.remove(capId)}
+                onCrearPartida={(capId) =>
+                  api.pedidosCapitulos.addPartida(capId, { resumen: 'Nueva partida' })
+                }
+                onActualizarPartida={(partId, cambios) => api.pedidosPartidas.update(partId, cambios)}
+                onEliminarPartida={(partId) => api.pedidosPartidas.remove(partId)}
+                onSeleccionarPartida={setSeleccionId}
+                seleccionadaId={seleccionId}
+                onCambio={cargarCapitulos}
+                origenEntidad="pedido"
+                etiquetaDocumento={pedido.codigo}
+                onPegarCapitulos={(datos) => api.pedidos.pegarCapitulos(id, datos)}
+                onPegarPartidas={(capituloId, datos) => api.pedidosCapitulos.pegarPartidas(capituloId, datos)}
+              />
+            ),
+          },
+          {
+            id: 'mediciones',
+            titulo: 'Mediciones',
+            x: 8,
+            y: 0,
+            w: 4,
+            h: 12,
+            minW: 3,
+            minH: 6,
+            contenido: !partidaSeleccionada ? (
+              <EmptyState title="Nada seleccionado">
+                Selecciona una partida en el listado para ver y editar su medición aquí.
+              </EmptyState>
+            ) : (
+              <MedicionesDocumento
+                key={partidaSeleccionada.id}
+                mediciones={partidaSeleccionada.mediciones}
+                unidad={partidaSeleccionada.unidad}
+                medicionTotal={partidaSeleccionada.medicion}
+                precio={partidaSeleccionada.precio}
+                importe={partidaSeleccionada.importe}
+                onCrear={() => api.pedidosPartidas.addMedicion(partidaSeleccionada.id, { uds: '1' })}
+                onActualizar={(medId, campos) => api.pedidosMediciones.update(medId, campos)}
+                onEliminar={(medId) => api.pedidosMediciones.remove(medId)}
+                onCambio={cargarCapitulos}
+                origenEntidad="pedido"
+                origenEtiqueta={`${partidaSeleccionada.codigo} · ${partidaSeleccionada.resumen}`}
+                onPegar={(datos) => api.pedidosPartidas.pegarMediciones(partidaSeleccionada.id, datos)}
+              />
+            ),
+          },
+          ...(permiteDescompuesto
+            ? [
+                {
+                  id: 'descompuesto',
+                  titulo: 'Descompuesto',
+                  x: 0,
+                  y: 12,
+                  w: 12,
+                  h: 10,
+                  minW: 5,
+                  minH: 5,
+                  contenido: !partidaSeleccionada ? (
+                    <EmptyState title="Ninguna partida seleccionada">
+                      Selecciona una partida en el listado para ver de qué se compone su precio.
+                    </EmptyState>
+                  ) : (
+                    <DescompuestoDocumento
+                      key={partidaSeleccionada.id}
+                      codigo={partidaSeleccionada.codigo}
+                      resumen={partidaSeleccionada.resumen}
+                      unidad={partidaSeleccionada.unidad}
+                      precio={partidaSeleccionada.precio}
+                      costesIndirectos={partidaSeleccionada.costes_indirectos}
+                      etiquetaAlcanceAmplio="En todo el pedido donde aparezca"
+                      cargar={() => api.pedidosPartidas.descomposicion(partidaSeleccionada.id)}
+                      anadirComponente={(datos) =>
+                        api.pedidosPartidas.anadirComponente(partidaSeleccionada.id, datos)
+                      }
+                      quitarComponente={(lineaId) =>
+                        api.pedidosPartidas.quitarComponente(partidaSeleccionada.id, lineaId)
+                      }
+                      independizarDescomposicion={() =>
+                        api.pedidosPartidas.independizarDescomposicion(partidaSeleccionada.id)
+                      }
+                      cambiarPrecioComponente={(datos) =>
+                        api.pedidosPartidas.cambiarPrecioComponente(partidaSeleccionada.id, {
+                          hijo_id: datos.hijo_id,
+                          precio: datos.precio,
+                          alcance: datos.alcance === 'amplio' ? 'pedido' : 'partida',
+                        })
+                      }
+                      cambiarRendimientoComponente={(datos) =>
+                        api.pedidosPartidas.cambiarRendimientoComponente(partidaSeleccionada.id, datos)
+                      }
+                      cambiarResumenComponente={(datos) =>
+                        api.pedidosPartidas.cambiarResumenComponente(partidaSeleccionada.id, datos)
+                      }
+                      cambiarNaturalezaComponente={(datos) =>
+                        api.pedidosPartidas.cambiarNaturalezaComponente(partidaSeleccionada.id, datos)
+                      }
+                      cambiarUnidadComponente={(datos) =>
+                        api.pedidosPartidas.cambiarUnidadComponente(partidaSeleccionada.id, datos)
+                      }
+                      onCambio={cargarCapitulos}
+                      origenEntidad="pedido"
+                      pegarComponentes={(datos) =>
+                        api.pedidosPartidas.pegarComponentes(partidaSeleccionada.id, datos)
+                      }
+                    />
+                  ),
+                },
+                {
+                  // Solo pedidos de cliente: uno de proveedor no tiene
+                  // descompuesto que montar y el backend responde 409 si se
+                  // llama aquí (ver `pedido_ia_router._pedido_cliente_propio`).
+                  id: 'ayuda-ia',
+                  titulo: 'Ayuda con IA',
+                  x: 0,
+                  y: 22,
+                  w: 12,
+                  h: 3,
+                  minW: 4,
+                  minH: 3,
+                  contenido: !partidaSeleccionada ? (
+                    <EmptyState title="Ninguna partida seleccionada">
+                      Selecciona una partida en el listado para pedir ayuda a la IA sobre ella.
+                    </EmptyState>
+                  ) : (
+                    <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+                      <button className="btn btn--sm" onClick={() => setAyudaIAAbierta(true)}>
+                        <Sparkles size={14} aria-hidden="true" />
+                        Ayuda con IA sobre «{partidaSeleccionada.resumen}»
                       </button>
-                    </Tooltip>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="fila-total">
-                <td colSpan={3} className="table__num total-label">
-                  Total
-                </td>
-                <td className="table__num">
-                  <strong>{formatoImporte(pedido.total)}</strong>
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        )}
-      </div>
+                    </div>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
 
-      {anadiendo && (
-        <NuevaLineaModal
-          pedidoId={id}
-          onClose={() => setAnadiendo(false)}
-          onAnadida={() => {
-            setAnadiendo(false)
-            void cargar()
+      {ayudaIAAbierta && partidaSeleccionada && (
+        <AyudaIADocumentoModal
+          contexto={{
+            tipo: 'partida',
+            codigo: partidaSeleccionada.codigo,
+            resumen: partidaSeleccionada.resumen,
+            unidad: partidaSeleccionada.unidad,
+            precio: partidaSeleccionada.precio,
           }}
+          destinoCapituloId={partidaSeleccionada.capitulo_id}
+          conversar={(datos) =>
+            api.pedidos.iaConversar(id, {
+              contexto: { ...datos.contexto, pedido_id: id, pedido_codigo: pedido.codigo },
+              mensajes: datos.mensajes,
+            })
+          }
+          aplicarCapitulo={(datos) => api.pedidos.iaAplicarCapitulo(id, datos)}
+          pegarPartida={(capituloId, datos) => api.pedidosCapitulos.pegarPartidas(capituloId, datos)}
+          crearPartida={(capituloId, datos) => api.pedidosCapitulos.addPartida(capituloId, datos)}
+          anadirComponente={(partidaId, datos) => api.pedidosPartidas.anadirComponente(partidaId, datos)}
+          onCambio={cargarCapitulos}
+          onClose={() => setAyudaIAAbierta(false)}
         />
       )}
     </>
@@ -245,9 +357,7 @@ export function PedidoDetalle() {
                 ]
               : []),
           ]}
-          cargarAsociados={() =>
-            cargarAsociadosDeObra(pedido.obra_id, { tipo: 'pedido', id })
-          }
+          cargarAsociados={() => cargarAsociadosDeObra(pedido.obra_id, { tipo: 'pedido', id })}
         />
       ),
     },
@@ -272,155 +382,14 @@ export function PedidoDetalle() {
   )
 }
 
-function NuevaLineaModal({
-  pedidoId,
-  onClose,
-  onAnadida,
-}: {
-  pedidoId: string
-  onClose: () => void
-  onAnadida: () => void
-}) {
-  const [modo, setModo] = useState<'banco' | 'manual'>('banco')
-  const [q, setQ] = useState('')
-  const [conceptos, setConceptos] = useState<Concepto[]>([])
-  const [conceptoId, setConceptoId] = useState('')
-  const [descripcion, setDescripcion] = useState('')
-  const [unidad, setUnidad] = useState('ud')
-  const [cantidad, setCantidad] = useState('1')
-  const [precio, setPrecio] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (modo !== 'banco') return
-    const idTimeout = setTimeout(() => {
-      void api.conceptos
-        .list({ q: q || undefined, activo: true, limit: 50 })
-        .then((page) => setConceptos(page.items))
-        .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
-    }, 250)
-    return () => clearTimeout(idTimeout)
-  }, [q, modo])
-
-  async function guardar() {
-    setError(null)
-    try {
-      await api.pedidos.addLinea(
-        pedidoId,
-        modo === 'banco'
-          ? { concepto_id: conceptoId, cantidad, precio_unitario: precio || null }
-          : { descripcion, unidad, cantidad, precio_unitario: precio },
-      )
-      onAnadida()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
-    }
+/** Busca una partida por id en el árbol de capítulos ya cargado — la
+ *  selección se guarda solo como id para no arrastrar una copia que quede
+ *  desactualizada tras la siguiente recarga (mismo criterio que
+ *  `PresupuestoDetalle.buscarPartida`). */
+function buscarPartida(capitulos: PedidoCapituloConPartidas[], id: string) {
+  for (const capitulo of capitulos) {
+    const encontrada = capitulo.partidas.find((p) => p.id === id)
+    if (encontrada) return encontrada
   }
-
-  const listo =
-    modo === 'banco'
-      ? conceptoId !== '' && cantidad !== ''
-      : descripcion.trim() !== '' && cantidad !== '' && precio !== ''
-
-  return (
-    <Modal title="Añadir línea" onClose={onClose}>
-      <div className="form-section">
-        <ErrorNotice error={error} />
-        <Field label="Origen">
-          <select
-            className="select"
-            value={modo}
-            onChange={(e) => setModo(e.target.value as 'banco' | 'manual')}
-          >
-            <option value="banco">Del banco de precios</option>
-            <option value="manual">Descripción manual</option>
-          </select>
-        </Field>
-
-        {modo === 'banco' ? (
-          <>
-            <div style={{ marginTop: 'var(--sp-4)' }}>
-              <Field label="Buscar en el banco de precios">
-                <input
-                  className="input"
-                  placeholder="Código o descripción…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  autoFocus
-                />
-              </Field>
-            </div>
-            <div className="lista-seleccion">
-              {conceptos.length === 0 ? (
-                <div className="muted" style={{ padding: 'var(--sp-3)' }}>
-                  Sin resultados
-                </div>
-              ) : (
-                conceptos.map((c) => (
-                  <button
-                    key={c.id}
-                    className={
-                      conceptoId === c.id ? 'lista-seleccion__item is-activo' : 'lista-seleccion__item'
-                    }
-                    onClick={() => setConceptoId(c.id)}
-                  >
-                    <span className="table__code">{c.codigo}</span>
-                    <span className="lista-seleccion__texto">{c.resumen}</span>
-                    <span className="table__num">{c.unidad}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="form-grid" style={{ marginTop: 'var(--sp-4)' }}>
-            <Field ancho="doble" label="Descripción">
-              <input
-                className="input"
-                value={descripcion}
-                onChange={(e) => setDescripcion(e.target.value)}
-              />
-            </Field>
-            <Field label="Unidad">
-              <input className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)} />
-            </Field>
-          </div>
-        )}
-
-        <div className="form-grid" style={{ marginTop: 'var(--sp-4)' }}>
-          <Field label="Cantidad">
-            <input
-              className="input"
-              type="number"
-              step="0.001"
-              value={cantidad}
-              onChange={(e) => setCantidad(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Precio unitario"
-            hint={modo === 'banco' ? 'Vacío: tarifa del proveedor' : undefined}
-          >
-            <input
-              className="input"
-              type="number"
-              step="0.0001"
-              value={precio}
-              onChange={(e) => setPrecio(e.target.value)}
-            />
-          </Field>
-        </div>
-      </div>
-      <div className="form-actions">
-        <button className="btn" onClick={onClose}>
-          <X size={16} aria-hidden="true" />
-          Cancelar
-        </button>
-        <button className="btn btn--primary" disabled={!listo} onClick={() => void guardar()}>
-          <Plus size={16} aria-hidden="true" />
-          Añadir
-        </button>
-      </div>
-    </Modal>
-  )
+  return null
 }

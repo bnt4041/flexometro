@@ -7,11 +7,19 @@ import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
+import { MedicionesDocumento } from '../components/MedicionesDocumento'
 import { NotasCrm } from '../components/NotasCrm'
+import { RejillaDocumento } from '../components/RejillaDocumento'
 import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { ETIQUETA_ESTADO_FACTURA_RECIBIDA, ETIQUETA_IVA, api } from '../lib/api'
-import type { AlbaranResumen, EstadoFacturaRecibida, FacturaRecibida as Detalle, TipoIVA } from '../lib/api'
+import type {
+  AlbaranResumen,
+  EstadoFacturaRecibida,
+  FacturaRecibida as Detalle,
+  FacturaRecibidaCapituloConPartidas,
+  TipoIVA,
+} from '../lib/api'
 import { useContextoFacturasRecibidas } from './FacturasRecibidas'
 
 export function FacturaRecibidaDetalle() {
@@ -21,8 +29,11 @@ export function FacturaRecibidaDetalle() {
   const [factura, setFactura] = useState<Detalle | null>(null)
   const [borrador, setBorrador] = useState<Partial<Detalle>>({})
   const [albaranesObra, setAlbaranesObra] = useState<AlbaranResumen[]>([])
+  const [capitulos, setCapitulos] = useState<FacturaRecibidaCapituloConPartidas[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [errorCapitulos, setErrorCapitulos] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
+  const [seleccionId, setSeleccionId] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -36,9 +47,23 @@ export function FacturaRecibidaDetalle() {
     }
   }, [id])
 
+  const cargarCapitulos = useCallback(async () => {
+    try {
+      setCapitulos(await api.facturasRecibidas.capitulos(id))
+      setErrorCapitulos(null)
+    } catch (err) {
+      setErrorCapitulos(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }, [id])
+
   useEffect(() => {
     void cargar()
-  }, [cargar])
+    void cargarCapitulos()
+  }, [cargar, cargarCapitulos])
+
+  async function recargarTodo() {
+    await Promise.all([cargar(), cargarCapitulos()])
+  }
 
   function cerrar() {
     navigate('/facturas-recibidas')
@@ -111,6 +136,7 @@ export function FacturaRecibidaDetalle() {
   }
 
   const disponibles = albaranesObra.filter((a) => !factura.albaran_ids.includes(a.id))
+  const partidaSeleccionada = seleccionId ? buscarPartida(capitulos, seleccionId) : null
 
   const pestanaDatos = (
     <div className="ficha-datos">
@@ -218,6 +244,67 @@ export function FacturaRecibidaDetalle() {
               {guardando ? 'Guardando…' : 'Guardar cambios'}
             </button>
           </span>
+        </div>
+      </div>
+
+      <div className="page-head" style={{ marginTop: 'var(--sp-5)', marginBottom: 'var(--sp-3)' }}>
+        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 650 }}>Capítulos y partidas</h2>
+      </div>
+      <ErrorNotice error={errorCapitulos} />
+      <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+        <div className="card" style={{ flex: '1 1 60%', minWidth: 0 }}>
+          <RejillaDocumento
+            capitulos={capitulos}
+            permiteDescompuesto={false}
+            onCrearCapitulo={() => api.facturasRecibidas.addCapitulo(id, { resumen: 'Nuevo capítulo' })}
+            onActualizarCapitulo={(capId, cambios) =>
+              api.facturasRecibidasCapitulos.update(capId, cambios)
+            }
+            onEliminarCapitulo={(capId) => api.facturasRecibidasCapitulos.remove(capId)}
+            onCrearPartida={(capId) =>
+              api.facturasRecibidasCapitulos.addPartida(capId, { resumen: 'Nueva partida' })
+            }
+            onActualizarPartida={(partId, cambios) =>
+              api.facturasRecibidasPartidas.update(partId, cambios)
+            }
+            onEliminarPartida={(partId) => api.facturasRecibidasPartidas.remove(partId)}
+            onSeleccionarPartida={setSeleccionId}
+            seleccionadaId={seleccionId}
+            onCambio={() => void recargarTodo()}
+            origenEntidad="factura_recibida"
+            etiquetaDocumento={factura.codigo}
+            onPegarCapitulos={(datos) => api.facturasRecibidas.pegarCapitulos(id, datos)}
+            onPegarPartidas={(capituloId, datos) =>
+              api.facturasRecibidasCapitulos.pegarPartidas(capituloId, datos)
+            }
+          />
+        </div>
+        <div className="card" style={{ flex: '1 1 40%', minWidth: 0 }}>
+          {!partidaSeleccionada ? (
+            <EmptyState title="Nada seleccionado">
+              Selecciona una partida en el listado para ver y editar su medición aquí.
+            </EmptyState>
+          ) : (
+            <MedicionesDocumento
+              key={partidaSeleccionada.id}
+              mediciones={partidaSeleccionada.mediciones}
+              unidad={partidaSeleccionada.unidad}
+              medicionTotal={partidaSeleccionada.medicion}
+              precio={partidaSeleccionada.precio}
+              importe={partidaSeleccionada.importe}
+              onCrear={() =>
+                api.facturasRecibidasPartidas.addMedicion(partidaSeleccionada.id, { uds: '1' })
+              }
+              onActualizar={(medId, campos) => api.facturasRecibidasMediciones.update(medId, campos)}
+              onEliminar={(medId) => api.facturasRecibidasMediciones.remove(medId)}
+              onCambio={() => void recargarTodo()}
+              origenEntidad="factura_recibida"
+              origenEtiqueta={`${partidaSeleccionada.codigo} · ${partidaSeleccionada.resumen}`}
+              onPegar={(datos) =>
+                api.facturasRecibidasPartidas.pegarMediciones(partidaSeleccionada.id, datos)
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -337,4 +424,14 @@ export function FacturaRecibidaDetalle() {
       onClose={cerrar}
     />
   )
+}
+
+/** Busca una partida por id en el árbol de capítulos ya cargado — igual que
+ *  `PresupuestoDetalle.buscarPartida`. */
+function buscarPartida(capitulos: FacturaRecibidaCapituloConPartidas[], id: string) {
+  for (const capitulo of capitulos) {
+    const encontrada = capitulo.partidas.find((p) => p.id === id)
+    if (encontrada) return encontrada
+  }
+  return null
 }

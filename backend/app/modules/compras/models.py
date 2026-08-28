@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import TipoIVA, enum_column
 from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.modules.presupuestos.models_presupuesto import MetodoCalculo
 
 SCHEMA = "compras"
 
@@ -245,20 +246,35 @@ class Pedido(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixi
     )
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    lineas: Mapped[list["PedidoLinea"]] = relationship(
+    # Fase 1 de la jerarquía capítulo/partida/medición (misma estructura que
+    # `Presupuesto`, ver `models_presupuesto.py`). Solo se usa de verdad en
+    # pedidos de cliente: ahí es donde las partidas pueden llevar
+    # descompuesto propio y tiene sentido elegir cómo se pasa del coste a la
+    # venta. En pedidos de proveedor se queda en su valor por defecto sin
+    # usarse — la partida es siempre alzada.
+    metodo_calculo: Mapped[MetodoCalculo] = mapped_column(
+        enum_column(MetodoCalculo, "metodo_calculo"),
+        nullable=False,
+        default=MetodoCalculo.CLASICO,
+    )
+    porcentaje_metodo: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    capitulos: Mapped[list["PedidoCapitulo"]] = relationship(
         back_populates="pedido",
         cascade="all, delete-orphan",
-        order_by="PedidoLinea.orden",
+        order_by="PedidoCapitulo.orden",
     )
 
 
-class PedidoLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
-    """Una línea del pedido — mismo esquema que `AlbaranLinea`: cantidad de
-    un concepto (o de un material fuera de banco) a un precio."""
+class PedidoCapitulo(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Nodo de la jerarquía del pedido. A diferencia de
+    `presupuestos.Capitulo`, un solo nivel plano — sin anidar subcapítulos."""
 
-    __tablename__ = "pedido_linea"
+    __tablename__ = "pedido_capitulo"
     __table_args__ = (
-        Index("ix_compras_pedido_linea_pedido", "pedido_id"),
+        Index("ix_compras_pedido_capitulo_pedido", "pedido_id"),
         {"schema": SCHEMA},
     )
 
@@ -267,20 +283,160 @@ class PedidoLinea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
         ForeignKey(f"{SCHEMA}.pedido.id", ondelete="CASCADE"),
         nullable=False,
     )
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    pedido: Mapped[Pedido] = relationship(back_populates="capitulos")
+    partidas: Mapped[list["PedidoPartida"]] = relationship(
+        back_populates="capitulo",
+        cascade="all, delete-orphan",
+        order_by="PedidoPartida.orden",
+    )
+
+
+class PedidoPartida(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea presupuestada del pedido — mismo esquema que
+    `presupuestos.Partida`. `concepto_id` es opcional: una partida alzada no
+    se descompone y lleva su precio a mano."""
+
+    __tablename__ = "pedido_partida"
+    __table_args__ = (
+        Index("ix_compras_pedido_partida_capitulo", "capitulo_id"),
+        Index("ix_compras_pedido_partida_pedido", "pedido_id"),
+        Index("ix_compras_pedido_partida_concepto", "concepto_id"),
+        {"schema": SCHEMA},
+    )
+
+    pedido_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capitulo_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido_capitulo.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     concepto_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    descripcion: Mapped[str] = mapped_column(String(250), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
     unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
-    cantidad: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
-    precio_unitario: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-    importe: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    costes_indirectos: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+
+    precio_venta: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    venta_bloqueada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    importe_venta: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    medicion: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    importe: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    pedido: Mapped[Pedido] = relationship(back_populates="lineas")
+    capitulo: Mapped[PedidoCapitulo] = relationship(back_populates="partidas")
+    mediciones: Mapped[list["PedidoMedicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="PedidoMedicion.orden",
+    )
+    # Solo se rellena cuando `Pedido.tipo == cliente`; en pedidos de
+    # proveedor la partida es siempre alzada — no se fuerza a nivel de base
+    # de datos (no hay CHECK), lo hace el servicio en la fase siguiente.
+    descomposicion: Mapped[list["PedidoPartidaDescomposicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="PedidoPartidaDescomposicion.orden",
+    )
+
+
+class PedidoMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea del estado de mediciones de una partida del pedido — mismo
+    esquema que `presupuestos.LineaMedicion` (sin soporte de fórmulas)."""
+
+    __tablename__ = "pedido_medicion"
+    __table_args__ = (
+        Index("ix_compras_pedido_medicion_partida", "partida_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido_partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    comentario: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    uds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    longitud: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    anchura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    altura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    parcial: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[PedidoPartida] = relationship(back_populates="mediciones")
+
+
+class PedidoPartidaDescomposicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Descompuesto propio de una partida de pedido — mismo esquema que
+    `presupuestos.PartidaDescomposicion`. Solo tiene sentido en partidas de
+    pedidos de cliente; el servicio (fase siguiente) es quien impide
+    escribir aquí desde el lado proveedor."""
+
+    __tablename__ = "pedido_partida_descomposicion"
+    __table_args__ = (
+        Index("ix_compras_pedido_partida_descomposicion_partida", "partida_id"),
+        Index("ix_compras_pedido_partida_descomposicion_hijo", "hijo_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.pedido_partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    hijo_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    naturaleza: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    rendimiento: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    factor: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("1")
+    )
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[PedidoPartida] = relationship(back_populates="descomposicion")
 
 
 # --- Facturas de proveedor ---
@@ -368,6 +524,15 @@ class FacturaRecibida(
         back_populates="factura",
         cascade="all, delete-orphan",
     )
+    # Jerarquía capítulo/partida/medición (Fase 1), igual que en `Pedido` y
+    # `facturacion.Factura` — pero sin descomposición: una factura recibida
+    # es siempre de proveedor, así que la partida es siempre alzada, precio
+    # directo, sin componentes.
+    capitulos: Mapped[list["FacturaRecibidaCapitulo"]] = relationship(
+        back_populates="factura",
+        cascade="all, delete-orphan",
+        order_by="FacturaRecibidaCapitulo.orden",
+    )
 
 
 class FacturaRecibidaAlbaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
@@ -404,6 +569,121 @@ class FacturaRecibidaAlbaran(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMi
     )
 
     factura: Mapped[FacturaRecibida] = relationship(back_populates="albaranes")
+
+
+class FacturaRecibidaCapitulo(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Nodo de la jerarquía de la factura recibida. Un solo nivel plano, sin
+    anidar subcapítulos — igual que `PedidoCapitulo`."""
+
+    __tablename__ = "factura_recibida_capitulo"
+    __table_args__ = (
+        Index("ix_compras_factura_recibida_capitulo_factura", "factura_id"),
+        {"schema": SCHEMA},
+    )
+
+    factura_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_recibida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    factura: Mapped[FacturaRecibida] = relationship(back_populates="capitulos")
+    partidas: Mapped[list["FacturaRecibidaPartida"]] = relationship(
+        back_populates="capitulo",
+        cascade="all, delete-orphan",
+        order_by="FacturaRecibidaPartida.orden",
+    )
+
+
+class FacturaRecibidaPartida(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea presupuestada de la factura recibida.
+
+    Sin campos de venta (`precio_venta`/`venta_bloqueada`/`importe_venta`/
+    `costes_indirectos`): una factura recibida es siempre de proveedor, y
+    esos conceptos no existen de este lado — `precio` es directamente el que
+    cobra el proveedor, ya final.
+    """
+
+    __tablename__ = "factura_recibida_partida"
+    __table_args__ = (
+        Index("ix_compras_factura_recibida_partida_capitulo", "capitulo_id"),
+        Index("ix_compras_factura_recibida_partida_factura", "factura_id"),
+        Index("ix_compras_factura_recibida_partida_concepto", "concepto_id"),
+        {"schema": SCHEMA},
+    )
+
+    factura_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_recibida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capitulo_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_recibida_capitulo.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    concepto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    medicion: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    importe: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    capitulo: Mapped[FacturaRecibidaCapitulo] = relationship(back_populates="partidas")
+    mediciones: Mapped[list["FacturaRecibidaMedicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="FacturaRecibidaMedicion.orden",
+    )
+
+
+class FacturaRecibidaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea del estado de mediciones de una partida de factura recibida
+    — mismo esquema que `presupuestos.LineaMedicion` (sin fórmulas)."""
+
+    __tablename__ = "factura_recibida_medicion"
+    __table_args__ = (
+        Index("ix_compras_factura_recibida_medicion_partida", "partida_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_recibida_partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    comentario: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    uds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    longitud: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    anchura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    altura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    parcial: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[FacturaRecibidaPartida] = relationship(back_populates="mediciones")
 
 
 # --- Solicitud de precios a proveedor (la "separata") ---

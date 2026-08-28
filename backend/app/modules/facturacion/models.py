@@ -33,6 +33,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import TipoIVA, enum_column
 from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
 from app.modules.core.tesoreria_models import CuentaFinanciera
+from app.modules.presupuestos.models_presupuesto import MetodoCalculo
 from app.modules.terceros.models import FormaPago
 
 SCHEMA = "facturacion"
@@ -215,10 +216,28 @@ class Factura(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMix
     )
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Jerarquía capítulo/partida/medición (Fase 1), misma estructura que
+    # `Presupuesto` (ver `presupuestos.models_presupuesto`). Como una
+    # factura de venta es siempre de cliente, el descompuesto está siempre
+    # disponible en sus partidas.
+    metodo_calculo: Mapped[MetodoCalculo] = mapped_column(
+        enum_column(MetodoCalculo, "metodo_calculo"),
+        nullable=False,
+        default=MetodoCalculo.CLASICO,
+    )
+    porcentaje_metodo: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.00")
+    )
+
     cobros: Mapped[list["Cobro"]] = relationship(
         back_populates="factura",
         cascade="all, delete-orphan",
         order_by="Cobro.fecha",
+    )
+    capitulos: Mapped[list["FacturaCapitulo"]] = relationship(
+        back_populates="factura",
+        cascade="all, delete-orphan",
+        order_by="FacturaCapitulo.orden",
     )
 
 
@@ -261,3 +280,178 @@ class Cobro(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
     @property
     def cuenta_financiera_nombre(self) -> str | None:
         return self.cuenta_financiera.nombre if self.cuenta_financiera else None
+
+
+# --- Capítulos, partidas y mediciones de la factura (Fase 1) ---
+#
+# Misma jerarquía de tres niveles que `presupuestos.Capitulo`/`Partida`/
+# `LineaMedicion` (ver ese módulo), calcada aquí porque una factura de venta
+# es siempre de cliente y por tanto siempre puede llevar descompuesto propio
+# en sus partidas — a diferencia de `compras.FacturaRecibida`, que al ser
+# siempre de proveedor no tiene tabla de descomposición.
+
+
+class FacturaCapitulo(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Nodo de la jerarquía de la factura. Un solo nivel plano, sin anidar
+    subcapítulos — a diferencia de `presupuestos.Capitulo`."""
+
+    __tablename__ = "factura_capitulo"
+    __table_args__ = (
+        Index("ix_facturacion_factura_capitulo_factura", "factura_id"),
+        {"schema": SCHEMA},
+    )
+
+    factura_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    factura: Mapped[Factura] = relationship(back_populates="capitulos")
+    partidas: Mapped[list["FacturaPartida"]] = relationship(
+        back_populates="capitulo",
+        cascade="all, delete-orphan",
+        order_by="FacturaPartida.orden",
+    )
+
+
+class FacturaPartida(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea presupuestada de la factura — mismo esquema que
+    `presupuestos.Partida`. `concepto_id` es opcional: una partida alzada no
+    se descompone y lleva su precio a mano."""
+
+    __tablename__ = "factura_partida"
+    __table_args__ = (
+        Index("ix_facturacion_factura_partida_capitulo", "capitulo_id"),
+        Index("ix_facturacion_factura_partida_factura", "factura_id"),
+        Index("ix_facturacion_factura_partida_concepto", "concepto_id"),
+        {"schema": SCHEMA},
+    )
+
+    factura_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capitulo_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_capitulo.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    concepto_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    costes_indirectos: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+
+    precio_venta: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    venta_bloqueada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    importe_venta: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    medicion: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    importe: Mapped[Decimal] = mapped_column(
+        Numeric(16, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    capitulo: Mapped[FacturaCapitulo] = relationship(back_populates="partidas")
+    mediciones: Mapped[list["FacturaMedicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="FacturaMedicion.orden",
+    )
+    descomposicion: Mapped[list["FacturaPartidaDescomposicion"]] = relationship(
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        order_by="FacturaPartidaDescomposicion.orden",
+    )
+
+
+class FacturaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una línea del estado de mediciones de una partida de factura — mismo
+    esquema que `presupuestos.LineaMedicion` (sin soporte de fórmulas)."""
+
+    __tablename__ = "factura_medicion"
+    __table_args__ = (
+        Index("ix_facturacion_factura_medicion_partida", "partida_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    comentario: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    uds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    longitud: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    anchura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    altura: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    parcial: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), nullable=False, default=Decimal("0.000")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[FacturaPartida] = relationship(back_populates="mediciones")
+
+
+class FacturaPartidaDescomposicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Descompuesto propio de una partida de factura — mismo esquema que
+    `presupuestos.PartidaDescomposicion`."""
+
+    __tablename__ = "factura_partida_descomposicion"
+    __table_args__ = (
+        Index("ix_facturacion_factura_partida_descomposicion_partida", "partida_id"),
+        Index("ix_facturacion_factura_partida_descomposicion_hijo", "hijo_id"),
+        {"schema": SCHEMA},
+    )
+
+    partida_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.factura_partida.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    hijo_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("presupuestos.concepto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    resumen: Mapped[str] = mapped_column(String(250), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(10), nullable=False, default="ud")
+    naturaleza: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    rendimiento: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    factor: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("1")
+    )
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    partida: Mapped[FacturaPartida] = relationship(back_populates="descomposicion")

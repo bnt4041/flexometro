@@ -41,6 +41,7 @@ import { Landing } from './pages/Landing'
 import { ObraCrear, Obras } from './pages/Obras'
 import { ObraDetalle } from './pages/ObraDetalle'
 import { OfertaProveedor } from './pages/OfertaProveedor'
+import { TestMeter } from './pages/TestMeter'
 import { Personal } from './pages/Personal'
 import { Placeholder } from './pages/Placeholder'
 import { PedidoCrear, Pedidos } from './pages/Pedidos'
@@ -300,6 +301,9 @@ export function App() {
           precios a proveedor», §2): fuera de `WorkspaceProvider` a propósito,
           para que el arranque de Keycloak de éste no llegue a dispararse. */}
       <Route path="/oferta/:token" element={<OfertaProveedor />} />
+      {/* Prueba de concepto del medidor por cámara — tampoco lleva sesión ni
+          organización, ni siquiera token: es una prueba abierta. */}
+      <Route path="/testmeter" element={<TestMeter />} />
       <Route
         path="/*"
         element={

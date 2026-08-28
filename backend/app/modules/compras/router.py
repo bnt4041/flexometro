@@ -28,6 +28,10 @@ from app.modules.compras.factura_recibida_router import (
     router as facturas_recibidas_router,
     totales_router as compras_totales_router,
 )
+from app.modules.compras.factura_recibida_partidas_router import (
+    router as factura_recibida_partidas_router,
+)
+from app.modules.compras.pedido_ia_router import router as pedido_ia_router
 from app.modules.compras.pedido_router import router as pedido_router
 from app.modules.compras.publico_router import router as publico_router
 from app.modules.compras.schemas import (
@@ -650,7 +654,14 @@ router.include_router(solicitudes_router)
 # es largo.
 router.include_router(facturas_recibidas_router)
 router.include_router(compras_totales_router)
+# Capítulos/partidas/mediciones de la factura recibida (Fase 2): en su propio
+# módulo para no seguir engordando `factura_recibida_router.py`.
+router.include_router(factura_recibida_partidas_router)
 router.include_router(pedido_router)
+# "Ayuda con IA" sobre pedidos de cliente (Fase 4): aparte porque pide
+# además el módulo `ia` activo, mismo motivo que `factura_recibida_partidas_
+# router` está aparte de `factura_recibida_router`.
+router.include_router(pedido_ia_router)
 
 # Espacio SIN autenticar (separata del proveedor). Va sin las guardas de
 # arriba a propósito: quien entra no tiene cuenta. Se autoriza contra el token

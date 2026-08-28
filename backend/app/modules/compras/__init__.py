@@ -20,6 +20,10 @@ SPEC = ModuleSpec(
         # busca ahí primero.
         NavItem(label="Pedidos", path="/pedidos", icon="truck", section="Clientes"),
         NavItem(label="Albaranes", path="/albaranes", icon="truck"),
+        # Igual que el pedido: un albarán puede ser de proveedor o de
+        # cliente (`Albaran.tipo`) — mismo listado, atajo también desde
+        # "Clientes".
+        NavItem(label="Albaranes", path="/albaranes", icon="truck", section="Clientes"),
         NavItem(label="Facturas recibidas", path="/facturas-recibidas", icon="receipt"),
         # Las ofertas que devuelven los proveedores al responder una
         # solicitud de precios (ver `compras/oferta_service.py`): mismo

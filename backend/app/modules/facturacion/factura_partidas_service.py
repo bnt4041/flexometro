@@ -1,18 +1,20 @@
-"""Pedidos a proveedor: la orden de compra en firme.
+"""Capítulos, partidas, mediciones y descompuesto de la Factura de venta
+(Fase 2).
 
-Dos vías para llegar a uno (ver plan "Pedido, Contrato y trazabilidad
-documental"): confirmando la oferta ganadora de una `SolicitudPrecios` ya
-resuelta (`origen_oferta_presupuesto_id`) o directo a un proveedor conocido,
-sin RFQ de por medio.
+Calcado de `presupuestos.presupuesto_service`, con dos diferencias:
+`FacturaCapitulo` es de un solo nivel (sin subcapítulos, a diferencia de
+`presupuestos.Capitulo`) y, al ser una factura de venta siempre de cliente,
+el descompuesto está siempre disponible en sus partidas — a diferencia de
+`compras.pedido_service`, aquí no hace falta ningún
+`DescomposicionNoDisponible`.
 
-Capítulos/partidas/mediciones y su descompuesto (Fase 2, ver el bloque al
-final de este archivo) están calcados de
-`presupuestos.presupuesto_service`, con dos diferencias: `PedidoCapitulo` es
-de un solo nivel (sin subcapítulos, a diferencia de
-`presupuestos.Capitulo`) y el descompuesto solo se puede tocar cuando
-`Pedido.tipo == CLIENTE` — en un pedido a proveedor la partida es siempre
-alzada, precio directo, y cualquier intento de tocar su descomposición se
-rechaza con `DescomposicionNoDisponible` (409 en el router).
+Además, tras cualquier alta/baja/edición de partida, medición o
+descomposición se recalcula `Factura.base_imponible` (suma de
+`importe_venta` de sus partidas) y, con ella, `cuota_iva`/`total` — pero
+SOLO si la factura ya tiene alguna `FacturaPartida`. Una factura sin
+desglose (como la `FAC00001` real, tecleada a mano antes de existir esta
+jerarquía) conserva lo que se haya escrito directamente: no se le impone un
+0,00 por no tener partidas.
 """
 
 import uuid
@@ -22,205 +24,26 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.numeracion import siguiente_referencia_libre
 from app.core.redondeo import redondear_medicion, redondear_precio
-from app.core.tenancy import datos_autoria, require_organization_id
+from app.core.tenancy import require_organization_id
+from app.modules.facturacion.factura_partidas_schemas import (
+    FacturaCapituloCreate,
+    FacturaCapituloUpdate,
+    FacturaMedicionCreate,
+    FacturaMedicionUpdate,
+    FacturaPartidaCreate,
+    FacturaPartidaUpdate,
+)
+from app.modules.facturacion.models import (
+    Factura,
+    FacturaCapitulo,
+    FacturaMedicion,
+    FacturaPartida,
+    FacturaPartidaDescomposicion,
+)
+from app.modules.facturacion.service import _calcular_iva
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos.models import Concepto, Descomposicion
-from app.modules.compras.models import (
-    Pedido,
-    PedidoCapitulo,
-    PedidoMedicion,
-    PedidoPartida,
-    PedidoPartidaDescomposicion,
-    TipoPedido,
-)
-from app.modules.compras.pedido_schemas import (
-    PedidoCapituloCreate,
-    PedidoCapituloUpdate,
-    PedidoCreate,
-    PedidoMedicionCreate,
-    PedidoMedicionUpdate,
-    PedidoPartidaCreate,
-    PedidoPartidaUpdate,
-    PedidoUpdate,
-)
-
-TIPO_DOCUMENTO = "pedido"
-
-
-class CodigoDuplicado(Exception):
-    pass
-
-
-class OrigenInvalido(Exception):
-    pass
-
-
-class LineaSinDatos(Exception):
-    pass
-
-
-async def siguiente_codigo(session: AsyncSession) -> str:
-    org_id = require_organization_id()
-
-    async def existe(codigo: str) -> bool:
-        return (
-            await session.scalar(
-                select(Pedido.id).where(
-                    Pedido.organization_id == org_id, Pedido.codigo == codigo
-                )
-            )
-        ) is not None
-
-    return await siguiente_referencia_libre(
-        session, organization_id=org_id, tipo_documento=TIPO_DOCUMENTO, existe=existe
-    )
-
-
-async def crear(session: AsyncSession, datos: PedidoCreate) -> Pedido:
-    from app.modules.compras.models import SolicitudPrecios
-    from app.modules.compras.service import _validar_cliente, _validar_obra, _validar_proveedor
-
-    org_id = require_organization_id()
-    await _validar_obra(session, datos.obra_id)
-    if datos.tipo == TipoPedido.CLIENTE:
-        assert datos.cliente_id is not None  # ya garantizado por el validador del schema
-        await _validar_cliente(session, datos.cliente_id)
-    else:
-        assert datos.proveedor_id is not None
-        await _validar_proveedor(session, datos.proveedor_id)
-
-    if datos.origen_solicitud_id is not None:
-        existe_solicitud = await session.scalar(
-            select(SolicitudPrecios.id).where(
-                SolicitudPrecios.id == datos.origen_solicitud_id,
-                SolicitudPrecios.organization_id == org_id,
-            )
-        )
-        if existe_solicitud is None:
-            raise OrigenInvalido("La solicitud de precios indicada no existe en esta organización")
-
-    async def _existe(codigo: str) -> bool:
-        return (
-            await session.scalar(
-                select(Pedido.id).where(
-                    Pedido.organization_id == org_id, Pedido.codigo == codigo
-                )
-            )
-        ) is not None
-
-    if datos.codigo:
-        if await _existe(datos.codigo):
-            raise CodigoDuplicado(f"Ya existe un pedido con el código '{datos.codigo}'")
-        codigo = datos.codigo
-    else:
-        codigo = await siguiente_referencia_libre(
-            session, organization_id=org_id, tipo_documento=TIPO_DOCUMENTO, existe=_existe
-        )
-
-    pedido = Pedido(
-        organization_id=org_id,
-        codigo=codigo,
-        **datos.model_dump(exclude={"codigo"}),
-        **datos_autoria(),
-    )
-    session.add(pedido)
-    await session.flush()
-    return pedido
-
-
-async def listar(
-    session: AsyncSession,
-    *,
-    obra_id: uuid.UUID | None = None,
-    proveedor_id: uuid.UUID | None = None,
-    tipo: TipoPedido | None = None,
-    limit: int = 50,
-    offset: int = 0,
-    creado_por_subject: str | None = None,
-) -> tuple[list[tuple[Pedido, str]], int]:
-    from app.modules.terceros.models import Tercero
-
-    org_id = require_organization_id()
-    base = (
-        select(Pedido, Tercero.razon_social)
-        .join(Tercero, Tercero.id == func.coalesce(Pedido.cliente_id, Pedido.proveedor_id))
-        .where(Pedido.organization_id == org_id)
-    )
-    if obra_id is not None:
-        base = base.where(Pedido.obra_id == obra_id)
-    if proveedor_id is not None:
-        base = base.where(Pedido.proveedor_id == proveedor_id)
-    if tipo is not None:
-        base = base.where(Pedido.tipo == tipo)
-    if creado_por_subject is not None:
-        base = base.where(Pedido.creado_por_subject == creado_por_subject)
-
-    total = await session.scalar(
-        select(func.count()).select_from(
-            base.with_only_columns(Pedido.id).order_by(None).subquery()
-        )
-    )
-    filas = await session.execute(base.order_by(Pedido.fecha.desc()).limit(limit).offset(offset))
-    return list(filas.all()), int(total or 0)
-
-
-async def obtener(session: AsyncSession, pedido_id: uuid.UUID) -> tuple[Pedido, str] | None:
-    from app.modules.terceros.models import Tercero
-
-    org_id = require_organization_id()
-    fila = (
-        await session.execute(
-            select(Pedido, Tercero.razon_social)
-            .join(Tercero, Tercero.id == func.coalesce(Pedido.cliente_id, Pedido.proveedor_id))
-            .where(Pedido.id == pedido_id, Pedido.organization_id == org_id)
-        )
-    ).first()
-    return tuple(fila) if fila else None
-
-
-async def obtener_obj(session: AsyncSession, pedido_id: uuid.UUID) -> Pedido | None:
-    org_id = require_organization_id()
-    return await session.scalar(
-        select(Pedido).where(Pedido.id == pedido_id, Pedido.organization_id == org_id)
-    )
-
-
-async def actualizar(
-    session: AsyncSession, pedido_id: uuid.UUID, datos: PedidoUpdate
-) -> Pedido | None:
-    pedido = await obtener_obj(session, pedido_id)
-    if pedido is None:
-        return None
-    for campo, valor in datos.model_dump(exclude_unset=True).items():
-        setattr(pedido, campo, valor)
-    await session.flush()
-    return pedido
-
-
-async def eliminar(session: AsyncSession, pedido_id: uuid.UUID) -> bool:
-    pedido = await obtener_obj(session, pedido_id)
-    if pedido is None:
-        return False
-    await session.delete(pedido)
-    await session.flush()
-    return True
-
-
-async def total_de(session: AsyncSession, pedido: Pedido) -> Decimal:
-    """El total del pedido no se guarda en columna: se suma en caliente sobre
-    sus partidas (de todos sus capítulos), `importe_venta` si es de cliente o
-    `importe` si es de proveedor — en un pedido a proveedor la partida no
-    lleva margen, es directamente lo que cuesta."""
-    campo = PedidoPartida.importe_venta if pedido.tipo == TipoPedido.CLIENTE else PedidoPartida.importe
-    total = await session.scalar(
-        select(func.coalesce(func.sum(campo), 0)).where(PedidoPartida.pedido_id == pedido.id)
-    )
-    return redondear_precio(Decimal(total))
-
-
-# --- Capítulos, partidas, mediciones y descompuesto (Fase 2) ---
 
 
 class ConceptoInvalido(Exception):
@@ -231,18 +54,39 @@ class PartidaSinDatos(Exception):
     pass
 
 
-class DescomposicionNoDisponible(Exception):
-    """El descompuesto de una partida de pedido solo existe del lado cliente
-    (`Pedido.tipo == CLIENTE`); en un pedido a proveedor la partida es
-    siempre alzada, precio directo. El router traduce esto a 409."""
+# --- Total de la factura ---
 
 
-async def _siguiente_codigo_capitulo(session: AsyncSession, pedido_id: uuid.UUID) -> str:
-    """Numeración plana: 01, 02... — sin subcapítulos, a diferencia de
-    `presupuestos.presupuesto_service._siguiente_codigo_capitulo`."""
+async def _recalcular_totales_factura(session: AsyncSession, factura_id: uuid.UUID) -> None:
+    factura = await session.get(Factura, factura_id)
+    if factura is None:
+        return
+    tiene_partidas = await session.scalar(
+        select(func.count()).select_from(FacturaPartida).where(FacturaPartida.factura_id == factura_id)
+    )
+    if not tiene_partidas:
+        return
+    suma = await session.scalar(
+        select(func.coalesce(func.sum(FacturaPartida.importe_venta), 0)).where(
+            FacturaPartida.factura_id == factura_id
+        )
+    )
+    factura.base_imponible = redondear_precio(Decimal(suma))
+    factura.cuota_iva = _calcular_iva(
+        factura.base_imponible, factura.tipo_iva, factura.inversion_sujeto_pasivo
+    )
+    factura.total = redondear_precio(factura.base_imponible + factura.cuota_iva)
+    await session.flush()
+
+
+# --- Capítulos ---
+
+
+async def _siguiente_codigo_capitulo(session: AsyncSession, factura_id: uuid.UUID) -> str:
+    """Numeración plana: 01, 02... — sin subcapítulos."""
     hermanos = (
         await session.execute(
-            select(PedidoCapitulo.codigo).where(PedidoCapitulo.pedido_id == pedido_id)
+            select(FacturaCapitulo.codigo).where(FacturaCapitulo.factura_id == factura_id)
         )
     ).scalars()
     maximo = 0
@@ -253,34 +97,31 @@ async def _siguiente_codigo_capitulo(session: AsyncSession, pedido_id: uuid.UUID
     return f"{maximo + 1:02d}"
 
 
-async def obtener_capitulo(session: AsyncSession, capitulo_id: uuid.UUID) -> PedidoCapitulo | None:
+async def obtener_capitulo(session: AsyncSession, capitulo_id: uuid.UUID) -> FacturaCapitulo | None:
     org_id = require_organization_id()
     return await session.scalar(
-        select(PedidoCapitulo).where(
-            PedidoCapitulo.id == capitulo_id, PedidoCapitulo.organization_id == org_id
+        select(FacturaCapitulo).where(
+            FacturaCapitulo.id == capitulo_id, FacturaCapitulo.organization_id == org_id
         )
     )
 
 
-async def cargar_capitulos(session: AsyncSession, pedido_id: uuid.UUID) -> list[PedidoCapitulo]:
-    """El árbol completo del pedido, ya anidado, con mediciones y
-    descomposición cargadas de un tirón (evita N+1 al serializar la lista).
-
-    `tiene_desglose`/`descomposicion_propia` no son columnas: se calculan
-    aquí mismo a partir de las relaciones ya cargadas y se dejan puestas como
-    atributo de instancia antes de devolver, para que el router los lea sin
-    volver a consultar (mismo truco que `presupuesto_service.arbol_y_totales`
-    con `fila.tiene_desglose`)."""
+async def cargar_capitulos(session: AsyncSession, factura_id: uuid.UUID) -> list[FacturaCapitulo]:
+    """El árbol completo de la factura, ya anidado, con mediciones y
+    descomposición cargadas de un tirón. `tiene_desglose`/`descomposicion_
+    propia` no son columnas: se calculan aquí a partir de las relaciones ya
+    cargadas y se dejan como atributo de instancia (mismo criterio que
+    `pedido_service.cargar_capitulos`/`presupuesto_service.arbol_y_totales`)."""
     org_id = require_organization_id()
     capitulos = (
         await session.execute(
-            select(PedidoCapitulo)
-            .where(PedidoCapitulo.pedido_id == pedido_id, PedidoCapitulo.organization_id == org_id)
+            select(FacturaCapitulo)
+            .where(FacturaCapitulo.factura_id == factura_id, FacturaCapitulo.organization_id == org_id)
             .options(
-                selectinload(PedidoCapitulo.partidas).selectinload(PedidoPartida.mediciones),
-                selectinload(PedidoCapitulo.partidas).selectinload(PedidoPartida.descomposicion),
+                selectinload(FacturaCapitulo.partidas).selectinload(FacturaPartida.mediciones),
+                selectinload(FacturaCapitulo.partidas).selectinload(FacturaPartida.descomposicion),
             )
-            .order_by(PedidoCapitulo.orden, PedidoCapitulo.codigo)
+            .order_by(FacturaCapitulo.orden, FacturaCapitulo.codigo)
         )
     ).scalars()
     resultado = list(capitulos)
@@ -292,16 +133,18 @@ async def cargar_capitulos(session: AsyncSession, pedido_id: uuid.UUID) -> list[
 
 
 async def crear_capitulo(
-    session: AsyncSession, pedido_id: uuid.UUID, datos: PedidoCapituloCreate
-) -> PedidoCapitulo | None:
+    session: AsyncSession, factura_id: uuid.UUID, datos: FacturaCapituloCreate
+) -> FacturaCapitulo | None:
     org_id = require_organization_id()
-    pedido = await obtener_obj(session, pedido_id)
-    if pedido is None:
+    factura = await session.scalar(
+        select(Factura).where(Factura.id == factura_id, Factura.organization_id == org_id)
+    )
+    if factura is None:
         return None
-    codigo = datos.codigo or await _siguiente_codigo_capitulo(session, pedido_id)
-    capitulo = PedidoCapitulo(
+    codigo = datos.codigo or await _siguiente_codigo_capitulo(session, factura_id)
+    capitulo = FacturaCapitulo(
         organization_id=org_id,
-        pedido_id=pedido_id,
+        factura_id=factura_id,
         codigo=codigo,
         resumen=datos.resumen,
         texto=datos.texto,
@@ -313,8 +156,8 @@ async def crear_capitulo(
 
 
 async def actualizar_capitulo(
-    session: AsyncSession, capitulo_id: uuid.UUID, datos: PedidoCapituloUpdate
-) -> PedidoCapitulo | None:
+    session: AsyncSession, capitulo_id: uuid.UUID, datos: FacturaCapituloUpdate
+) -> FacturaCapitulo | None:
     capitulo = await obtener_capitulo(session, capitulo_id)
     if capitulo is None:
         return None
@@ -328,15 +171,20 @@ async def eliminar_capitulo(session: AsyncSession, capitulo_id: uuid.UUID) -> bo
     capitulo = await obtener_capitulo(session, capitulo_id)
     if capitulo is None:
         return False
+    factura_id = capitulo.factura_id
     await session.delete(capitulo)
     await session.flush()
+    await _recalcular_totales_factura(session, factura_id)
     return True
 
 
+# --- Mediciones y recálculo de partida ---
+
+
 def _nueva_medicion(
-    org_id: uuid.UUID, partida_id: uuid.UUID, datos: PedidoMedicionCreate
-) -> PedidoMedicion:
-    return PedidoMedicion(
+    org_id: uuid.UUID, partida_id: uuid.UUID, datos: FacturaMedicionCreate
+) -> FacturaMedicion:
+    return FacturaMedicion(
         organization_id=org_id,
         partida_id=partida_id,
         parcial=calc.parcial_de(datos.uds, datos.longitud, datos.anchura, datos.altura),
@@ -346,17 +194,17 @@ def _nueva_medicion(
 
 async def _tiene_desglose(session: AsyncSession, partida_id: uuid.UUID) -> bool:
     total = await session.scalar(
-        select(func.count()).select_from(PedidoMedicion).where(PedidoMedicion.partida_id == partida_id)
+        select(func.count()).select_from(FacturaMedicion).where(FacturaMedicion.partida_id == partida_id)
     )
     return bool(total)
 
 
-async def _recalcular_partida(session: AsyncSession, partida: PedidoPartida) -> None:
+async def _recalcular_partida(session: AsyncSession, partida: FacturaPartida) -> None:
     """Igual que `presupuesto_calculo.recalcular_partida`: si la partida tiene
     mediciones, `medicion` es su suma; sin ninguna, se respeta lo tecleado a
     mano. `importe` siempre es `medicion * precio`."""
     filas = await session.execute(
-        select(PedidoMedicion.parcial).where(PedidoMedicion.partida_id == partida.id)
+        select(FacturaMedicion.parcial).where(FacturaMedicion.partida_id == partida.id)
     )
     parciales = [fila[0] for fila in filas.all()]
     if parciales:
@@ -365,37 +213,36 @@ async def _recalcular_partida(session: AsyncSession, partida: PedidoPartida) -> 
     await session.flush()
 
 
-async def _refrescar_venta(session: AsyncSession, pedido: Pedido, partida: PedidoPartida) -> None:
+async def _refrescar_venta(session: AsyncSession, factura: Factura, partida: FacturaPartida) -> None:
     """Recalcula precio_venta/importe_venta tras tocar coste o medición.
 
-    Solo se aplica de verdad en pedidos de CLIENTE: `venta_unitaria()` con
-    método CLASICO (el por defecto, y el único disponible aquí — Pedido no
+    Una factura de venta es siempre de cliente, así que a diferencia de
+    `compras.pedido_service` esto se aplica siempre, sin condición de tipo.
+    `venta_unitaria()` con método CLASICO (el por defecto — `Factura` no
     tiene `gastos_generales`/`beneficio_industrial` como sí tiene
-    `Presupuesto`) devuelve el coste sin recargo, así que "clásico" en un
-    Pedido/Factura equivale deliberadamente a "sin margen". En pedidos de
-    PROVEEDOR estas columnas no se usan (la partida es alzada); por
-    simplicidad se dejan iguales a precio/importe en vez de forzar nada
-    especial, tal y como decidido en el plan de la Fase 2.
+    `Presupuesto`) devuelve el coste sin recargo, así que "clásico" en una
+    Factura equivale deliberadamente a "sin margen" (misma simplificación que
+    en `Pedido`, ver su `_refrescar_venta`).
     """
-    if pedido.tipo == TipoPedido.CLIENTE:
-        if not partida.venta_bloqueada:
-            partida.precio_venta = calc.venta_unitaria(
-                partida.precio, pedido.metodo_calculo, pedido.porcentaje_metodo
-            )
-        partida.importe_venta = redondear_precio(partida.medicion * partida.precio_venta)
-    else:
-        partida.precio_venta = partida.precio
-        partida.importe_venta = partida.importe
+    if not partida.venta_bloqueada:
+        partida.precio_venta = calc.venta_unitaria(
+            partida.precio, factura.metodo_calculo, factura.porcentaje_metodo
+        )
+    partida.importe_venta = redondear_precio(partida.medicion * partida.precio_venta)
     await session.flush()
+    await _recalcular_totales_factura(session, factura.id)
+
+
+# --- Partidas ---
 
 
 async def crear_partida(
-    session: AsyncSession, capitulo_id: uuid.UUID, datos: PedidoPartidaCreate
-) -> PedidoPartida | None:
+    session: AsyncSession, capitulo_id: uuid.UUID, datos: FacturaPartidaCreate
+) -> FacturaPartida | None:
     org_id = require_organization_id()
     capitulo = await session.scalar(
-        select(PedidoCapitulo).where(
-            PedidoCapitulo.id == capitulo_id, PedidoCapitulo.organization_id == org_id
+        select(FacturaCapitulo).where(
+            FacturaCapitulo.id == capitulo_id, FacturaCapitulo.organization_id == org_id
         )
     )
     if capitulo is None:
@@ -427,9 +274,9 @@ async def crear_partida(
             "Una partida alzada necesita al menos descripción; sin concepto no hay de dónde copiarla"
         )
 
-    partida = PedidoPartida(
+    partida = FacturaPartida(
         organization_id=org_id,
-        pedido_id=capitulo.pedido_id,
+        factura_id=capitulo.factura_id,
         capitulo_id=capitulo_id,
         concepto_id=datos.concepto_id,
         codigo=codigo or "",
@@ -446,26 +293,26 @@ async def crear_partida(
         session.add(_nueva_medicion(org_id, partida.id, medicion))
     await session.flush()
     await _recalcular_partida(session, partida)
-    pedido = await obtener_obj(session, capitulo.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, capitulo.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return partida
 
 
-async def obtener_partida(session: AsyncSession, partida_id: uuid.UUID) -> PedidoPartida | None:
+async def obtener_partida(session: AsyncSession, partida_id: uuid.UUID) -> FacturaPartida | None:
     org_id = require_organization_id()
     return await session.scalar(
-        select(PedidoPartida)
+        select(FacturaPartida)
         .options(
-            selectinload(PedidoPartida.mediciones), selectinload(PedidoPartida.descomposicion)
+            selectinload(FacturaPartida.mediciones), selectinload(FacturaPartida.descomposicion)
         )
-        .where(PedidoPartida.id == partida_id, PedidoPartida.organization_id == org_id)
+        .where(FacturaPartida.id == partida_id, FacturaPartida.organization_id == org_id)
     )
 
 
 async def actualizar_partida(
-    session: AsyncSession, partida_id: uuid.UUID, datos: PedidoPartidaUpdate
-) -> PedidoPartida | None:
+    session: AsyncSession, partida_id: uuid.UUID, datos: FacturaPartidaUpdate
+) -> FacturaPartida | None:
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return None
@@ -479,21 +326,21 @@ async def actualizar_partida(
     if "precio" in cambios:
         partida.precio = redondear_precio(partida.precio)
 
-    pedido = await obtener_obj(session, partida.pedido_id)
+    factura = await session.get(Factura, partida.factura_id)
 
     if medicion_manual is not None and sin_desglose:
         partida.medicion = redondear_medicion(medicion_manual)
         partida.importe = redondear_precio(partida.medicion * partida.precio)
-        if pedido is not None:
-            await _refrescar_venta(session, pedido, partida)
+        if factura is not None:
+            await _refrescar_venta(session, factura, partida)
         else:
             await session.flush()
         return partida
 
     await session.flush()
     await _recalcular_partida(session, partida)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return partida
 
 
@@ -501,14 +348,16 @@ async def eliminar_partida(session: AsyncSession, partida_id: uuid.UUID) -> bool
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
+    factura_id = partida.factura_id
     await session.delete(partida)
     await session.flush()
+    await _recalcular_totales_factura(session, factura_id)
     return True
 
 
 async def crear_medicion(
-    session: AsyncSession, partida_id: uuid.UUID, datos: PedidoMedicionCreate
-) -> PedidoMedicion | None:
+    session: AsyncSession, partida_id: uuid.UUID, datos: FacturaMedicionCreate
+) -> FacturaMedicion | None:
     org_id = require_organization_id()
     partida = await obtener_partida(session, partida_id)
     if partida is None:
@@ -517,24 +366,24 @@ async def crear_medicion(
     session.add(medicion)
     await session.flush()
     await _recalcular_partida(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return medicion
 
 
-async def obtener_medicion(session: AsyncSession, medicion_id: uuid.UUID) -> PedidoMedicion | None:
+async def obtener_medicion(session: AsyncSession, medicion_id: uuid.UUID) -> FacturaMedicion | None:
     org_id = require_organization_id()
     return await session.scalar(
-        select(PedidoMedicion).where(
-            PedidoMedicion.id == medicion_id, PedidoMedicion.organization_id == org_id
+        select(FacturaMedicion).where(
+            FacturaMedicion.id == medicion_id, FacturaMedicion.organization_id == org_id
         )
     )
 
 
 async def actualizar_medicion(
-    session: AsyncSession, medicion_id: uuid.UUID, datos: PedidoMedicionUpdate
-) -> PedidoMedicion | None:
+    session: AsyncSession, medicion_id: uuid.UUID, datos: FacturaMedicionUpdate
+) -> FacturaMedicion | None:
     medicion = await obtener_medicion(session, medicion_id)
     if medicion is None:
         return None
@@ -546,9 +395,9 @@ async def actualizar_medicion(
     partida = await obtener_partida(session, medicion.partida_id)
     if partida is not None:
         await _recalcular_partida(session, partida)
-        pedido = await obtener_obj(session, partida.pedido_id)
-        if pedido is not None:
-            await _refrescar_venta(session, pedido, partida)
+        factura = await session.get(Factura, partida.factura_id)
+        if factura is not None:
+            await _refrescar_venta(session, factura, partida)
     return medicion
 
 
@@ -565,23 +414,14 @@ async def eliminar_medicion(session: AsyncSession, medicion_id: uuid.UUID) -> bo
         if not await _tiene_desglose(session, partida_id):
             partida.medicion = Decimal("0.000")
         await _recalcular_partida(session, partida)
-        pedido = await obtener_obj(session, partida.pedido_id)
-        if pedido is not None:
-            await _refrescar_venta(session, pedido, partida)
+        factura = await session.get(Factura, partida.factura_id)
+        if factura is not None:
+            await _refrescar_venta(session, factura, partida)
     return True
 
 
-# --- Descompuesto de la partida (solo pedidos de cliente) ---
-
-
-async def _asegurar_cliente(session: AsyncSession, partida: PedidoPartida) -> Pedido:
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is None or pedido.tipo != TipoPedido.CLIENTE:
-        raise DescomposicionNoDisponible(
-            "El descompuesto solo está disponible en pedidos de cliente; "
-            "este pedido es de proveedor y su partida es siempre alzada"
-        )
-    return pedido
+# --- Descompuesto de la partida (siempre disponible: la factura es siempre
+#     de cliente) ---
 
 
 async def _lineas_heredadas(
@@ -597,17 +437,14 @@ async def _lineas_heredadas(
 
 
 async def independizar_descomposicion(
-    session: AsyncSession, partida: PedidoPartida
-) -> list[PedidoPartidaDescomposicion]:
-    """Clona el descompuesto del concepto en la partida, si no lo tiene ya —
-    igual que `presupuesto_service.independizar_descomposicion`."""
+    session: AsyncSession, partida: FacturaPartida
+) -> list[FacturaPartidaDescomposicion]:
     org_id = require_organization_id()
-    await _asegurar_cliente(session, partida)
     existentes = (
         await session.execute(
-            select(PedidoPartidaDescomposicion)
-            .where(PedidoPartidaDescomposicion.partida_id == partida.id)
-            .order_by(PedidoPartidaDescomposicion.orden)
+            select(FacturaPartidaDescomposicion)
+            .where(FacturaPartidaDescomposicion.partida_id == partida.id)
+            .order_by(FacturaPartidaDescomposicion.orden)
         )
     ).scalars()
     ya = list(existentes)
@@ -624,9 +461,9 @@ async def independizar_descomposicion(
     if concepto is None:
         return []
 
-    nuevas: list[PedidoPartidaDescomposicion] = []
+    nuevas: list[FacturaPartidaDescomposicion] = []
     for orden, (linea, hijo) in enumerate(await _lineas_heredadas(session, concepto.id)):
-        fila = PedidoPartidaDescomposicion(
+        fila = FacturaPartidaDescomposicion(
             organization_id=org_id,
             partida_id=partida.id,
             hijo_id=hijo.id,
@@ -654,13 +491,12 @@ async def descomposicion_de_partida(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return None
-    await _asegurar_cliente(session, partida)
 
     propias = (
         await session.execute(
-            select(PedidoPartidaDescomposicion)
-            .where(PedidoPartidaDescomposicion.partida_id == partida.id)
-            .order_by(PedidoPartidaDescomposicion.orden)
+            select(FacturaPartidaDescomposicion)
+            .where(FacturaPartidaDescomposicion.partida_id == partida.id)
+            .order_by(FacturaPartidaDescomposicion.orden)
         )
     ).scalars()
     propias = list(propias)
@@ -701,14 +537,14 @@ async def descomposicion_de_partida(
 
 
 async def _precio_desde_descomposicion_propia(
-    session: AsyncSession, partida: PedidoPartida
+    session: AsyncSession, partida: FacturaPartida
 ) -> Decimal | None:
     filas = await session.execute(
         select(
-            PedidoPartidaDescomposicion.rendimiento,
-            PedidoPartidaDescomposicion.factor,
-            PedidoPartidaDescomposicion.precio,
-        ).where(PedidoPartidaDescomposicion.partida_id == partida.id)
+            FacturaPartidaDescomposicion.rendimiento,
+            FacturaPartidaDescomposicion.factor,
+            FacturaPartidaDescomposicion.precio,
+        ).where(FacturaPartidaDescomposicion.partida_id == partida.id)
     )
     lineas = filas.all()
     if not lineas:
@@ -724,7 +560,7 @@ async def _precio_desde_descomposicion_propia(
     return redondear_precio(coste_directo)
 
 
-async def _recalcular_desde_descomposicion(session: AsyncSession, partida: PedidoPartida) -> None:
+async def _recalcular_desde_descomposicion(session: AsyncSession, partida: FacturaPartida) -> None:
     nuevo = await _precio_desde_descomposicion_propia(session, partida)
     if nuevo is None:
         return
@@ -744,7 +580,6 @@ async def anadir_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
 
     hijo = await session.scalar(
         select(Concepto).where(Concepto.id == hijo_id, Concepto.organization_id == org_id)
@@ -755,11 +590,11 @@ async def anadir_componente(
     await independizar_descomposicion(session, partida)
     siguiente = await session.scalar(
         select(func.count())
-        .select_from(PedidoPartidaDescomposicion)
-        .where(PedidoPartidaDescomposicion.partida_id == partida.id)
+        .select_from(FacturaPartidaDescomposicion)
+        .where(FacturaPartidaDescomposicion.partida_id == partida.id)
     )
     session.add(
-        PedidoPartidaDescomposicion(
+        FacturaPartidaDescomposicion(
             organization_id=org_id,
             partida_id=partida.id,
             hijo_id=hijo.id,
@@ -775,9 +610,9 @@ async def anadir_componente(
     )
     await session.flush()
     await _recalcular_desde_descomposicion(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return True
 
 
@@ -788,12 +623,11 @@ async def quitar_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
     linea = await session.scalar(
-        select(PedidoPartidaDescomposicion).where(
-            PedidoPartidaDescomposicion.id == linea_id,
-            PedidoPartidaDescomposicion.partida_id == partida_id,
-            PedidoPartidaDescomposicion.organization_id == org_id,
+        select(FacturaPartidaDescomposicion).where(
+            FacturaPartidaDescomposicion.id == linea_id,
+            FacturaPartidaDescomposicion.partida_id == partida_id,
+            FacturaPartidaDescomposicion.organization_id == org_id,
         )
     )
     if linea is None:
@@ -801,9 +635,9 @@ async def quitar_componente(
     await session.delete(linea)
     await session.flush()
     await _recalcular_desde_descomposicion(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return True
 
 
@@ -814,32 +648,29 @@ async def cambiar_precio_componente(
     precio: Decimal,
     alcance: str,
 ) -> int:
-    """Con alcance `partida` afecta solo a esa; con `pedido`, a todas las
-    partidas del mismo pedido que lleven ese componente. En ambos casos las
-    partidas afectadas se independizan del banco. Devuelve cuántas se han
-    visto afectadas."""
+    """Con alcance `partida` afecta solo a esa; con `factura`, a todas las
+    partidas de la misma factura que lleven ese componente."""
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return 0
-    await _asegurar_cliente(session, partida)
 
     objetivo = [partida]
-    if alcance == "pedido":
+    if alcance == "factura":
         org_id = require_organization_id()
         hermanas = (
             await session.execute(
-                select(PedidoPartida)
-                .options(selectinload(PedidoPartida.mediciones))
+                select(FacturaPartida)
+                .options(selectinload(FacturaPartida.mediciones))
                 .where(
-                    PedidoPartida.pedido_id == partida.pedido_id,
-                    PedidoPartida.organization_id == org_id,
-                    PedidoPartida.id != partida.id,
+                    FacturaPartida.factura_id == partida.factura_id,
+                    FacturaPartida.organization_id == org_id,
+                    FacturaPartida.id != partida.id,
                 )
             )
         ).scalars()
         objetivo.extend(hermanas)
 
-    pedido = await obtener_obj(session, partida.pedido_id)
+    factura = await session.get(Factura, partida.factura_id)
     afectadas = 0
     for candidata in objetivo:
         lineas = await independizar_descomposicion(session, candidata)
@@ -852,8 +683,8 @@ async def cambiar_precio_componente(
             continue
         await session.flush()
         await _recalcular_desde_descomposicion(session, candidata)
-        if pedido is not None:
-            await _refrescar_venta(session, pedido, candidata)
+        if factura is not None:
+            await _refrescar_venta(session, factura, candidata)
         afectadas += 1
 
     return afectadas
@@ -865,7 +696,6 @@ async def cambiar_rendimiento_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
     lineas = await independizar_descomposicion(session, partida)
     tocada = False
     for linea in lineas:
@@ -876,9 +706,9 @@ async def cambiar_rendimiento_componente(
         return False
     await session.flush()
     await _recalcular_desde_descomposicion(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     return True
 
 
@@ -888,7 +718,6 @@ async def cambiar_resumen_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
     lineas = await independizar_descomposicion(session, partida)
     tocada = False
     for linea in lineas:
@@ -907,7 +736,6 @@ async def cambiar_unidad_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
     lineas = await independizar_descomposicion(session, partida)
     tocada = False
     for linea in lineas:
@@ -926,7 +754,6 @@ async def cambiar_naturaleza_componente(
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return False
-    await _asegurar_cliente(session, partida)
     lineas = await independizar_descomposicion(session, partida)
     tocada = False
     for linea in lineas:
@@ -942,33 +769,32 @@ async def cambiar_naturaleza_componente(
 # --- Portapapeles: copiar/mover capítulos, partidas, mediciones y
 # componentes de descompuesto (Fase 5) ---
 #
-# Calcado de `presupuestos.presupuesto_service` (`pegar_partidas`/
-# `_clonar_partida`/`pegar_capitulos`/`pegar_lineas_medicion`/
-# `pegar_componentes_descompuesto`), con dos diferencias: `PedidoCapitulo` es
-# de un solo nivel, así que copiar/mover uno nunca implica recursión ni
-# comprobación de ciclos (no hay subcapítulos que arrastrar); y el
-# descompuesto solo se puede pegar en partidas de pedidos de cliente —
-# `pegar_componentes_descompuesto` reutiliza `_asegurar_cliente`, que ya
-# traduce a `DescomposicionNoDisponible` (409 en el router) igual que el
-# resto de escritura de descomposición de este módulo.
+# Calcado de `presupuestos.presupuesto_service`, con dos diferencias:
+# `FacturaCapitulo` es de un solo nivel (sin recursión ni comprobación de
+# ciclos) y el descompuesto está siempre disponible (factura de venta =
+# siempre cliente), así que a diferencia de `compras.pedido_service` no hace
+# falta ningún `DescomposicionNoDisponible`.
 #
-# `Pedido.total` no es una columna (se suma en caliente en `total_de`), así
-# que a diferencia de `factura_partidas_service`/`factura_recibida_partidas_
-# service` no hace falta recalcular ningún total persistido tras mover un
-# capítulo o una partida entre pedidos.
+# A diferencia de `Pedido` (cuyo total se suma en caliente), `Factura.
+# base_imponible`/`cuota_iva`/`total` SÍ son columnas persistidas — así que,
+# a diferencia de `presupuesto_service`, aquí hace falta recalcularlas
+# explícitamente tras mover un capítulo o una partida a otra factura: mover
+# una partida sola ya lo hace `_refrescar_venta` (llamada tras cada cambio),
+# pero mover un capítulo entero reengancha sus partidas en bloque sin pasar
+# por ahí, así que se recalcula la factura de origen y la de destino a mano.
 
 
 async def pegar_partidas(
     session: AsyncSession, capitulo_id: uuid.UUID, partida_ids: list[uuid.UUID], alcance: str
 ) -> int:
-    """Copia o mueve partidas enteras a otro capítulo (del mismo pedido o de
-    otro). Copiar clona la partida, su descompuesto propio (si lo tiene) y
-    sus mediciones, todo con ids nuevos; mover solo reengancha
-    `capitulo_id`/`pedido_id`."""
+    """Copia o mueve partidas enteras a otro capítulo (de la misma factura o
+    de otra). Copiar clona la partida, su descompuesto propio y sus
+    mediciones, todo con ids nuevos; mover solo reengancha
+    `capitulo_id`/`factura_id`."""
     org_id = require_organization_id()
     capitulo = await session.scalar(
-        select(PedidoCapitulo).where(
-            PedidoCapitulo.id == capitulo_id, PedidoCapitulo.organization_id == org_id
+        select(FacturaCapitulo).where(
+            FacturaCapitulo.id == capitulo_id, FacturaCapitulo.organization_id == org_id
         )
     )
     if capitulo is None:
@@ -977,8 +803,8 @@ async def pegar_partidas(
     origen = list(
         (
             await session.execute(
-                select(PedidoPartida).where(
-                    PedidoPartida.id.in_(partida_ids), PedidoPartida.organization_id == org_id
+                select(FacturaPartida).where(
+                    FacturaPartida.id.in_(partida_ids), FacturaPartida.organization_id == org_id
                 )
             )
         ).scalars()
@@ -989,46 +815,50 @@ async def pegar_partidas(
     orden_pedido = [origen_por_id[pid] for pid in partida_ids if pid in origen_por_id]
 
     siguiente = await session.scalar(
-        select(func.max(PedidoPartida.orden)).where(PedidoPartida.capitulo_id == capitulo_id)
+        select(func.max(FacturaPartida.orden)).where(FacturaPartida.capitulo_id == capitulo_id)
     )
     orden = int(siguiente + 1) if siguiente is not None else 0
 
-    pedido = await obtener_obj(session, capitulo.pedido_id)
-    afectadas: list[PedidoPartida] = []
+    factura = await session.get(Factura, capitulo.factura_id)
+    facturas_origen: set[uuid.UUID] = set()
+    afectadas: list[FacturaPartida] = []
     for partida in orden_pedido:
         if alcance == "mover":
+            facturas_origen.add(partida.factura_id)
             partida.capitulo_id = capitulo_id
-            partida.pedido_id = capitulo.pedido_id
+            partida.factura_id = capitulo.factura_id
             partida.orden = orden
             afectadas.append(partida)
         else:
             nueva = await _clonar_partida(
-                session, partida, org_id, capitulo.pedido_id, capitulo_id, orden
+                session, partida, org_id, capitulo.factura_id, capitulo_id, orden
             )
             afectadas.append(nueva)
         orden += 1
 
     await session.flush()
-    if pedido is not None:
+    if factura is not None:
         for p in afectadas:
-            await _refrescar_venta(session, pedido, p)
+            await _refrescar_venta(session, factura, p)
+    for factura_id_origen in facturas_origen - {capitulo.factura_id}:
+        await _recalcular_totales_factura(session, factura_id_origen)
     return len(afectadas)
 
 
 async def _clonar_partida(
     session: AsyncSession,
-    partida: PedidoPartida,
+    partida: FacturaPartida,
     org_id: uuid.UUID,
-    pedido_id: uuid.UUID,
+    factura_id: uuid.UUID,
     capitulo_id: uuid.UUID,
     orden: int,
-) -> PedidoPartida:
+) -> FacturaPartida:
     """Clona una partida entera —descompuesto propio y mediciones
     incluidos— con ids nuevos. Compartido por `pegar_partidas` y
-    `_clonar_capitulo` (copiar un capítulo copia también sus partidas)."""
-    nueva = PedidoPartida(
+    `_clonar_capitulo`."""
+    nueva = FacturaPartida(
         organization_id=org_id,
-        pedido_id=pedido_id,
+        factura_id=factura_id,
         capitulo_id=capitulo_id,
         concepto_id=partida.concepto_id,
         codigo=partida.codigo,
@@ -1038,8 +868,6 @@ async def _clonar_partida(
         precio=partida.precio,
         costes_indirectos=partida.costes_indirectos,
         precio_venta=partida.precio_venta,
-        # Un precio pactado a mano en el origen no se hereda: es un candado
-        # puesto para ESA partida, no para la copia.
         venta_bloqueada=False,
         importe_venta=partida.importe_venta,
         medicion=partida.medicion,
@@ -1051,14 +879,14 @@ async def _clonar_partida(
 
     propias = (
         await session.execute(
-            select(PedidoPartidaDescomposicion)
-            .where(PedidoPartidaDescomposicion.partida_id == partida.id)
-            .order_by(PedidoPartidaDescomposicion.orden)
+            select(FacturaPartidaDescomposicion)
+            .where(FacturaPartidaDescomposicion.partida_id == partida.id)
+            .order_by(FacturaPartidaDescomposicion.orden)
         )
     ).scalars()
     for linea in propias:
         session.add(
-            PedidoPartidaDescomposicion(
+            FacturaPartidaDescomposicion(
                 organization_id=org_id,
                 partida_id=nueva.id,
                 hijo_id=linea.hijo_id,
@@ -1075,14 +903,14 @@ async def _clonar_partida(
 
     mediciones = (
         await session.execute(
-            select(PedidoMedicion)
-            .where(PedidoMedicion.partida_id == partida.id)
-            .order_by(PedidoMedicion.orden)
+            select(FacturaMedicion)
+            .where(FacturaMedicion.partida_id == partida.id)
+            .order_by(FacturaMedicion.orden)
         )
     ).scalars()
     for medicion in mediciones:
         session.add(
-            PedidoMedicion(
+            FacturaMedicion(
                 organization_id=org_id,
                 partida_id=nueva.id,
                 comentario=medicion.comentario,
@@ -1099,17 +927,17 @@ async def _clonar_partida(
 
 async def _clonar_capitulo(
     session: AsyncSession,
-    capitulo: PedidoCapitulo,
+    capitulo: FacturaCapitulo,
     org_id: uuid.UUID,
-    pedido_id: uuid.UUID,
+    factura_id: uuid.UUID,
     orden: int,
-) -> PedidoCapitulo:
+) -> FacturaCapitulo:
     """Clona un capítulo entero —sus partidas, con descompuesto y
-    mediciones— con ids nuevos. Sin recursión: `PedidoCapitulo` es de un solo
-    nivel, a diferencia de `presupuestos.Capitulo`."""
-    nuevo = PedidoCapitulo(
+    mediciones— con ids nuevos. Sin recursión: `FacturaCapitulo` es de un
+    solo nivel."""
+    nuevo = FacturaCapitulo(
         organization_id=org_id,
-        pedido_id=pedido_id,
+        factura_id=factura_id,
         codigo=capitulo.codigo,
         resumen=capitulo.resumen,
         texto=capitulo.texto,
@@ -1120,34 +948,33 @@ async def _clonar_capitulo(
 
     partidas = (
         await session.execute(
-            select(PedidoPartida)
-            .where(PedidoPartida.capitulo_id == capitulo.id)
-            .order_by(PedidoPartida.orden)
+            select(FacturaPartida)
+            .where(FacturaPartida.capitulo_id == capitulo.id)
+            .order_by(FacturaPartida.orden)
         )
     ).scalars()
     for i, partida in enumerate(partidas):
-        await _clonar_partida(session, partida, org_id, pedido_id, nuevo.id, i)
+        await _clonar_partida(session, partida, org_id, factura_id, nuevo.id, i)
 
     return nuevo
 
 
 async def pegar_capitulos(
-    session: AsyncSession, pedido_id: uuid.UUID, capitulo_ids: list[uuid.UUID], alcance: str
+    session: AsyncSession, factura_id: uuid.UUID, capitulo_ids: list[uuid.UUID], alcance: str
 ) -> int:
     """Copia o mueve capítulos enteros —con sus partidas, descompuesto y
-    mediciones— a este pedido (del mismo o de otro). Sin `parent_id`, a
-    diferencia de `presupuesto_service.pegar_capitulos`: `PedidoCapitulo` no
-    anida, así que no hay dónde colgarlo salvo la raíz del pedido destino."""
+    mediciones— a esta factura (de la misma o de otra). Sin `parent_id`:
+    `FacturaCapitulo` no anida."""
     org_id = require_organization_id()
-    pedido = await obtener_obj(session, pedido_id)
-    if pedido is None:
+    factura = await session.get(Factura, factura_id)
+    if factura is None:
         return 0
 
     origen = list(
         (
             await session.execute(
-                select(PedidoCapitulo).where(
-                    PedidoCapitulo.id.in_(capitulo_ids), PedidoCapitulo.organization_id == org_id
+                select(FacturaCapitulo).where(
+                    FacturaCapitulo.id.in_(capitulo_ids), FacturaCapitulo.organization_id == org_id
                 )
             )
         ).scalars()
@@ -1158,32 +985,33 @@ async def pegar_capitulos(
     orden_pedido = [origen_por_id[cid] for cid in capitulo_ids if cid in origen_por_id]
 
     siguiente = await session.scalar(
-        select(func.max(PedidoCapitulo.orden)).where(PedidoCapitulo.pedido_id == pedido_id)
+        select(func.max(FacturaCapitulo.orden)).where(FacturaCapitulo.factura_id == factura_id)
     )
     orden = int(siguiente + 1) if siguiente is not None else 0
 
+    facturas_origen: set[uuid.UUID] = set()
     afectados = 0
     for capitulo in orden_pedido:
         if alcance == "mover":
-            capitulo.pedido_id = pedido_id
+            facturas_origen.add(capitulo.factura_id)
+            capitulo.factura_id = factura_id
             capitulo.orden = orden
-            # Reengancha también lo que cuelga de él: sus partidas llevan su
-            # propio `pedido_id` (que `cargar_capitulos` usa para filtrar),
-            # así que sin esto quedarían huérfanas de un pedido al que ya no
-            # pertenece su capítulo.
             partidas = (
                 await session.execute(
-                    select(PedidoPartida).where(PedidoPartida.capitulo_id == capitulo.id)
+                    select(FacturaPartida).where(FacturaPartida.capitulo_id == capitulo.id)
                 )
             ).scalars()
             for partida in partidas:
-                partida.pedido_id = pedido_id
+                partida.factura_id = factura_id
         else:
-            await _clonar_capitulo(session, capitulo, org_id, pedido_id, orden)
+            await _clonar_capitulo(session, capitulo, org_id, factura_id, orden)
         afectados += 1
         orden += 1
 
     await session.flush()
+    await _recalcular_totales_factura(session, factura_id)
+    for factura_id_origen in facturas_origen - {factura_id}:
+        await _recalcular_totales_factura(session, factura_id_origen)
     return afectados
 
 
@@ -1199,8 +1027,8 @@ async def pegar_mediciones(
     origen = list(
         (
             await session.execute(
-                select(PedidoMedicion).where(
-                    PedidoMedicion.id.in_(medicion_ids), PedidoMedicion.organization_id == org_id
+                select(FacturaMedicion).where(
+                    FacturaMedicion.id.in_(medicion_ids), FacturaMedicion.organization_id == org_id
                 )
             )
         ).scalars()
@@ -1211,7 +1039,7 @@ async def pegar_mediciones(
     orden_pedido = [origen_por_id[mid] for mid in medicion_ids if mid in origen_por_id]
 
     siguiente = await session.scalar(
-        select(func.max(PedidoMedicion.orden)).where(PedidoMedicion.partida_id == partida_id)
+        select(func.max(FacturaMedicion.orden)).where(FacturaMedicion.partida_id == partida_id)
     )
     orden = int(siguiente + 1) if siguiente is not None else 0
 
@@ -1223,7 +1051,7 @@ async def pegar_mediciones(
             medicion.orden = orden
         else:
             session.add(
-                PedidoMedicion(
+                FacturaMedicion(
                     organization_id=org_id,
                     partida_id=partida_id,
                     comentario=medicion.comentario,
@@ -1239,47 +1067,38 @@ async def pegar_mediciones(
     await session.flush()
 
     await _recalcular_partida(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     if alcance == "mover":
         for origen_id in partidas_origen - {partida_id}:
             origen_partida = await obtener_partida(session, origen_id)
             if origen_partida is not None:
-                # Si se llevó la última medición, la partida de origen se
-                # queda sin desglose y `_recalcular_partida` ya no toca la
-                # medición (para no pisar una manual) — pero lo que había ahí
-                # era la suma de unas mediciones que ya no son suyas, así que
-                # aquí sí hay que ponerla a cero explícitamente (mismo caso
-                # que `eliminar_medicion`).
                 if not await _tiene_desglose(session, origen_id):
                     origen_partida.medicion = Decimal("0.000")
                 await _recalcular_partida(session, origen_partida)
-                pedido_origen = await obtener_obj(session, origen_partida.pedido_id)
-                if pedido_origen is not None:
-                    await _refrescar_venta(session, pedido_origen, origen_partida)
+                factura_origen = await session.get(Factura, origen_partida.factura_id)
+                if factura_origen is not None:
+                    await _refrescar_venta(session, factura_origen, origen_partida)
     return len(orden_pedido)
 
 
 async def pegar_componentes_descompuesto(
     session: AsyncSession, partida_id: uuid.UUID, linea_ids: list[uuid.UUID], alcance: str
 ) -> int:
-    """Copia o mueve componentes de un descompuesto a otra partida —solo
-    disponible si la partida destino es de un pedido de cliente
-    (`DescomposicionNoDisponible`, 409 en el router, en caso contrario).
-    Independiza la partida destino si todavía heredaba del banco."""
+    """Copia o mueve componentes de un descompuesto a otra partida,
+    independizando el destino del banco si aún lo heredaba."""
     org_id = require_organization_id()
     partida = await obtener_partida(session, partida_id)
     if partida is None:
         return 0
-    await _asegurar_cliente(session, partida)
 
     origen = list(
         (
             await session.execute(
-                select(PedidoPartidaDescomposicion).where(
-                    PedidoPartidaDescomposicion.id.in_(linea_ids),
-                    PedidoPartidaDescomposicion.organization_id == org_id,
+                select(FacturaPartidaDescomposicion).where(
+                    FacturaPartidaDescomposicion.id.in_(linea_ids),
+                    FacturaPartidaDescomposicion.organization_id == org_id,
                 )
             )
         ).scalars()
@@ -1291,8 +1110,8 @@ async def pegar_componentes_descompuesto(
 
     await independizar_descomposicion(session, partida)
     siguiente = await session.scalar(
-        select(func.max(PedidoPartidaDescomposicion.orden)).where(
-            PedidoPartidaDescomposicion.partida_id == partida_id
+        select(func.max(FacturaPartidaDescomposicion.orden)).where(
+            FacturaPartidaDescomposicion.partida_id == partida_id
         )
     )
     orden = int(siguiente + 1) if siguiente is not None else 0
@@ -1305,7 +1124,7 @@ async def pegar_componentes_descompuesto(
             linea.orden = orden
         else:
             session.add(
-                PedidoPartidaDescomposicion(
+                FacturaPartidaDescomposicion(
                     organization_id=org_id,
                     partida_id=partida_id,
                     hijo_id=linea.hijo_id,
@@ -1323,15 +1142,15 @@ async def pegar_componentes_descompuesto(
     await session.flush()
 
     await _recalcular_desde_descomposicion(session, partida)
-    pedido = await obtener_obj(session, partida.pedido_id)
-    if pedido is not None:
-        await _refrescar_venta(session, pedido, partida)
+    factura = await session.get(Factura, partida.factura_id)
+    if factura is not None:
+        await _refrescar_venta(session, factura, partida)
     if alcance == "mover":
         for origen_id in partidas_origen - {partida_id}:
             origen_partida = await obtener_partida(session, origen_id)
             if origen_partida is not None:
                 await _recalcular_desde_descomposicion(session, origen_partida)
-                pedido_origen = await obtener_obj(session, origen_partida.pedido_id)
-                if pedido_origen is not None:
-                    await _refrescar_venta(session, pedido_origen, origen_partida)
+                factura_origen = await session.get(Factura, origen_partida.factura_id)
+                if factura_origen is not None:
+                    await _refrescar_venta(session, factura_origen, origen_partida)
     return len(orden_pedido)

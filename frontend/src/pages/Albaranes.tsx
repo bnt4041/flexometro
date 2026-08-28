@@ -5,8 +5,8 @@ import { Plus, X } from 'lucide-react'
 import { EmptyState, ErrorNotice, Field, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { ColumnaTabla } from '../components/DataTable'
-import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
-import type { AlbaranResumen, ObraResumen, PedidoResumen, Tercero } from '../lib/api'
+import { ETIQUETA_ESTADO_ALBARAN, ETIQUETA_TIPO_ALBARAN, api } from '../lib/api'
+import type { AlbaranResumen, ObraResumen, PedidoResumen, Tercero, TipoAlbaran } from '../lib/api'
 
 // El listado ya no pagina en el servidor: el `DataTable` pagina, ordena y
 // filtra en el navegador sobre este lote — 500 es el máximo que admite el
@@ -45,13 +45,22 @@ export function Albaranes() {
     () => [
       { id: 'codigo', encabezado: 'Código', accessor: (a) => a.codigo, anchoInicial: 110 },
       {
-        id: 'proveedor',
-        encabezado: 'Proveedor',
-        accessor: (a) => `${a.proveedor_razon_social} ${a.numero_proveedor ?? ''}`,
+        id: 'tipo',
+        encabezado: 'Tipo',
+        accessor: (a) => a.tipo,
+        render: (a) => ETIQUETA_TIPO_ALBARAN[a.tipo],
+        tipo: 'select',
+        opciones: Object.entries(ETIQUETA_TIPO_ALBARAN).map(([value, label]) => ({ value, label })),
+        anchoInicial: 100,
+      },
+      {
+        id: 'tercero',
+        encabezado: 'Cliente / proveedor',
+        accessor: (a) => `${a.tercero_razon_social} ${a.numero_proveedor ?? ''}`,
         render: (a) => (
           <>
             <Link className="table__link" to={`${a.id}`}>
-              {a.proveedor_razon_social}
+              {a.tercero_razon_social}
             </Link>
             {a.numero_proveedor && <div className="muted">Nº {a.numero_proveedor}</div>}
           </>
@@ -85,9 +94,11 @@ export function Albaranes() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Albaranes</h1>
-          <p className="page-lead">Material recibido en obra desde un proveedor.</p>
+          <p className="page-lead">
+            Material recibido en obra desde un proveedor, o entregado/ejecutado a un cliente.
+          </p>
         </div>
-        <Tooltip texto="Registrar un albarán de proveedor">
+        <Tooltip texto="Registrar un albarán">
           <Link className="btn btn--primary" to="nuevo">
             <Plus size={16} aria-hidden="true" />
             Nuevo albarán
@@ -118,9 +129,10 @@ export function AlbaranCrear() {
   const navigate = useNavigate()
   const { onCambio } = useContextoAlbaranes()
   const [obras, setObras] = useState<ObraResumen[]>([])
-  const [proveedores, setProveedores] = useState<Tercero[]>([])
+  const [tipo, setTipo] = useState<TipoAlbaran>('proveedor')
+  const [terceros, setTerceros] = useState<Tercero[]>([])
   const [obraId, setObraId] = useState('')
-  const [proveedorId, setProveedorId] = useState('')
+  const [terceroId, setTerceroId] = useState('')
   const [numeroProveedor, setNumeroProveedor] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   const [pedidos, setPedidos] = useState<PedidoResumen[]>([])
@@ -128,32 +140,40 @@ export function AlbaranCrear() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    void Promise.all([
-      api.obras.list({ limit: 200 }),
-      api.terceros.list({ rol: 'proveedor', activo: true, limit: 500 }),
-    ])
-      .then(([obrasPage, provPage]) => {
-        setObras(obrasPage.items)
-        setProveedores(provPage.items)
-        if (obrasPage.items.length > 0) setObraId(obrasPage.items[0].id)
-        if (provPage.items.length > 0) setProveedorId(provPage.items[0].id)
+    void api.obras
+      .list({ limit: 200 })
+      .then((page) => {
+        setObras(page.items)
+        if (page.items.length > 0) setObraId(page.items[0].id)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
   }, [])
 
+  useEffect(() => {
+    setTerceroId('')
+    void api.terceros
+      .list({ rol: tipo, activo: true, limit: 500 })
+      .then((page) => {
+        setTerceros(page.items)
+        if (page.items.length > 0) setTerceroId(page.items[0].id)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Error desconocido'))
+  }, [tipo])
+
   // Pedidos de este proveedor y obra, para poder decir de cuál viene esta
   // entrega — opcional, se sigue pudiendo dar de alta un albarán directo.
+  // Solo aplica a proveedor: un albarán de cliente no cuelga de un pedido.
   useEffect(() => {
     setPedidoId('')
-    if (!obraId || !proveedorId) {
+    if (tipo !== 'proveedor' || !obraId || !terceroId) {
       setPedidos([])
       return
     }
     void api.pedidos
-      .list({ obra_id: obraId, proveedor_id: proveedorId, limit: 100 })
+      .list({ obra_id: obraId, proveedor_id: terceroId, limit: 100 })
       .then((page) => setPedidos(page.items))
       .catch(() => setPedidos([]))
-  }, [obraId, proveedorId])
+  }, [tipo, obraId, terceroId])
 
   function cerrar() {
     navigate('/albaranes')
@@ -163,8 +183,10 @@ export function AlbaranCrear() {
     setError(null)
     try {
       const albaran = await api.albaranes.create({
+        tipo,
         obra_id: obraId,
-        proveedor_id: proveedorId,
+        proveedor_id: tipo === 'proveedor' ? terceroId : null,
+        cliente_id: tipo === 'cliente' ? terceroId : null,
         numero_proveedor: numeroProveedor || null,
         fecha,
         pedido_id: pedidoId || null,
@@ -181,12 +203,20 @@ export function AlbaranCrear() {
       <ErrorNotice error={error} />
       <div className="card">
         <div className="form-section">
-          {obras.length === 0 || proveedores.length === 0 ? (
-            <EmptyState title="Hace falta una obra y un proveedor">
-              Crea antes al menos una obra y marca algún tercero con el rol de proveedor.
-            </EmptyState>
+          {obras.length === 0 ? (
+            <EmptyState title="Hace falta una obra">Crea antes al menos una obra.</EmptyState>
           ) : (
             <div className="form-grid">
+              <Field label="Tipo">
+                <select
+                  className="select"
+                  value={tipo}
+                  onChange={(e) => setTipo(e.target.value as TipoAlbaran)}
+                >
+                  <option value="proveedor">De un proveedor</option>
+                  <option value="cliente">Para un cliente</option>
+                </select>
+              </Field>
               <Field label="Obra">
                 <select className="select" value={obraId} onChange={(e) => setObraId(e.target.value)}>
                   {obras.map((o) => (
@@ -196,44 +226,55 @@ export function AlbaranCrear() {
                   ))}
                 </select>
               </Field>
-              <Field label="Proveedor">
-                <select
-                  className="select"
-                  value={proveedorId}
-                  onChange={(e) => setProveedorId(e.target.value)}
-                >
-                  {proveedores.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.razon_social}
-                    </option>
-                  ))}
-                </select>
+              <Field label={tipo === 'proveedor' ? 'Proveedor' : 'Cliente'}>
+                {terceros.length === 0 ? (
+                  <p className="muted">
+                    No hay ningún tercero con el rol de {tipo === 'proveedor' ? 'proveedor' : 'cliente'}
+                  </p>
+                ) : (
+                  <select
+                    className="select"
+                    value={terceroId}
+                    onChange={(e) => setTerceroId(e.target.value)}
+                  >
+                    {terceros.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.razon_social}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </Field>
-              <Field label="Nº del proveedor" hint="El número que trae el propio albarán">
+              <Field
+                label={tipo === 'proveedor' ? 'Nº del proveedor' : 'Nº de referencia'}
+                hint="El número que trae el propio albarán — opcional"
+              >
                 <input
                   className="input"
                   value={numeroProveedor}
                   onChange={(e) => setNumeroProveedor(e.target.value)}
                 />
               </Field>
-              <Field
-                label="De qué pedido viene"
-                hint={pedidos.length === 0 ? 'Sin pedidos abiertos con este proveedor en esta obra' : 'Opcional'}
-              >
-                <select
-                  className="select"
-                  value={pedidoId}
-                  onChange={(e) => setPedidoId(e.target.value)}
-                  disabled={pedidos.length === 0}
+              {tipo === 'proveedor' && (
+                <Field
+                  label="De qué pedido viene"
+                  hint={pedidos.length === 0 ? 'Sin pedidos abiertos con este proveedor en esta obra' : 'Opcional'}
                 >
-                  <option value="">— Sin pedido —</option>
-                  {pedidos.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.codigo}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                  <select
+                    className="select"
+                    value={pedidoId}
+                    onChange={(e) => setPedidoId(e.target.value)}
+                    disabled={pedidos.length === 0}
+                  >
+                    <option value="">— Sin pedido —</option>
+                    {pedidos.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.codigo}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Fecha">
                 <input
                   className="input"
@@ -252,7 +293,7 @@ export function AlbaranCrear() {
           </button>
           <button
             className="btn btn--primary"
-            disabled={obraId === '' || proveedorId === ''}
+            disabled={obraId === '' || terceroId === ''}
             onClick={() => void guardar()}
           >
             <Plus size={16} aria-hidden="true" />

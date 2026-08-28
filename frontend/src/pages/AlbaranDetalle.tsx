@@ -10,7 +10,7 @@ import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
-import { ETIQUETA_ESTADO_ALBARAN, api } from '../lib/api'
+import { ETIQUETA_ESTADO_ALBARAN, ETIQUETA_TIPO_ALBARAN, api } from '../lib/api'
 import type {
   AlbaranDetalle as Detalle,
   Concepto,
@@ -213,9 +213,9 @@ export function AlbaranDetalle() {
           origen={[
             {
               tipo: 'tercero',
-              etiqueta: albaran.proveedor_razon_social,
-              ruta: `/terceros/${albaran.proveedor_id}`,
-              estadoEtiqueta: 'Proveedor',
+              etiqueta: albaran.tercero_razon_social,
+              ruta: `/terceros/${albaran.cliente_id ?? albaran.proveedor_id}`,
+              estadoEtiqueta: ETIQUETA_TIPO_ALBARAN[albaran.tipo],
             },
             ...(albaran.pedido_id
               ? [
@@ -245,7 +245,7 @@ export function AlbaranDetalle() {
     <FichaDetalle
       titulo={
         <>
-          {albaran.proveedor_razon_social} <span className="table__code">{albaran.codigo}</span>
+          {albaran.tercero_razon_social} <span className="table__code">{albaran.codigo}</span>
         </>
       }
       pestanas={pestanas}

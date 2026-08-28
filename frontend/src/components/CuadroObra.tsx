@@ -265,7 +265,7 @@ export function CuadroObra({
       api.obras.costes(obraId),
       api.facturasRecibidas.totalesDeObra(obraId),
       api.certificaciones.resumenDeObra(obraId),
-      api.albaranes.list({ obra_id: obraId, limit: 5 }),
+      api.albaranes.list({ obra_id: obraId, tipo: 'proveedor', limit: 5 }),
       api.obras.resumenTareas(obraId),
       api.obras.tareas(obraId),
     ])
@@ -452,7 +452,7 @@ export function CuadroObra({
                 {albaranes.map((a) => (
                   <tr key={a.id}>
                     <td>{a.codigo}</td>
-                    <td>{a.proveedor_razon_social}</td>
+                    <td>{a.tercero_razon_social}</td>
                     <td>{a.fecha}</td>
                     <td className="table__num">{euros(a.total)}</td>
                   </tr>

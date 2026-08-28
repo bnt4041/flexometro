@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Ban, FileDown, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
+import { Ban, FileDown, Plus, RefreshCw, Send, Sparkles, Trash2, X } from 'lucide-react'
 
+import { AyudaIADocumentoModal } from '../components/AyudaIADocumentoModal'
 import { ContactosAsociados } from '../components/ContactosAsociados'
+import { DescompuestoDocumento } from '../components/DescompuestoDocumento'
 import { Documentos } from '../components/Documentos'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { FichaDetalle } from '../components/FichaDetalle'
 import { Historial } from '../components/Historial'
+import { MedicionesDocumento } from '../components/MedicionesDocumento'
 import { NotasCrm } from '../components/NotasCrm'
+import { RejillaDocumento } from '../components/RejillaDocumento'
 import { Trazabilidad, cargarAsociadosDeObra } from '../components/Trazabilidad'
 import { EmptyState, ErrorNotice, Field, Modal, ModalPantalla, Tooltip, formatoImporte } from '../components/ui'
 import { WidgetGrid } from '../components/WidgetGrid'
 import { ETIQUETA_ESTADO_FACTURA, ETIQUETA_SITUACION_COBRO, api, descargar } from '../lib/api'
-import type { CuentaFinanciera, FacturaDetalle as Detalle } from '../lib/api'
+import type { CuentaFinanciera, FacturaCapituloConPartidas, FacturaDetalle as Detalle } from '../lib/api'
 import { useContextoFacturas } from './Facturas'
 
 export function FacturaDetalle() {
@@ -20,10 +24,14 @@ export function FacturaDetalle() {
   const navigate = useNavigate()
   const { onCambio } = useContextoFacturas()
   const [factura, setFactura] = useState<Detalle | null>(null)
+  const [capitulos, setCapitulos] = useState<FacturaCapituloConPartidas[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [errorCapitulos, setErrorCapitulos] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [anulando, setAnulando] = useState(false)
   const [cobrando, setCobrando] = useState(false)
+  const [seleccionId, setSeleccionId] = useState<string | null>(null)
+  const [ayudaIAAbierta, setAyudaIAAbierta] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -34,9 +42,23 @@ export function FacturaDetalle() {
     }
   }, [id])
 
+  const cargarCapitulos = useCallback(async () => {
+    try {
+      setCapitulos(await api.facturas.capitulos(id))
+      setErrorCapitulos(null)
+    } catch (err) {
+      setErrorCapitulos(err instanceof Error ? err.message : 'Error desconocido')
+    }
+  }, [id])
+
   useEffect(() => {
     void cargar()
-  }, [cargar])
+    void cargarCapitulos()
+  }, [cargar, cargarCapitulos])
+
+  async function recargarTodo() {
+    await Promise.all([cargar(), cargarCapitulos()])
+  }
 
   function cerrar() {
     navigate('/facturas')
@@ -83,6 +105,8 @@ export function FacturaDetalle() {
   const numeroFiscal = factura.numero
     ? `${factura.serie}/${String(factura.numero).padStart(5, '0')}`
     : `${factura.serie} · borrador`
+
+  const partidaSeleccionada = seleccionId ? buscarPartida(capitulos, seleccionId) : null
 
   const pestanaDatos = (
     <>
@@ -220,8 +244,130 @@ export function FacturaDetalle() {
               </div>
             ),
           },
+          {
+            id: 'lineas',
+            titulo: 'Capítulos y partidas',
+            x: 0,
+            y: 10,
+            w: 8,
+            h: 12,
+            minW: 4,
+            minH: 6,
+            contenido: (
+              <RejillaDocumento
+                capitulos={capitulos}
+                permiteDescompuesto
+                onCrearCapitulo={() => api.facturas.addCapitulo(id, { resumen: 'Nuevo capítulo' })}
+                onActualizarCapitulo={(capId, cambios) => api.facturasCapitulos.update(capId, cambios)}
+                onEliminarCapitulo={(capId) => api.facturasCapitulos.remove(capId)}
+                onCrearPartida={(capId) =>
+                  api.facturasCapitulos.addPartida(capId, { resumen: 'Nueva partida' })
+                }
+                onActualizarPartida={(partId, cambios) => api.facturasPartidas.update(partId, cambios)}
+                onEliminarPartida={(partId) => api.facturasPartidas.remove(partId)}
+                onSeleccionarPartida={setSeleccionId}
+                seleccionadaId={seleccionId}
+                onCambio={() => void recargarTodo()}
+                origenEntidad="factura"
+                etiquetaDocumento={numeroFiscal}
+                onPegarCapitulos={(datos) => api.facturas.pegarCapitulos(id, datos)}
+                onPegarPartidas={(capituloId, datos) => api.facturasCapitulos.pegarPartidas(capituloId, datos)}
+              />
+            ),
+          },
+          {
+            id: 'mediciones',
+            titulo: 'Mediciones',
+            x: 8,
+            y: 10,
+            w: 4,
+            h: 12,
+            minW: 3,
+            minH: 6,
+            contenido: !partidaSeleccionada ? (
+              <EmptyState title="Nada seleccionado">
+                Selecciona una partida en el listado para ver y editar su medición aquí.
+              </EmptyState>
+            ) : (
+              <MedicionesDocumento
+                key={partidaSeleccionada.id}
+                mediciones={partidaSeleccionada.mediciones}
+                unidad={partidaSeleccionada.unidad}
+                medicionTotal={partidaSeleccionada.medicion}
+                precio={partidaSeleccionada.precio}
+                importe={partidaSeleccionada.importe}
+                onCrear={() => api.facturasPartidas.addMedicion(partidaSeleccionada.id, { uds: '1' })}
+                onActualizar={(medId, campos) => api.facturasMediciones.update(medId, campos)}
+                onEliminar={(medId) => api.facturasMediciones.remove(medId)}
+                onCambio={() => void recargarTodo()}
+                origenEntidad="factura"
+                origenEtiqueta={`${partidaSeleccionada.codigo} · ${partidaSeleccionada.resumen}`}
+                onPegar={(datos) => api.facturasPartidas.pegarMediciones(partidaSeleccionada.id, datos)}
+              />
+            ),
+          },
+          {
+            id: 'descompuesto',
+            titulo: 'Descompuesto',
+            x: 0,
+            y: 22,
+            w: 12,
+            h: 10,
+            minW: 5,
+            minH: 5,
+            contenido: !partidaSeleccionada ? (
+              <EmptyState title="Ninguna partida seleccionada">
+                Selecciona una partida en el listado para ver de qué se compone su precio.
+              </EmptyState>
+            ) : (
+              <DescompuestoDocumento
+                key={partidaSeleccionada.id}
+                codigo={partidaSeleccionada.codigo}
+                resumen={partidaSeleccionada.resumen}
+                unidad={partidaSeleccionada.unidad}
+                precio={partidaSeleccionada.precio}
+                costesIndirectos={partidaSeleccionada.costes_indirectos}
+                etiquetaAlcanceAmplio="En toda la factura donde aparezca"
+                cargar={() => api.facturasPartidas.descomposicion(partidaSeleccionada.id)}
+                anadirComponente={(datos) =>
+                  api.facturasPartidas.anadirComponente(partidaSeleccionada.id, datos)
+                }
+                quitarComponente={(lineaId) =>
+                  api.facturasPartidas.quitarComponente(partidaSeleccionada.id, lineaId)
+                }
+                independizarDescomposicion={() =>
+                  api.facturasPartidas.independizarDescomposicion(partidaSeleccionada.id)
+                }
+                cambiarPrecioComponente={(datos) =>
+                  api.facturasPartidas.cambiarPrecioComponente(partidaSeleccionada.id, {
+                    hijo_id: datos.hijo_id,
+                    precio: datos.precio,
+                    alcance: datos.alcance === 'amplio' ? 'factura' : 'partida',
+                  })
+                }
+                cambiarRendimientoComponente={(datos) =>
+                  api.facturasPartidas.cambiarRendimientoComponente(partidaSeleccionada.id, datos)
+                }
+                cambiarResumenComponente={(datos) =>
+                  api.facturasPartidas.cambiarResumenComponente(partidaSeleccionada.id, datos)
+                }
+                cambiarNaturalezaComponente={(datos) =>
+                  api.facturasPartidas.cambiarNaturalezaComponente(partidaSeleccionada.id, datos)
+                }
+                cambiarUnidadComponente={(datos) =>
+                  api.facturasPartidas.cambiarUnidadComponente(partidaSeleccionada.id, datos)
+                }
+                onCambio={() => void recargarTodo()}
+                origenEntidad="factura"
+                pegarComponentes={(datos) =>
+                  api.facturasPartidas.pegarComponentes(partidaSeleccionada.id, datos)
+                }
+              />
+            ),
+          },
         ]}
       />
+      <ErrorNotice error={errorCapitulos} />
 
       <div className="card" style={{ marginTop: 'var(--sp-4)' }}>
         <div className="form-actions form-actions--separadas">
@@ -522,4 +668,16 @@ function CobroModal({
       </div>
     </Modal>
   )
+}
+
+/** Busca una partida por id en el árbol de capítulos ya cargado — igual que
+ *  `PresupuestoDetalle.buscarPartida`: la selección se guarda solo como id
+ *  para no arrastrar una copia que quede desactualizada tras la siguiente
+ *  recarga. */
+function buscarPartida(capitulos: FacturaCapituloConPartidas[], id: string) {
+  for (const capitulo of capitulos) {
+    const encontrada = capitulo.partidas.find((p) => p.id === id)
+    if (encontrada) return encontrada
+  }
+  return null
 }

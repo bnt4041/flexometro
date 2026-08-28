@@ -82,7 +82,7 @@ async def apariciones_de(session: AsyncSession, tercero_id: uuid.UUID) -> list[A
         (
             await session.execute(
                 select(Albaran)
-                .where(Albaran.proveedor_id == tercero_id)
+                .where(or_(Albaran.proveedor_id == tercero_id, Albaran.cliente_id == tercero_id))
                 .order_by(Albaran.fecha.desc())
             )
         ).scalars()

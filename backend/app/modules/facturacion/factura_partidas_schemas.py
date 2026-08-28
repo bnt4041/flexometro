@@ -1,99 +1,26 @@
+"""Esquemas de capítulos/partidas/mediciones/descomposición de la Factura de
+venta (Fase 2). Calcado de `presupuestos.presupuesto_schemas`, con el
+prefijo `Factura*` en vez de sin prefijo — mismo criterio ya usado en
+`compras.pedido_schemas`.
+
+`FacturaCapitulo` es de un solo nivel (sin subcapítulos, a diferencia de
+`presupuestos.Capitulo`). Al ser una factura de venta siempre de cliente, el
+descompuesto está siempre disponible: no hace falta ningún equivalente a
+`DescomposicionNoDisponible`.
+"""
+
 import uuid
-from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.html_seguro import sanear_html
-from app.modules.compras.models import EstadoPedido, TipoPedido
 from app.modules.ia.schemas import MensajeConversacionIn
 from app.modules.presupuestos.models import NaturalezaConcepto
 
-# Nota (Fase 1 de la jerarquía capítulo/partida/medición, ver
-# `models.py::Pedido`): `PedidoLinea` y sus esquemas (`PedidoLineaBase/
-# Create/Update/Out`) se han retirado junto con la tabla plana que
-# sustituyen. Los esquemas de capítulos/partidas/mediciones/descomposición
-# se añaden aquí abajo en la Fase 2 (servicios+routers), calcados de
-# `presupuestos.presupuesto_schemas` con el prefijo `Pedido*`.
 
-
-class PedidoBase(BaseModel):
-    tipo: TipoPedido = TipoPedido.PROVEEDOR
-    obra_id: uuid.UUID
-    proveedor_id: uuid.UUID | None = None
-    cliente_id: uuid.UUID | None = None
-    fecha: date
-    fecha_entrega_prevista: date | None = None
-    estado: EstadoPedido = EstadoPedido.PENDIENTE
-    notas: str | None = None
-
-    @model_validator(mode="after")
-    def _tercero_segun_tipo(self) -> "PedidoBase":
-        if self.tipo == TipoPedido.CLIENTE:
-            if self.cliente_id is None or self.proveedor_id is not None:
-                raise ValueError(
-                    "Un pedido de cliente necesita cliente_id, y no proveedor_id"
-                )
-        else:
-            if self.proveedor_id is None or self.cliente_id is not None:
-                raise ValueError(
-                    "Un pedido a proveedor necesita proveedor_id, y no cliente_id"
-                )
-        return self
-
-
-class PedidoCreate(PedidoBase):
-    codigo: str | None = Field(default=None, max_length=32)
-    # De qué solicitud/oferta viene, si viene de ahí (vía "confirmar oferta
-    # ganadora") — solo aplica a `tipo=proveedor`. Copiar las partidas de esa
-    # oferta (o del presupuesto de cliente) a la jerarquía de
-    # capítulos/partidas del pedido es trabajo de la Fase 2 (servicios).
-    origen_solicitud_id: uuid.UUID | None = None
-    origen_oferta_presupuesto_id: uuid.UUID | None = None
-
-
-class PedidoUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    fecha: date | None = None
-    fecha_entrega_prevista: date | None = None
-    estado: EstadoPedido | None = None
-    notas: str | None = None
-
-
-class PedidoOut(PedidoBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    codigo: str
-    origen_solicitud_id: uuid.UUID | None
-    origen_oferta_presupuesto_id: uuid.UUID | None
-    created_at: datetime
-    updated_at: datetime
-    creado_por_nombre: str | None = None
-
-
-class PedidoResumen(PedidoOut):
-    # El cliente o el proveedor, según `tipo`.
-    tercero_razon_social: str
-    total: Decimal
-
-
-class PedidoDetalle(PedidoOut):
-    tercero_razon_social: str
-    total: Decimal = Decimal("0.00")
-
-
-# --- Capítulos, partidas y mediciones (Fase 2) ---
-#
-# Calcado de `presupuestos.presupuesto_schemas`, salvo que `PedidoCapitulo` es
-# de un solo nivel (sin `parent_id`, sin subcapítulos) y que el descompuesto
-# (`PedidoPartidaDescomposicion`) solo se puede tocar si `Pedido.tipo ==
-# CLIENTE` — el servicio es quien lo comprueba, no el esquema.
-
-
-class PedidoCapituloCreate(BaseModel):
+class FacturaCapituloCreate(BaseModel):
     codigo: str | None = Field(default=None, max_length=32)
     resumen: str = Field(min_length=1, max_length=250)
     texto: str | None = None
@@ -105,7 +32,7 @@ class PedidoCapituloCreate(BaseModel):
         return sanear_html(valor)
 
 
-class PedidoCapituloUpdate(BaseModel):
+class FacturaCapituloUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     codigo: str | None = Field(default=None, max_length=32)
@@ -119,26 +46,25 @@ class PedidoCapituloUpdate(BaseModel):
         return sanear_html(valor)
 
 
-class PedidoCapituloOut(BaseModel):
+class FacturaCapituloOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    pedido_id: uuid.UUID
+    factura_id: uuid.UUID
     codigo: str
     resumen: str
     texto: str | None
     orden: int
 
 
-class PedidoCapituloConPartidas(PedidoCapituloOut):
+class FacturaCapituloConPartidas(FacturaCapituloOut):
     """El árbol completo de un capítulo, con sus partidas ya detalladas
-    (mediciones incluidas) — lo que devuelve `GET /api/pedidos/{id}/capitulos`
-    para poder pintar la ficha entera de una vez."""
+    (mediciones incluidas) — lo que devuelve `GET /api/facturas/{id}/capitulos`."""
 
-    partidas: list["PedidoPartidaDetalle"] = Field(default_factory=list)
+    partidas: list["FacturaPartidaDetalle"] = Field(default_factory=list)
 
 
-class PedidoMedicionBase(BaseModel):
+class FacturaMedicionBase(BaseModel):
     comentario: str | None = Field(default=None, max_length=250)
     uds: Decimal | None = None
     longitud: Decimal | None = None
@@ -147,11 +73,11 @@ class PedidoMedicionBase(BaseModel):
     orden: int = 0
 
 
-class PedidoMedicionCreate(PedidoMedicionBase):
+class FacturaMedicionCreate(FacturaMedicionBase):
     pass
 
 
-class PedidoMedicionUpdate(BaseModel):
+class FacturaMedicionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     comentario: str | None = None
@@ -162,7 +88,7 @@ class PedidoMedicionUpdate(BaseModel):
     orden: int | None = None
 
 
-class PedidoMedicionOut(PedidoMedicionBase):
+class FacturaMedicionOut(FacturaMedicionBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -170,7 +96,7 @@ class PedidoMedicionOut(PedidoMedicionBase):
     parcial: Decimal
 
 
-class PedidoPartidaCreate(BaseModel):
+class FacturaPartidaCreate(BaseModel):
     concepto_id: uuid.UUID | None = None
     codigo: str | None = Field(default=None, max_length=32)
     resumen: str | None = Field(default=None, max_length=250)
@@ -178,7 +104,7 @@ class PedidoPartidaCreate(BaseModel):
     unidad: str | None = Field(default=None, max_length=10)
     precio: Decimal | None = Field(default=None, ge=0)
     orden: int = 0
-    mediciones: list[PedidoMedicionCreate] = Field(default_factory=list)
+    mediciones: list[FacturaMedicionCreate] = Field(default_factory=list)
 
     @field_validator("texto")
     @classmethod
@@ -186,7 +112,7 @@ class PedidoPartidaCreate(BaseModel):
         return sanear_html(valor)
 
 
-class PedidoPartidaUpdate(BaseModel):
+class FacturaPartidaUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     codigo: str | None = Field(default=None, max_length=32)
@@ -207,7 +133,7 @@ class PedidoPartidaUpdate(BaseModel):
         return sanear_html(valor)
 
 
-class PedidoPartidaOut(BaseModel):
+class FacturaPartidaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -229,12 +155,12 @@ class PedidoPartidaOut(BaseModel):
     descomposicion_propia: bool = False
 
 
-class PedidoPartidaDetalle(PedidoPartidaOut):
-    mediciones: list[PedidoMedicionOut] = Field(default_factory=list)
+class FacturaPartidaDetalle(FacturaPartidaOut):
+    mediciones: list[FacturaMedicionOut] = Field(default_factory=list)
     precio_cuadro: Decimal | None = None
 
 
-class PedidoLineaDescomposicionOut(BaseModel):
+class FacturaLineaDescomposicionOut(BaseModel):
     id: uuid.UUID
     hijo_id: uuid.UUID | None
     codigo: str
@@ -247,15 +173,15 @@ class PedidoLineaDescomposicionOut(BaseModel):
     importe: Decimal
 
 
-class PedidoDescomposicionOut(BaseModel):
+class FacturaDescomposicionOut(BaseModel):
     """`propia` distingue el descompuesto independizado de la partida del que
     todavía hereda del banco de precios (que se enseña en solo lectura)."""
 
     propia: bool
-    lineas: list[PedidoLineaDescomposicionOut] = Field(default_factory=list)
+    lineas: list[FacturaLineaDescomposicionOut] = Field(default_factory=list)
 
 
-class PedidoComponenteNuevo(BaseModel):
+class FacturaComponenteNuevo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
@@ -263,124 +189,121 @@ class PedidoComponenteNuevo(BaseModel):
     factor: Decimal = Field(default=Decimal("1"), ge=0)
 
 
-class PedidoCambioPrecioComponente(BaseModel):
+class FacturaCambioPrecioComponente(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
     precio: Decimal = Field(ge=0)
-    # `partida`: solo esta. `pedido`: todas las partidas del mismo pedido que
-    # lleven ese componente. El banco de precios no se toca en ningún caso.
-    alcance: Literal["partida", "pedido"] = "partida"
+    # `partida`: solo esta. `factura`: todas las partidas de la misma
+    # factura que lleven ese componente. El banco de precios no se toca.
+    alcance: Literal["partida", "factura"] = "partida"
 
 
-class PedidoCambioRendimientoComponente(BaseModel):
+class FacturaCambioRendimientoComponente(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
     rendimiento: Decimal = Field(ge=0)
 
 
-class PedidoCambioResumenComponente(BaseModel):
+class FacturaCambioResumenComponente(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
     resumen: str = Field(min_length=1, max_length=250)
 
 
-class PedidoCambioNaturalezaComponente(BaseModel):
+class FacturaCambioNaturalezaComponente(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
     naturaleza: NaturalezaConcepto
 
 
-class PedidoCambioUnidadComponente(BaseModel):
+class FacturaCambioUnidadComponente(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hijo_id: uuid.UUID
     unidad: str = Field(min_length=1, max_length=10)
 
 
-class PedidoResultadoCambioPrecio(BaseModel):
+class FacturaResultadoCambioPrecio(BaseModel):
     partidas_afectadas: int
-    descomposicion: PedidoDescomposicionOut
+    descomposicion: FacturaDescomposicionOut
 
 
 # --- Copiar/mover (portapapeles) — Fase 5 ---
 #
-# Calcado de `presupuestos.presupuesto_schemas` (`PegarCapitulos`/
-# `PegarPartidas`/`PegarLineasMedicion`/`PegarComponentesDescompuesto`/
-# `ResultadoPegado`), con el prefijo `Pedido*` (mismo criterio que el resto
-# de este archivo) y sin `parent_id` en `PedidoPegarCapitulos`: `PedidoCapitulo`
-# es de un solo nivel. El campo se llama `medicion_ids`, no `linea_ids`, para
-# seguir la nomenclatura ya usada aquí (`PedidoMedicion`, `crear_medicion`...)
-# en vez de la de `presupuestos` (`LineaMedicion`).
+# Calcado de `presupuestos.presupuesto_schemas`, con el prefijo `Factura*` y
+# sin `parent_id` en `FacturaPegarCapitulos`: `FacturaCapitulo` es de un solo
+# nivel. `medicion_ids`, no `linea_ids`, para seguir la nomenclatura ya usada
+# aquí (`FacturaMedicion`, `crear_medicion`...).
 
 
-class PedidoPegarCapitulos(BaseModel):
+class FacturaPegarCapitulos(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     capitulo_ids: list[uuid.UUID] = Field(min_length=1)
     alcance: Literal["copiar", "mover"]
 
 
-class PedidoPegarPartidas(BaseModel):
+class FacturaPegarPartidas(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     partida_ids: list[uuid.UUID] = Field(min_length=1)
     alcance: Literal["copiar", "mover"]
 
 
-class PedidoPegarMediciones(BaseModel):
+class FacturaPegarMediciones(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     medicion_ids: list[uuid.UUID] = Field(min_length=1)
     alcance: Literal["copiar", "mover"]
 
 
-class PedidoPegarComponentesDescompuesto(BaseModel):
+class FacturaPegarComponentesDescompuesto(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     linea_ids: list[uuid.UUID] = Field(min_length=1)
     alcance: Literal["copiar", "mover"]
 
 
-class PedidoResultadoPegado(BaseModel):
+class FacturaResultadoPegado(BaseModel):
     pegadas: int
 
 
 # --- "Ayuda con IA" (Fase 4) — calcado de `ia.schemas.ContextoAyudaLinea`/
-# `ConversarAyudaLinea`, con `pedido_id`/`pedido_codigo` en vez de
-# `presupuesto_id`/`presupuesto_nombre` (más claro que reinterpretar el
-# campo de un esquema pensado para presupuestos) y sin el caso "ficha" — un
-# pedido no tiene fichas de banco de precios propias. Solo tiene sentido
-# cuando `Pedido.tipo == CLIENTE`; el servicio (`ia_asistente_pedido.
-# conversar`) es quien lo comprueba y lo traduce a `DescomposicionNoDisponible`.
+# `ConversarAyudaLinea`, con `factura_id`/`factura_codigo` en vez de
+# `presupuesto_id`/`presupuesto_nombre` y sin el caso "ficha" — una factura
+# no tiene fichas de banco de precios propias. Al ser una factura de venta
+# siempre de cliente, no hace falta ningún equivalente a
+# `DescomposicionNoDisponible` (a diferencia de `compras.pedido_schemas.
+# ContextoAyudaPedido`).
 
 
-class ContextoAyudaPedido(BaseModel):
+class ContextoAyudaFactura(BaseModel):
     tipo: Literal["capitulo", "partida"]
     codigo: str | None = None
     resumen: str = Field(min_length=1, max_length=250)
     unidad: str | None = None
     precio: Decimal | None = None
-    pedido_id: uuid.UUID
-    pedido_codigo: str = Field(min_length=1, max_length=32)
+    factura_id: uuid.UUID
+    factura_codigo: str = Field(min_length=1, max_length=32)
 
 
-class ConversarAyudaPedido(BaseModel):
+class ConversarAyudaFactura(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contexto: ContextoAyudaPedido
+    contexto: ContextoAyudaFactura
     mensajes: list[MensajeConversacionIn] = Field(min_length=1, max_length=40)
 
 
 # --- Aplicar un capítulo propuesto por la IA con descompuesto real (Fase 4)
 # — calcado de `presupuestos.presupuesto_schemas.AplicarCapituloConComponentesIA`
-# con el prefijo `Pedido*`.
+# con el prefijo `Factura*`.
 
 
-class PedidoComponentePropuestoIA(BaseModel):
+class FacturaComponentePropuestoIA(BaseModel):
     concepto_id: uuid.UUID | None = None
     rendimiento: Decimal
     personalizado: bool = False
@@ -390,7 +313,7 @@ class PedidoComponentePropuestoIA(BaseModel):
     naturaleza: NaturalezaConcepto | None = None
 
 
-class PedidoLineaMedicionPropuestaIA(BaseModel):
+class FacturaLineaMedicionPropuestaIA(BaseModel):
     comentario: str | None = Field(default=None, max_length=250)
     uds: Decimal | None = None
     longitud: Decimal | None = None
@@ -398,19 +321,19 @@ class PedidoLineaMedicionPropuestaIA(BaseModel):
     altura: Decimal | None = None
 
 
-class PedidoPartidaConComponentesIA(BaseModel):
+class FacturaPartidaConComponentesIA(BaseModel):
     """Una partida bajo el capítulo nuevo: movida (`partida_id`, ya existe en
-    el pedido) o creada de cero (`resumen`/`unidad`/`componentes`)."""
+    la factura) o creada de cero (`resumen`/`unidad`/`componentes`)."""
 
     partida_id: uuid.UUID | None = None
     resumen: str | None = Field(default=None, max_length=250)
     unidad: str | None = Field(default=None, max_length=10)
-    componentes: list[PedidoComponentePropuestoIA] = Field(default_factory=list)
+    componentes: list[FacturaComponentePropuestoIA] = Field(default_factory=list)
     texto: str | None = None
-    mediciones: list[PedidoLineaMedicionPropuestaIA] = Field(default_factory=list)
+    mediciones: list[FacturaLineaMedicionPropuestaIA] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _mover_xor_crear(self) -> "PedidoPartidaConComponentesIA":
+    def _mover_xor_crear(self) -> "FacturaPartidaConComponentesIA":
         if self.partida_id is not None:
             return self
         if not self.resumen or not self.unidad or not self.componentes:
@@ -421,6 +344,6 @@ class PedidoPartidaConComponentesIA(BaseModel):
         return self
 
 
-class PedidoAplicarCapituloIA(BaseModel):
+class FacturaAplicarCapituloIA(BaseModel):
     capitulo_resumen: str = Field(min_length=1, max_length=250)
-    partidas: list[PedidoPartidaConComponentesIA] = Field(min_length=1)
+    partidas: list[FacturaPartidaConComponentesIA] = Field(min_length=1)

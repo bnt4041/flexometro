@@ -31,10 +31,11 @@ from app.modules.ia import SPEC as IA
 from app.modules.obras import SPEC as OBRAS
 from app.modules.presupuestos import SPEC as PRESUPUESTOS
 from app.modules.terceros import SPEC as TERCEROS
+from app.modules.testmeter import SPEC as TESTMETER
 
 ALL_SPECS = (
     CORE, CAMPOS_LIBRES, CRM, DOCUMENTOS, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA,
-    CONTRATOS,
+    CONTRATOS, TESTMETER,
 )
 
 

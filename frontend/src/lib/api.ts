@@ -1326,6 +1326,43 @@ export interface FacturaRecibida {
   creado_por_nombre: string | null
 }
 
+// --- Capítulos, partidas y mediciones de FacturaRecibida (Fase 3) ---
+// Sin descomposición ni venta: siempre de proveedor, partida alzada con
+// precio directo. Ver `factura_recibida_partidas_schemas.py`.
+
+export interface FacturaRecibidaCapitulo {
+  id: string
+  factura_id: string
+  codigo: string
+  resumen: string
+  texto: string | null
+  orden: number
+}
+
+export interface FacturaRecibidaPartida {
+  id: string
+  capitulo_id: string
+  concepto_id: string | null
+  codigo: string
+  resumen: string
+  texto: string | null
+  unidad: string
+  precio: string
+  medicion: string
+  importe: string
+  orden: number
+  tiene_desglose: boolean
+}
+
+export interface FacturaRecibidaPartidaDetalle extends FacturaRecibidaPartida {
+  mediciones: MedicionDocumento[]
+  precio_cuadro: string | null
+}
+
+export interface FacturaRecibidaCapituloConPartidas extends FacturaRecibidaCapitulo {
+  partidas: FacturaRecibidaPartidaDetalle[]
+}
+
 /** El cuadre de compras de una obra. */
 export interface TotalesComprasObra {
   albaranes_total: string
@@ -1342,18 +1379,6 @@ export interface TotalesComprasObra {
 
 export type EstadoPedido = 'pendiente' | 'confirmado' | 'servido_parcial' | 'servido' | 'cancelado'
 export type TipoPedido = 'cliente' | 'proveedor'
-
-export interface PedidoLinea {
-  id: string
-  pedido_id: string
-  concepto_id: string | null
-  descripcion: string
-  unidad: string
-  cantidad: string
-  precio_unitario: string
-  importe: string
-  orden: number
-}
 
 export interface Pedido {
   id: string
@@ -1381,9 +1406,75 @@ export interface PedidoResumen extends Pedido {
 
 export interface PedidoDetalle extends Pedido {
   tercero_razon_social: string
-  lineas: PedidoLinea[]
   total: string
 }
+
+// --- Capítulos, partidas y mediciones de Pedido/Factura/FacturaRecibida
+// (Fase 3, frontend) ---
+//
+// Misma jerarquía de tres niveles que `Presupuesto` (Capítulo → Partida →
+// Medición), calcada de `NodoCapitulo`/`Partida`/`LineaMedicion` de más
+// arriba, salvo que aquí los capítulos son planos (sin `parent_id`/
+// subcapítulos: así los devuelve el backend, ver `Pedido*CapituloOut` en
+// `pedido_schemas.py`) y las mediciones no llevan fórmula.
+
+/** Línea de medición común a Pedido/Factura/FacturaRecibida — sin fórmulas
+ *  (a diferencia de `LineaMedicion`, que sí las lleva para `Presupuesto`). */
+export interface MedicionDocumento {
+  id: string
+  partida_id: string
+  comentario: string | null
+  uds: string | null
+  longitud: string | null
+  anchura: string | null
+  altura: string | null
+  parcial: string
+  orden: number
+}
+
+export interface PedidoCapitulo {
+  id: string
+  pedido_id: string
+  codigo: string
+  resumen: string
+  texto: string | null
+  orden: number
+}
+
+export interface PedidoPartida {
+  id: string
+  capitulo_id: string
+  concepto_id: string | null
+  codigo: string
+  resumen: string
+  texto: string | null
+  unidad: string
+  precio: string
+  medicion: string
+  importe: string
+  orden: number
+  /** Venta: solo tiene sentido cuando el pedido es `tipo=cliente`, pero el
+   *  backend siempre informa estos campos en el esquema (a 0 si no aplica). */
+  precio_venta: string
+  venta_bloqueada: boolean
+  importe_venta: string
+  costes_indirectos: string | null
+  tiene_desglose: boolean
+  descomposicion_propia: boolean
+}
+
+export interface PedidoPartidaDetalle extends PedidoPartida {
+  mediciones: MedicionDocumento[]
+  precio_cuadro: string | null
+}
+
+export interface PedidoCapituloConPartidas extends PedidoCapitulo {
+  partidas: PedidoPartidaDetalle[]
+}
+
+/** Alcance de "hasta dónde llega este cambio de precio" al tocar un
+ *  componente del descompuesto — el banco de precios nunca se toca. */
+export type PedidoAlcancePrecio = 'partida' | 'pedido'
 
 // --- Contratos: formalizan el acuerdo de una obra, con cliente o proveedor ---
 
@@ -1652,6 +1743,52 @@ export interface FacturaResumen extends Factura {
 export interface FacturaDetalle extends FacturaResumen {
   cobros: Cobro[]
 }
+
+// --- Capítulos, partidas y mediciones de Factura de venta (Fase 3) ---
+// Siempre cliente, así que el descompuesto está siempre disponible. Ver
+// `factura_partidas_schemas.py`.
+
+export interface FacturaCapitulo {
+  id: string
+  factura_id: string
+  codigo: string
+  resumen: string
+  texto: string | null
+  orden: number
+}
+
+export interface FacturaPartida {
+  id: string
+  capitulo_id: string
+  concepto_id: string | null
+  codigo: string
+  resumen: string
+  texto: string | null
+  unidad: string
+  precio: string
+  medicion: string
+  importe: string
+  orden: number
+  precio_venta: string
+  venta_bloqueada: boolean
+  importe_venta: string
+  costes_indirectos: string | null
+  tiene_desglose: boolean
+  descomposicion_propia: boolean
+}
+
+export interface FacturaPartidaDetalle extends FacturaPartida {
+  mediciones: MedicionDocumento[]
+  precio_cuadro: string | null
+}
+
+export interface FacturaCapituloConPartidas extends FacturaCapitulo {
+  partidas: FacturaPartidaDetalle[]
+}
+
+/** Alcance de "hasta dónde llega este cambio de precio" — el banco de
+ *  precios nunca se toca. */
+export type FacturaAlcancePrecio = 'partida' | 'factura'
 
 // --- IA: sugerencia de patrones de presupuesto ---
 
@@ -3390,6 +3527,79 @@ export const api = {
       request<TotalesComprasObra>(`/api/obras/${obraId}/compras`),
     historial: (id: string) =>
       request<RegistroAuditoria[]>(`/api/facturas-recibidas/${id}/historial`),
+    /** El árbol de capítulos/partidas/mediciones de la factura, ya anidado. */
+    capitulos: (id: string) =>
+      request<FacturaRecibidaCapituloConPartidas[]>(`/api/facturas-recibidas/${id}/capitulos`),
+    addCapitulo: (
+      id: string,
+      datos: { codigo?: string | null; resumen: string; texto?: string | null; orden?: number },
+    ) =>
+      post<{ id: string; codigo: string; resumen: string }>(
+        `/api/facturas-recibidas/${id}/capitulos`,
+        datos,
+      ),
+    /** Pegar (Fase 5): dentro de la misma FacturaRecibida, sin descompuesto
+     *  (esta entidad no lo tiene). */
+    pegarCapitulos: (id: string, datos: { capitulo_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-recibidas/${id}/capitulos/pegar`, datos),
+  },
+
+  facturasRecibidasCapitulos: {
+    update: (
+      id: string,
+      datos: Partial<{ codigo: string; resumen: string; texto: string | null; orden: number }>,
+    ) =>
+      patch<{ id: string; codigo: string; resumen: string }>(
+        `/api/facturas-recibidas-capitulos/${id}`,
+        datos,
+      ),
+    remove: (id: string) => del(`/api/facturas-recibidas-capitulos/${id}`),
+    addPartida: (
+      id: string,
+      datos: {
+        concepto_id?: string | null
+        codigo?: string | null
+        resumen?: string | null
+        unidad?: string | null
+        precio?: string | null
+        orden?: number
+        mediciones?: {
+          comentario?: string | null
+          uds?: string | null
+          longitud?: string | null
+          anchura?: string | null
+          altura?: string | null
+        }[]
+      },
+    ) => post<FacturaRecibidaPartidaDetalle>(`/api/facturas-recibidas-capitulos/${id}/partidas`, datos),
+    pegarPartidas: (id: string, datos: { partida_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-recibidas-capitulos/${id}/partidas/pegar`, datos),
+  },
+
+  facturasRecibidasPartidas: {
+    get: (id: string) => request<FacturaRecibidaPartidaDetalle>(`/api/facturas-recibidas-partidas/${id}`),
+    update: (id: string, datos: Partial<FacturaRecibidaPartida>) =>
+      patch<FacturaRecibidaPartida>(`/api/facturas-recibidas-partidas/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-recibidas-partidas/${id}`),
+    addMedicion: (
+      id: string,
+      datos: {
+        comentario?: string | null
+        uds?: string | null
+        longitud?: string | null
+        anchura?: string | null
+        altura?: string | null
+        orden?: number
+      },
+    ) => post<MedicionDocumento>(`/api/facturas-recibidas-partidas/${id}/mediciones`, datos),
+    pegarMediciones: (id: string, datos: { medicion_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-recibidas-partidas/${id}/mediciones/pegar`, datos),
+  },
+
+  facturasRecibidasMediciones: {
+    update: (id: string, datos: Partial<MedicionDocumento>) =>
+      patch<MedicionDocumento>(`/api/facturas-recibidas-mediciones/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-recibidas-mediciones/${id}`),
   },
 
   albaranes: {
@@ -3455,15 +3665,9 @@ export const api = {
       fecha: string
       fecha_entrega_prevista?: string | null
       notas?: string | null
+      codigo?: string | null
       origen_solicitud_id?: string | null
       origen_oferta_presupuesto_id?: string | null
-      lineas?: {
-        concepto_id?: string | null
-        descripcion?: string | null
-        unidad?: string | null
-        cantidad: string
-        precio_unitario?: string | null
-      }[]
     }) => post<PedidoDetalle>('/api/pedidos', datos),
     update: (
       id: string,
@@ -3475,21 +3679,158 @@ export const api = {
       }>,
     ) => patch<Pedido>(`/api/pedidos/${id}`, datos),
     remove: (id: string) => del(`/api/pedidos/${id}`),
-    addLinea: (
+    historial: (id: string) => request<RegistroAuditoria[]>(`/api/pedidos/${id}/historial`),
+    /** El árbol de capítulos/partidas/mediciones del pedido, ya anidado. */
+    capitulos: (id: string) =>
+      request<PedidoCapituloConPartidas[]>(`/api/pedidos/${id}/capitulos`),
+    addCapitulo: (
+      id: string,
+      datos: { codigo?: string | null; resumen: string; texto?: string | null; orden?: number },
+    ) => post<{ id: string; codigo: string; resumen: string }>(`/api/pedidos/${id}/capitulos`, datos),
+    /** Pegar (Fase 5): dentro del mismo Pedido, cliente o proveedor por igual —
+     *  capítulos y partidas no dependen del tipo, solo el descompuesto. */
+    pegarCapitulos: (id: string, datos: { capitulo_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/pedidos/${id}/capitulos/pegar`, datos),
+    /** "Ayuda con IA" (Fase 4): conversación de solo lectura sobre este
+     *  pedido, que puede terminar en una propuesta de acción — nunca la
+     *  ejecuta ella sola. Solo disponible en pedidos de cliente: el backend
+     *  responde 409 (`DescomposicionNoDisponible`) si es de proveedor. Ver
+     *  `ContextoAyudaPedido`/`ConversarAyudaPedido` en `pedido_schemas.py`. */
+    iaConversar: (
+      id: string,
+      datos: {
+        contexto: {
+          tipo: 'capitulo' | 'partida'
+          codigo?: string | null
+          resumen: string
+          unidad?: string | null
+          precio?: string | null
+          pedido_id: string
+          pedido_codigo: string
+        }
+        mensajes: { rol: 'user' | 'assistant'; contenido: string }[]
+      },
+    ) => post<{ respuesta: string; propuesta: PropuestaIA | null }>(`/api/pedidos/${id}/ia/conversar`, datos),
+    /** Como `presupuestos.aplicarCapituloIA`, pero crea `PedidoCapitulo`/
+     *  `PedidoPartida` (con mediciones y descompuesto) en vez de
+     *  `Capitulo`/`Partida` — solo en pedidos de cliente. */
+    iaAplicarCapitulo: (
+      id: string,
+      datos: {
+        capitulo_resumen: string
+        partidas: {
+          partida_id?: string | null
+          resumen?: string | null
+          unidad?: string | null
+          texto?: string | null
+          componentes?: {
+            concepto_id?: string | null
+            rendimiento: string
+            personalizado: boolean
+            resumen?: string | null
+            unidad?: string | null
+            precio?: string | null
+            naturaleza?: string | null
+          }[]
+          mediciones?: {
+            comentario?: string | null
+            uds?: string | null
+            longitud?: string | null
+            anchura?: string | null
+            altura?: string | null
+          }[]
+        }[]
+      },
+    ) => post<{ id: string; resumen: string; partidas: number }>(
+      `/api/pedidos/${id}/ia/aplicar-capitulo`,
+      datos,
+    ),
+  },
+
+  pedidosCapitulos: {
+    update: (
+      id: string,
+      datos: Partial<{ codigo: string; resumen: string; texto: string | null; orden: number }>,
+    ) => patch<{ id: string; codigo: string; resumen: string }>(`/api/pedidos-capitulos/${id}`, datos),
+    remove: (id: string) => del(`/api/pedidos-capitulos/${id}`),
+    addPartida: (
       id: string,
       datos: {
         concepto_id?: string | null
-        descripcion?: string | null
+        codigo?: string | null
+        resumen?: string | null
         unidad?: string | null
-        cantidad: string
-        precio_unitario?: string | null
+        precio?: string | null
+        orden?: number
+        mediciones?: {
+          comentario?: string | null
+          uds?: string | null
+          longitud?: string | null
+          anchura?: string | null
+          altura?: string | null
+        }[]
       },
-    ) => post<PedidoLinea>(`/api/pedidos/${id}/lineas`, datos),
-    historial: (id: string) => request<RegistroAuditoria[]>(`/api/pedidos/${id}/historial`),
+    ) => post<PedidoPartidaDetalle>(`/api/pedidos-capitulos/${id}/partidas`, datos),
+    pegarPartidas: (id: string, datos: { partida_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/pedidos-capitulos/${id}/partidas/pegar`, datos),
   },
 
-  pedidosLineas: {
-    remove: (id: string) => del(`/api/pedidos-lineas/${id}`),
+  pedidosPartidas: {
+    get: (id: string) => request<PedidoPartidaDetalle>(`/api/pedidos-partidas/${id}`),
+    update: (id: string, datos: Partial<PedidoPartida>) =>
+      patch<PedidoPartida>(`/api/pedidos-partidas/${id}`, datos),
+    remove: (id: string) => del(`/api/pedidos-partidas/${id}`),
+    addMedicion: (
+      id: string,
+      datos: {
+        comentario?: string | null
+        uds?: string | null
+        longitud?: string | null
+        anchura?: string | null
+        altura?: string | null
+        orden?: number
+      },
+    ) => post<MedicionDocumento>(`/api/pedidos-partidas/${id}/mediciones`, datos),
+    pegarMediciones: (id: string, datos: { medicion_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/pedidos-partidas/${id}/mediciones/pegar`, datos),
+    /** Descompuesto — el backend responde 409 si el pedido es `tipo=proveedor`. */
+    descomposicion: (id: string) =>
+      request<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion`),
+    anadirComponente: (
+      id: string,
+      datos: { hijo_id: string; rendimiento?: string; factor?: string },
+    ) => post<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion`, datos),
+    quitarComponente: (id: string, lineaId: string) =>
+      del<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/${lineaId}`),
+    independizarDescomposicion: (id: string) =>
+      post<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/independizar`, {}),
+    cambiarPrecioComponente: (
+      id: string,
+      datos: { hijo_id: string; precio: string; alcance: PedidoAlcancePrecio },
+    ) =>
+      patch<{ partidas_afectadas: number; descomposicion: DescomposicionPartida }>(
+        `/api/pedidos-partidas/${id}/descomposicion/precio`,
+        datos,
+      ),
+    cambiarRendimientoComponente: (id: string, datos: { hijo_id: string; rendimiento: string }) =>
+      patch<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/rendimiento`, datos),
+    cambiarResumenComponente: (id: string, datos: { hijo_id: string; resumen: string }) =>
+      patch<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/resumen`, datos),
+    cambiarNaturalezaComponente: (
+      id: string,
+      datos: { hijo_id: string; naturaleza: NaturalezaConcepto },
+    ) => patch<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/naturaleza`, datos),
+    cambiarUnidadComponente: (id: string, datos: { hijo_id: string; unidad: string }) =>
+      patch<DescomposicionPartida>(`/api/pedidos-partidas/${id}/descomposicion/unidad`, datos),
+    /** 409 si el pedido es `tipo=proveedor` (igual que el resto del descompuesto). */
+    pegarComponentes: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/pedidos-partidas/${id}/descomposicion/pegar`, datos),
+  },
+
+  pedidosMediciones: {
+    update: (id: string, datos: Partial<MedicionDocumento>) =>
+      patch<MedicionDocumento>(`/api/pedidos-mediciones/${id}`, datos),
+    remove: (id: string) => del(`/api/pedidos-mediciones/${id}`),
   },
 
   contratos: {
@@ -3695,6 +4036,152 @@ export const api = {
       },
     ) =>
       post<Cobro>(`/api/facturas/${id}/cobros`, datos),
+    /** El árbol de capítulos/partidas/mediciones de la factura, ya anidado. */
+    capitulos: (id: string) =>
+      request<FacturaCapituloConPartidas[]>(`/api/facturas/${id}/capitulos`),
+    addCapitulo: (
+      id: string,
+      datos: { codigo?: string | null; resumen: string; texto?: string | null; orden?: number },
+    ) => post<{ id: string; codigo: string; resumen: string }>(`/api/facturas/${id}/capitulos`, datos),
+    /** Pegar (Fase 5): dentro de la misma Factura de venta. */
+    pegarCapitulos: (id: string, datos: { capitulo_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas/${id}/capitulos/pegar`, datos),
+    /** "Ayuda con IA" (Fase 4): igual que `pedidos.iaConversar`, pero una
+     *  factura de venta es SIEMPRE de cliente — nunca responde 409. Ver
+     *  `ContextoAyudaFactura`/`ConversarAyudaFactura` en
+     *  `factura_partidas_schemas.py`. */
+    iaConversar: (
+      id: string,
+      datos: {
+        contexto: {
+          tipo: 'capitulo' | 'partida'
+          codigo?: string | null
+          resumen: string
+          unidad?: string | null
+          precio?: string | null
+          factura_id: string
+          factura_codigo: string
+        }
+        mensajes: { rol: 'user' | 'assistant'; contenido: string }[]
+      },
+    ) => post<{ respuesta: string; propuesta: PropuestaIA | null }>(`/api/facturas/${id}/ia/conversar`, datos),
+    /** Como `pedidos.iaAplicarCapitulo`, pero crea `FacturaCapitulo`/
+     *  `FacturaPartida`. */
+    iaAplicarCapitulo: (
+      id: string,
+      datos: {
+        capitulo_resumen: string
+        partidas: {
+          partida_id?: string | null
+          resumen?: string | null
+          unidad?: string | null
+          texto?: string | null
+          componentes?: {
+            concepto_id?: string | null
+            rendimiento: string
+            personalizado: boolean
+            resumen?: string | null
+            unidad?: string | null
+            precio?: string | null
+            naturaleza?: string | null
+          }[]
+          mediciones?: {
+            comentario?: string | null
+            uds?: string | null
+            longitud?: string | null
+            anchura?: string | null
+            altura?: string | null
+          }[]
+        }[]
+      },
+    ) => post<{ id: string; resumen: string; partidas: number }>(
+      `/api/facturas/${id}/ia/aplicar-capitulo`,
+      datos,
+    ),
+  },
+
+  facturasCapitulos: {
+    update: (
+      id: string,
+      datos: Partial<{ codigo: string; resumen: string; texto: string | null; orden: number }>,
+    ) => patch<{ id: string; codigo: string; resumen: string }>(`/api/facturas-capitulos/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-capitulos/${id}`),
+    addPartida: (
+      id: string,
+      datos: {
+        concepto_id?: string | null
+        codigo?: string | null
+        resumen?: string | null
+        unidad?: string | null
+        precio?: string | null
+        orden?: number
+        mediciones?: {
+          comentario?: string | null
+          uds?: string | null
+          longitud?: string | null
+          anchura?: string | null
+          altura?: string | null
+        }[]
+      },
+    ) => post<FacturaPartidaDetalle>(`/api/facturas-capitulos/${id}/partidas`, datos),
+    pegarPartidas: (id: string, datos: { partida_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-capitulos/${id}/partidas/pegar`, datos),
+  },
+
+  facturasPartidas: {
+    get: (id: string) => request<FacturaPartidaDetalle>(`/api/facturas-partidas/${id}`),
+    update: (id: string, datos: Partial<FacturaPartida>) =>
+      patch<FacturaPartida>(`/api/facturas-partidas/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-partidas/${id}`),
+    addMedicion: (
+      id: string,
+      datos: {
+        comentario?: string | null
+        uds?: string | null
+        longitud?: string | null
+        anchura?: string | null
+        altura?: string | null
+        orden?: number
+      },
+    ) => post<MedicionDocumento>(`/api/facturas-partidas/${id}/mediciones`, datos),
+    pegarMediciones: (id: string, datos: { medicion_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-partidas/${id}/mediciones/pegar`, datos),
+    descomposicion: (id: string) =>
+      request<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion`),
+    anadirComponente: (
+      id: string,
+      datos: { hijo_id: string; rendimiento?: string; factor?: string },
+    ) => post<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion`, datos),
+    quitarComponente: (id: string, lineaId: string) =>
+      del<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/${lineaId}`),
+    independizarDescomposicion: (id: string) =>
+      post<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/independizar`, {}),
+    cambiarPrecioComponente: (
+      id: string,
+      datos: { hijo_id: string; precio: string; alcance: FacturaAlcancePrecio },
+    ) =>
+      patch<{ partidas_afectadas: number; descomposicion: DescomposicionPartida }>(
+        `/api/facturas-partidas/${id}/descomposicion/precio`,
+        datos,
+      ),
+    cambiarRendimientoComponente: (id: string, datos: { hijo_id: string; rendimiento: string }) =>
+      patch<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/rendimiento`, datos),
+    cambiarResumenComponente: (id: string, datos: { hijo_id: string; resumen: string }) =>
+      patch<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/resumen`, datos),
+    cambiarNaturalezaComponente: (
+      id: string,
+      datos: { hijo_id: string; naturaleza: NaturalezaConcepto },
+    ) => patch<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/naturaleza`, datos),
+    cambiarUnidadComponente: (id: string, datos: { hijo_id: string; unidad: string }) =>
+      patch<DescomposicionPartida>(`/api/facturas-partidas/${id}/descomposicion/unidad`, datos),
+    pegarComponentes: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
+      post<ResultadoPegado>(`/api/facturas-partidas/${id}/descomposicion/pegar`, datos),
+  },
+
+  facturasMediciones: {
+    update: (id: string, datos: Partial<MedicionDocumento>) =>
+      patch<MedicionDocumento>(`/api/facturas-mediciones/${id}`, datos),
+    remove: (id: string) => del(`/api/facturas-mediciones/${id}`),
   },
 
   cobros: {
@@ -4089,12 +4576,46 @@ export const apiPublico = {
         method: 'DELETE',
       }),
   },
+
+  /** Prueba de concepto del medidor por foto (`/testmeter`): sin token, sin
+   *  organización — solo la clave de Gemini del `.env`. Va con `FormData`,
+   *  igual que `leerDocumentoIA`. */
+  testmeter: {
+    medirFoto: async (fichero: File | Blob): Promise<ResultadoMedicionIA> => {
+      const cuerpo = new FormData()
+      cuerpo.append('fichero', fichero, 'foto.jpg')
+      const respuesta = await fetch('/api/publico/testmeter/escala', {
+        method: 'POST',
+        body: cuerpo,
+      })
+      if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+      return respuesta.json() as Promise<ResultadoMedicionIA>
+    },
+  },
 }
 
 export interface LecturaIA {
   rellenadas: number
   mensaje: string
   separata: Separata
+}
+
+export interface ElementoMedido {
+  label: string
+  /** Formato de detección de Gemini: [ymin, xmin, ymax, xmax] en 0-1000,
+   *  origen arriba-izquierda. Hay que reescalarlo al tamaño real de la foto. */
+  box_2d: [number, number, number, number]
+  ancho_cm: number | null
+  alto_cm: number | null
+  es_referencia: boolean
+  confianza: 'alta' | 'media' | 'baja' | null
+}
+
+export interface ResultadoMedicionIA {
+  elementos: ElementoMedido[]
+  referencia: string | null
+  razonamiento: string | null
+  mensaje: string | null
 }
 
 export interface DatosComponente {

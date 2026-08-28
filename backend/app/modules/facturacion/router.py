@@ -13,6 +13,8 @@ from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.facturacion import ia_certificacion, informes, service, ventas_concepto, webhook
+from app.modules.facturacion.factura_ia_router import router as factura_ia_router
+from app.modules.facturacion.factura_partidas_router import router as factura_partidas_router
 from app.modules.facturacion.models import Certificacion, EstadoFactura, Factura
 from app.modules.facturacion.schemas import (
     AnularFactura,
@@ -495,3 +497,9 @@ router.include_router(ia_certificacion.ia_certificacion_router)
 router.include_router(facturas_router)
 router.include_router(cobros_router)
 router.include_router(ventas_router)
+# Capítulos/partidas/mediciones/descomposición de la factura (Fase 2): en su
+# propio módulo para no seguir engordando este router.
+router.include_router(factura_partidas_router)
+# "Ayuda con IA" sobre facturas de venta (Fase 4): aparte porque pide además
+# el módulo `ia` activo, mismo motivo que `ia_certificacion`.
+router.include_router(factura_ia_router)

@@ -296,7 +296,9 @@ function RegistrarFacturaModal({
 
   // Los proveedores salen de los albaranes de la obra: es de quien se recibe
   // material, y así no hay que cargar el fichero entero de terceros.
-  const proveedores = [...new Map(albaranes.map((a) => [a.proveedor_id, a.tercero_razon_social]))]
+  // `albaranes` aquí siempre es de tipo=proveedor (así se pidió la lista),
+  // `proveedor_id` nunca es null en la práctica.
+  const proveedores = [...new Map(albaranes.map((a) => [a.proveedor_id!, a.tercero_razon_social]))]
 
   const listo = proveedorId !== '' && numero.trim() !== '' && base.trim() !== ''
 
