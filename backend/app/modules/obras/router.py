@@ -25,8 +25,6 @@ from app.modules.obras.models import (
 from app.modules.obras.schemas import (
     AceptadoOut,
     AceptarPresupuestoIn,
-    VincularPresupuestoIn,
-    VinculoPresupuestoOut,
     AsignacionCreate,
     AsignacionDetalle,
     AsignacionOut,
@@ -42,6 +40,8 @@ from app.modules.obras.schemas import (
     PersonalCreate,
     PersonalOut,
     PersonalUpdate,
+    VincularPresupuestoIn,
+    VinculoPresupuestoOut,
 )
 
 guard = Depends(require_module("obras"))
@@ -82,7 +82,7 @@ async def listar_personal(
 async def crear_personal(
     datos: PersonalCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> PersonalOut:
     try:
         persona = await service.crear_personal(session, datos)
@@ -126,7 +126,7 @@ async def eliminar_personal(
     personal_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     existente = await service.obtener_personal(session, personal_id)
     if existente is None:
@@ -178,7 +178,7 @@ async def listar(
 async def crear(
     datos: ObraCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> ObraOut:
     try:
         obra = await service.crear_obra(session, datos)
@@ -274,7 +274,7 @@ async def eliminar(
     obra_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     await _obra_propia(session, obra_id, alcance, principal)
     await service.eliminar_obra(session, obra_id)
@@ -308,7 +308,7 @@ async def crear_asignacion(
     datos: AsignacionCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> AsignacionOut:
     await _obra_propia(session, obra_id, alcance, principal)
     try:
@@ -365,7 +365,7 @@ async def eliminar_asignacion(
     asignacion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     await _asignacion_propia(session, asignacion_id, alcance, principal)
     await service.eliminar_asignacion(session, asignacion_id)
@@ -381,7 +381,7 @@ async def crear_parte(
     datos: ParteTrabajoCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> ParteTrabajoOut:
     await _asignacion_propia(session, asignacion_id, alcance, principal)
     try:
@@ -429,7 +429,7 @@ async def eliminar_parte(
     parte_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     await _parte_propio(session, parte_id, alcance, principal)
     await service.eliminar_parte(session, parte_id)
@@ -507,7 +507,7 @@ async def desvincular_presupuesto_de_obra(
     obra_id: uuid.UUID,
     vinculo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> list[VinculoPresupuestoOut]:
     vinculo = await session.scalar(
         select(ObraPresupuesto).where(

@@ -16,7 +16,13 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import enum_column
-from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.core.models import (
+    AutoriaMixin,
+    Base,
+    OrganizationMixin,
+    TimestampMixin,
+    UUIDPrimaryKeyMixin,
+)
 
 SCHEMA = "documentos"
 
@@ -34,6 +40,13 @@ class EntidadDocumento(StrEnum):
     CONTRATO = "contrato"
     ALBARAN = "albaran"
     FACTURA_RECIBIDA = "factura_recibida"
+    # Módulo PRL. `PERSONAL` y `RECURSO` cuelgan de la ficha correspondiente;
+    # `PRL_EMPRESA` es para los papeles de la organización entera, que no
+    # tienen ficha propia a la que colgarse.
+    PERSONAL = "personal"
+    RECURSO = "recurso"
+    PRL_EMPRESA = "prl_empresa"
+    SOLICITUD_FIRMA = "solicitud_firma"
 
 
 class Documento(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):

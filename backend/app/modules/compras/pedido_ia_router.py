@@ -103,7 +103,7 @@ async def aplicar_capitulo_ia(
     datos: PedidoAplicarCapituloIA,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> dict:
     """Como `presupuesto_router.aplicar_capitulo_ia`, pero creando
     `PedidoCapitulo`/`PedidoPartida` (con mediciones y descompuesto) en vez

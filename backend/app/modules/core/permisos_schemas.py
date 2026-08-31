@@ -15,6 +15,10 @@ class GrupoPermisoIn(BaseModel):
     module_code: str
     ver: Alcance = Alcance.NINGUNO
     editar: Alcance = Alcance.NINGUNO
+    #: En `crear` el alcance no significa nada: lo que creas es tuyo. Solo
+    #: cuenta si es NINGUNO o no.
+    crear: Alcance = Alcance.NINGUNO
+    borrar: Alcance = Alcance.NINGUNO
 
 
 class GrupoPermisoOut(BaseModel):
@@ -23,6 +27,8 @@ class GrupoPermisoOut(BaseModel):
     module_code: str
     ver: Alcance
     editar: Alcance
+    crear: Alcance
+    borrar: Alcance
 
 
 class GrupoMiembroOut(BaseModel):

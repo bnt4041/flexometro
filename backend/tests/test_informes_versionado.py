@@ -2,10 +2,9 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.presupuestos.informes import DOCUMENTOS, _formato_es
 from app.modules.presupuestos.models_presupuesto import Presupuesto
+from app.modules.presupuestos.plantilla_docx_service import _formato_es
 from app.modules.presupuestos.versionado import CAMPOS_COPIABLES, CambioPartida
-
 
 # --- Formato numérico español ---
 
@@ -34,16 +33,6 @@ def test_valor_nulo_no_imprime_nada():
 def test_millares_en_el_limite_de_los_grupos():
     assert _formato_es(Decimal("999"), 2) == "999,00"
     assert _formato_es(Decimal("1000"), 2) == "1.000,00"
-
-
-# --- Documentos ---
-
-
-def test_los_tres_documentos_tienen_plantilla_y_titulo():
-    assert set(DOCUMENTOS) == {"presupuesto", "mediciones", "descompuestos"}
-    for plantilla, titulo in DOCUMENTOS.values():
-        assert plantilla.endswith(".html")
-        assert titulo
 
 
 # --- Copia profunda ---

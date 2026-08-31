@@ -180,9 +180,18 @@ class KeycloakAuthBackend:
 
 
 def build_auth_backend(settings: Settings) -> AuthBackend:
+    base: AuthBackend
     if settings.auth_backend == "keycloak":
-        return KeycloakAuthBackend(settings)
-    return StubAuthBackend(settings.stub_organization_slug)
+        base = KeycloakAuthBackend(settings)
+    else:
+        base = StubAuthBackend(settings.stub_organization_slug)
+
+    # Las claves de API van por delante, pero solo se quedan la petición si
+    # traen la marca `flx_`: un JWT de Keycloak viaja por la misma cabecera
+    # `Authorization` y tiene que seguir su camino de siempre.
+    from app.modules.desarrolladores.claves import ConClavesApi
+
+    return ConClavesApi(base)
 
 
 def get_auth_backend(settings: Settings = Depends(get_settings)) -> AuthBackend:

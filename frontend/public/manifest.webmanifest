@@ -1,0 +1,23 @@
+{
+  "name": "Flexómetro — ERP de construcción",
+  "short_name": "Flexómetro",
+  "description": "Presupuesta, ejecuta y cobra tu obra desde un solo sitio.",
+  "lang": "es",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1b293e",
+  "theme_color": "#1b293e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Obras", "url": "/obras" },
+    { "name": "Presupuestos", "url": "/presupuestos" },
+    { "name": "Partes de trabajo", "url": "/obras" }
+  ]
+}

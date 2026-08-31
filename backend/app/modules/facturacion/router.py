@@ -118,7 +118,7 @@ async def listar_certificaciones(
 async def crear_certificacion(
     datos: CertificacionCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    _alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> CertificacionDetalle:
     try:
         certificacion = await service.crear_certificacion(session, datos)
@@ -194,7 +194,7 @@ async def eliminar_certificacion(
     certificacion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     await _certificacion_propia(session, certificacion_id, alcance, principal)
     try:
@@ -224,7 +224,7 @@ async def generar_factura(
     datos: GenerarDesdeCertificacion,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> FacturaOut:
     await _certificacion_propia(session, certificacion_id, alcance, principal)
     try:
@@ -296,7 +296,7 @@ async def listar_facturas(
 async def crear_factura_suelta(
     datos: FacturaSuelta,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    _alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> FacturaOut:
     try:
         factura = await service.crear_factura_suelta(session, datos)
@@ -369,7 +369,7 @@ async def eliminar_factura(
     factura_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     await _factura_propia(session, factura_id, alcance, principal)
     try:
@@ -456,7 +456,7 @@ async def registrar_cobro(
     datos: CobroCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> CobroOut:
     await _factura_propia(session, factura_id, alcance, principal)
     try:
@@ -472,7 +472,7 @@ async def eliminar_cobro(
     cobro_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     cobro = await service.obtener_cobro(session, cobro_id)
     if cobro is None:

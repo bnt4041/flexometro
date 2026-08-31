@@ -25,3 +25,14 @@ class DocumentoBusquedaOut(DocumentoOut):
     no en una sola ficha."""
 
     entidad_codigo: str | None = None
+
+
+class FichaConDocumentos(BaseModel):
+    """Una ficha (obra, pedido, contrato...) con los documentos que cuelgan de
+    ella — un nodo del árbol de la biblioteca."""
+
+    entidad: EntidadDocumento
+    entidad_id: uuid.UUID
+    #: `None` cuando la ficha no tiene código legible (o ya no existe).
+    entidad_codigo: str | None = None
+    documentos: list[DocumentoOut] = []

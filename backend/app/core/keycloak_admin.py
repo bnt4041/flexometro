@@ -258,6 +258,20 @@ class KeycloakAdminClient:
             slugs = atributos.get("organizacion") or []
             return organizacion_slug in slugs
 
+    async def email_de(self, user_id: str) -> str | None:
+        """El correo de un usuario por su `sub`. `None` si no existe o no
+        tiene: no es un error, hay usuarios dados de alta sin correo, y quien
+        pregunta ya se apaña avisando por otro canal."""
+        base = self._base()
+        async with httpx.AsyncClient(timeout=15.0) as cliente:
+            token = await self._token_admin(cliente)
+            respuesta = await cliente.get(
+                f"{base}/users/{user_id}", headers={"Authorization": f"Bearer {token}"}
+            )
+            if respuesta.status_code != 200:
+                return None
+            return respuesta.json().get("email") or None
+
     async def actualizar_usuario(
         self,
         user_id: str,

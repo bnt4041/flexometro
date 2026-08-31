@@ -23,20 +23,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
-from app.core.html_seguro import sanear_html
 from app.core.database import get_session
-from app.modules.compras import oferta_service
+from app.core.html_seguro import sanear_html
+from app.modules.compras import oferta_service, publico_ia
 from app.modules.compras.models import (
     OfertaDescompuesto,
     OfertaLinea,
     OfertaMedicion,
     SolicitudLinea,
 )
-from app.modules.compras import publico_ia
 from app.modules.compras.publico_acceso import ContextoProveedor, acceso_proveedor
 from app.modules.core import billing_service
-from app.modules.ia.gemini import GeminiError
 from app.modules.documentos.models import Documento, EntidadDocumento
+from app.modules.ia.gemini import GeminiError
 from app.modules.presupuestos.models_presupuesto import Presupuesto
 from app.modules.presupuestos.presupuesto_calculo import parcial_de, redondear_precio
 
@@ -851,6 +850,19 @@ async def enviar_oferta(
         ) from exc
 
     await session.flush()
+
+    # Aviso a quien pidió los precios. Va después del flush: si la oferta no
+    # se ha guardado, no hay nada de lo que avisar.
+    from app.modules.notificaciones.service import emitir
+
+    await emitir(
+        session,
+        "compras.oferta_recibida",
+        organization_id=ctx.solicitud.organization_id,
+        titulo=f"Oferta recibida de {proveedor_nombre or 'un proveedor'}",
+        cuerpo=f"Solicitud de precios {ctx.solicitud.codigo}.",
+        enlace="/solicitudes-precio",
+    )
     return EnviarOfertaOut(
         enviado=True,
         mensaje="Gracias, tu oferta ha sido enviada. Ya puedes cerrar esta ventana.",

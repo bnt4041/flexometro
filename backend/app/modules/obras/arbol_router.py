@@ -240,7 +240,7 @@ async def crear_capitulo(
     obra_id: uuid.UUID,
     datos: CapituloObraCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> CapituloObraOut:
     obra = await service.obtener_obra(session, obra_id)
     if obra is None:
@@ -303,7 +303,7 @@ async def actualizar_capitulo(
 async def eliminar_capitulo(
     capitulo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     capitulo = await _capitulo_o_404(session, capitulo_id)
     await arbol_service.eliminar_capitulo(session, capitulo)
@@ -319,7 +319,7 @@ async def crear_partida(
     capitulo_id: uuid.UUID,
     datos: PartidaObraCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> PartidaObraOut:
     capitulo = await _capitulo_o_404(session, capitulo_id)
     partida = await arbol_service.crear_partida(
@@ -392,7 +392,7 @@ async def actualizar_partida(
 async def eliminar_partida(
     partida_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     partida = await _partida_o_404(session, partida_id)
     await arbol_service.eliminar_partida(session, partida)
@@ -408,7 +408,7 @@ async def crear_medicion(
     partida_id: uuid.UUID,
     datos: MedicionObraCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> MedicionObraOut:
     partida = await _partida_o_404(session, partida_id)
     linea = await arbol_service.crear_medicion(
@@ -452,7 +452,7 @@ async def actualizar_medicion(
 async def eliminar_medicion(
     medicion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     linea = await _medicion_o_404(session, medicion_id)
     await arbol_service.eliminar_medicion(session, linea)

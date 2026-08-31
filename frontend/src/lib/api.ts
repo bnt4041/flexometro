@@ -296,6 +296,47 @@ export interface ConfiguracionSmtp {
   tiene_password: boolean
 }
 
+/** Con qué se habla con WhatsApp. `gowa` es el puente contra WhatsApp Web
+ *  (para enseñar el producto); `cloud`, la API oficial de Meta. */
+export type ProveedorWhatsApp = 'gowa' | 'cloud'
+
+export interface ConfiguracionWhatsApp {
+  proveedor: ProveedorWhatsApp
+  activa: boolean
+  prefijo_pais: string
+  base_url: string | null
+  usuario: string | null
+  device_id: string | null
+  tiene_password: boolean
+  cloud_phone_number_id: string | null
+  cloud_version: string
+  plantilla_aviso: string | null
+  plantilla_codigo: string | null
+  idioma_plantilla: string
+  tiene_cloud_token: boolean
+}
+
+export interface PruebaWhatsApp {
+  enviado: boolean
+  error: string | null
+}
+
+export interface VinculacionWhatsApp {
+  /** Si el proveedor se vincula escaneando. La API oficial no: allí el número
+   *  se da de alta en Meta y se configura con credenciales. */
+  soporta_qr: boolean
+  vinculado: boolean
+  /** Qué número hay detrás, para no acabar mandando desde el móvil que no es. */
+  descripcion: string | null
+  error: string | null
+}
+
+export interface QrVinculacion {
+  /** PNG en base64, listo para un `src`. */
+  imagen: string
+  segundos: number
+}
+
 export interface PruebaSmtp {
   enviado: boolean
   error: string | null
@@ -334,10 +375,292 @@ export interface ModuloDisponible {
   name: string
 }
 
+/** Por dónde puede llegar un aviso. `campana` no es mensajería: es la
+ *  bandeja de la propia aplicación. */
+export type CanalAviso = 'campana' | 'email' | 'whatsapp'
+
+/** Cómo se entera el sistema de que hay que avisar: porque ha pasado algo, o
+ *  porque lleva demasiado tiempo sin pasar. */
+export type DisparadorAviso = 'hecho' | 'vigilancia'
+
+export interface ParametroEvento {
+  nombre: string
+  etiqueta: string
+  por_defecto: number
+  minimo: number
+  maximo: number
+  sufijo: string
+}
+
+export interface TipoEvento {
+  codigo: string
+  modulo: string
+  etiqueta: string
+  descripcion: string
+  disparador: DisparadorAviso
+  parametros: ParametroEvento[]
+}
+
+export interface Favorito {
+  id: string
+  etiqueta: string
+  ruta: string
+  orden: number
+}
+
+export interface Perfil {
+  subject: string
+  username: string
+  email: string | null
+  nombre: string | null
+  organizacion: string | null
+  roles: string[]
+  grupos: { id: string; nombre: string }[]
+}
+
+export interface AmbitoModulo {
+  ver: Alcance
+  editar: Alcance
+  crear: Alcance
+  borrar: Alcance
+}
+
+export interface ClaveApi {
+  id: string
+  nombre: string
+  /** Los primeros caracteres. El secreto no vuelve nunca del servidor. */
+  prefijo: string
+  ambitos: Record<string, AmbitoModulo>
+  activa: boolean
+  expira_en: string | null
+  ultimo_uso_en: string | null
+  created_at: string
+}
+
+/** Lo mismo, más el secreto en claro. Es la ÚNICA vez que se ve. */
+export interface ClaveApiCreada extends ClaveApi {
+  clave: string
+}
+
+export interface WebhookSuscripcion {
+  id: string
+  nombre: string
+  url: string
+  eventos: string[]
+  activa: boolean
+  created_at: string
+  /** Para verificar la firma al otro lado. */
+  secreto: string
+}
+
+export type EstadoEntrega = 'pendiente' | 'entregada' | 'fallida' | 'agotada'
+
+export interface EntregaWebhook {
+  id: string
+  suscripcion_id: string
+  evento: string
+  estado: EstadoEntrega
+  intentos: number
+  proximo_intento_en: string | null
+  entregada_en: string | null
+  respuesta_codigo: number | null
+  error: string | null
+  created_at: string
+}
+
+export interface EventoWebhook {
+  codigo: string
+  modulo: string
+  etiqueta: string
+  descripcion: string
+}
+
+export interface CampoNodo {
+  nombre: string
+  etiqueta: string
+  /** `texto` | `texto_largo` | `numero` | `seleccion` | `booleano` */
+  tipo: string
+  opciones: [string, string][]
+  ayuda: string
+  obligatorio: boolean
+  por_defecto: unknown
+  /** Si admite `{{ nodo.campo }}`. */
+  admite_expresiones: boolean
+}
+
+export interface TipoNodo {
+  tipo: string
+  /** `disparador` arranca el flujo; `accion` va después. */
+  categoria: string
+  etiqueta: string
+  descripcion: string
+  icono: string
+  campos: CampoNodo[]
+  /** `[clave, etiqueta]`. Con más de una, el nodo tiene ramas. */
+  salidas: [string, string][]
+}
+
+export interface NodoFlujo {
+  id: string
+  tipo: string
+  nombre?: string
+  parametros?: Record<string, unknown>
+  /** Dónde está en el lienzo. */
+  x?: number
+  y?: number
+}
+
+export interface ConexionFlujo {
+  desde: string
+  salida: string
+  hasta: string
+}
+
+export interface DefinicionFlujo {
+  nodos: NodoFlujo[]
+  conexiones: ConexionFlujo[]
+}
+
+export interface Automatizacion {
+  id: string
+  nombre: string
+  descripcion: string | null
+  activa: boolean
+  definicion: DefinicionFlujo
+  evento_disparador: string | null
+  created_at: string
+  /** Problemas en lenguaje llano. No impiden guardar, solo activar. */
+  problemas: string[]
+  /** Solo al crear un disparador de webhook, y solo esa vez. */
+  token: string | null
+  url_webhook: string | null
+}
+
+export type EstadoEjecucion = 'en_curso' | 'completada' | 'fallida' | 'parcial'
+
+export interface PasoEjecucion {
+  nodo_id: string
+  tipo_nodo: string
+  orden: number
+  estado: 'ok' | 'error' | 'omitido'
+  salida: Record<string, unknown>
+  ruta: string | null
+  error: string | null
+  duracion_ms: number | null
+}
+
+export interface EjecucionFlujo {
+  id: string
+  estado: EstadoEjecucion
+  disparador: string
+  entrada: Record<string, unknown>
+  error: string | null
+  terminada_en: string | null
+  created_at: string
+  pasos: PasoEjecucion[]
+}
+
+export interface CampoDestino {
+  nombre: string
+  etiqueta: string
+  tipo: string
+  obligatorio: boolean
+  ayuda: string
+}
+
+export interface DestinoImportacion {
+  codigo: string
+  modulo: string
+  etiqueta: string
+  descripcion: string
+  campos: CampoDestino[]
+}
+
+export interface Importacion {
+  id: string
+  created_at: string
+  destino: string
+  nombre_archivo: string
+  estado: 'preparada' | 'completada' | 'parcial' | 'fallida'
+  columnas: string[]
+  mapeo: Record<string, string>
+  creadas: number
+  con_error: number
+  error: string | null
+  vista_previa: Record<string, string>[]
+  total_filas: number
+  /** Problemas detectables sin tocar la base. Al ejecutar pueden salir más. */
+  problemas: { fila: number; detalle: string }[]
+  resultado: { fila: number; estado: string; detalle: string }[]
+}
+
+export interface CampoInforme {
+  nombre: string
+  etiqueta: string
+  tipo: string
+  formato: string
+}
+
+export interface FuenteInforme {
+  codigo: string
+  modulo: string
+  etiqueta: string
+  descripcion: string
+  dimensiones: CampoInforme[]
+  metricas: CampoInforme[]
+}
+
+export interface Informe {
+  id: string
+  nombre: string
+  descripcion: string | null
+  fuente: string
+  dimensiones: string[]
+  metricas: string[]
+  filtros: Record<string, string>
+  grafico: string
+  compartido: boolean
+  creado_por_nombre: string | null
+}
+
+export type FilaInforme = Record<string, string | number | null>
+
+export interface SuscripcionAviso {
+  id: string
+  tipo_evento: string
+  usuario_subject: string | null
+  grupo_id: string | null
+  canales: CanalAviso[]
+  parametros: Record<string, number>
+  activa: boolean
+}
+
+export interface DatosSuscripcion {
+  tipo_evento: string
+  usuario_subject?: string | null
+  grupo_id?: string | null
+  /** Vacío = borrar la suscripción. Una que no avisa por ningún sitio es lo
+   *  mismo que no estar suscrito. */
+  canales: CanalAviso[]
+  parametros: Record<string, number>
+  activa?: boolean
+}
+
+export interface PreferenciaAvisos {
+  /** Para WhatsApp. No está en Keycloak, así que se guarda aquí. */
+  telefono: string | null
+  silenciado: boolean
+}
+
 export interface GrupoPermiso {
   module_code: string
   ver: Alcance
   editar: Alcance
+  /** En `crear` el alcance no significa nada —lo que creas es tuyo—, así que
+   *  solo cuenta si es `ninguno` o no. Se guarda igual como `Alcance` para
+   *  no tener un campo con otra forma que los demás. */
+  crear: Alcance
+  borrar: Alcance
 }
 
 export interface GrupoMiembro {
@@ -618,6 +941,12 @@ export type EntidadDocumento =
   | 'contrato'
   | 'albaran'
   | 'factura_recibida'
+  // Módulo PRL. `prl_empresa` es para los papeles de la organización entera,
+  // que no cuelgan de ninguna ficha.
+  | 'personal'
+  | 'recurso'
+  | 'prl_empresa'
+  | 'solicitud_firma'
 
 export interface Documento {
   id: string
@@ -628,6 +957,14 @@ export interface Documento {
   tamano_bytes: number
   created_at: string
   creado_por_nombre: string | null
+}
+
+/** Un nodo del árbol de la biblioteca: una ficha con sus documentos. */
+export interface FichaConDocumentos {
+  entidad: EntidadDocumento
+  entidad_id: string
+  entidad_codigo: string | null
+  documentos: Documento[]
 }
 
 export interface DocumentoBusqueda extends Documento {
@@ -1081,6 +1418,18 @@ export interface PresupuestoDetalle extends Presupuesto {
 export type EstadoObra = 'planificada' | 'en_ejecucion' | 'paralizada' | 'finalizada' | 'cerrada'
 export type EstadoAlbaran = 'borrador' | 'conformado' | 'facturado'
 
+export type TipoContratoLaboral =
+  | 'indefinido'
+  | 'temporal'
+  | 'fijo_discontinuo'
+  | 'obra_y_servicio'
+  | 'formacion'
+  | 'practicas'
+  | 'autonomo'
+  | 'otro'
+
+export type AptitudMedica = 'apto' | 'apto_con_restricciones' | 'no_apto' | 'pendiente'
+
 export interface Personal {
   id: string
   codigo: string
@@ -1090,7 +1439,48 @@ export interface Personal {
   coste_hora: string
   activo: boolean
   notas: string | null
+
+  // Identificación
+  nif: string | null
+  fecha_nacimiento: string | null
+  nacionalidad: string | null
+  telefono: string | null
+  email: string | null
+  direccion: string | null
+  codigo_postal: string | null
+  poblacion: string | null
+  provincia: string | null
+  // Emergencia
+  contacto_emergencia: string | null
+  telefono_emergencia: string | null
+  // Laboral
+  naf: string | null
+  iban: string | null
+  tipo_contrato: TipoContratoLaboral | null
+  fecha_alta: string | null
+  fecha_fin_contrato: string | null
+  fecha_baja: string | null
+  grupo_cotizacion: string | null
+  convenio: string | null
+  jornada_horas_semana: string | null
+  salario_bruto_anual: string | null
+  // PRL
+  tpc_numero: string | null
+  tpc_caducidad: string | null
+  formacion_prl_horas: number | null
+  formacion_prl_fecha: string | null
+  aptitud_medica: AptitudMedica | null
+  fecha_reconocimiento_medico: string | null
+  proximo_reconocimiento: string | null
+  epis_entregados: string | null
+  fecha_entrega_epis: string | null
+  informacion_riesgos_fecha: string | null
+  es_recurso_preventivo: boolean
 }
+
+/** Lo que admite crear/actualizar un trabajador: todo lo de la ficha menos
+ *  los campos que pone el servidor (id, código, fechas de auditoría). */
+export type DatosPersonal = Partial<Omit<Personal, 'id' | 'codigo'>> & { nombre: string }
 
 export interface ParteTrabajo {
   id: string
@@ -2070,6 +2460,17 @@ export interface EmpresasCuenta {
  *  imagen que necesite la cabecera Authorization. */
 export const LOGO_ORGANIZACION_URL = '/api/organizacion/logo'
 
+/** El contenido de un endpoint binario, con la sesión ya puesta.
+ *
+ *  pdf.js y `<img>` piden la URL por su cuenta, y ahí no viaja la cabecera
+ *  `Authorization` — de eso salía un 401 al abrir un plano. Traerlo con
+ *  `fetch` y pasarles un blob es lo que arregla eso sin abrir el endpoint. */
+export async function traerBlob(path: string): Promise<Blob> {
+  const response = await fetch(path, { headers: await cabeceras() })
+  await comprobarRespuesta(response)
+  return response.blob()
+}
+
 export async function descargar(
   path: string,
   nombre: string,
@@ -2275,6 +2676,9 @@ const patch = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
 // Genérico porque algún DELETE devuelve el estado ya recalculado en vez de un
 // 204 (ver `quitarComponente`); `request` ya distingue el 204 sin cuerpo.
+const put = <T,>(path: string, body: unknown) =>
+  request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+
 const del = <T = void,>(path: string) => request<T>(path, { method: 'DELETE' })
 
 export const api = {
@@ -2723,6 +3127,34 @@ export const api = {
         post<PruebaSmtp>('/api/admin/ajustes-smtp/prueba', { destinatario }),
     },
 
+    ajustesWhatsapp: {
+      get: () => request<ConfiguracionWhatsApp>('/api/admin/ajustes-whatsapp'),
+      update: (datos: {
+        proveedor?: ProveedorWhatsApp
+        activa?: boolean
+        prefijo_pais?: string
+        base_url?: string | null
+        usuario?: string | null
+        password?: string | null
+        device_id?: string | null
+        cloud_phone_number_id?: string | null
+        cloud_token?: string | null
+        cloud_version?: string
+        plantilla_aviso?: string | null
+        plantilla_codigo?: string | null
+        idioma_plantilla?: string
+      }) => patch<ConfiguracionWhatsApp>('/api/admin/ajustes-whatsapp', datos),
+      probar: (telefono: string) =>
+        post<PruebaWhatsApp>('/api/admin/ajustes-whatsapp/prueba', { telefono }),
+      vinculacion: () =>
+        request<VinculacionWhatsApp>('/api/admin/ajustes-whatsapp/vinculacion'),
+      vincular: () => post<QrVinculacion>('/api/admin/ajustes-whatsapp/vinculacion', {}),
+      desvincular: () =>
+        request<VinculacionWhatsApp>('/api/admin/ajustes-whatsapp/vinculacion', {
+          method: 'DELETE',
+        }),
+    },
+
     pasarelaPago: {
       get: () => request<ConfiguracionPasarela>('/api/admin/pasarela-pago'),
       update: (datos: {
@@ -2870,6 +3302,9 @@ export const api = {
     list: (entidad: EntidadDocumento, entidadId: string) =>
       request<Documento[]>(`/api/documentos${query({ entidad, entidad_id: entidadId })}`),
     buscar: (q: string) => request<DocumentoBusqueda[]>(`/api/documentos/buscar${query({ q })}`),
+    /** La biblioteca agrupada por ficha, para navegarla sin buscar a ciegas. */
+    arbol: (params: { content_type?: string } = {}) =>
+      request<FichaConDocumentos[]>(`/api/documentos/arbol${query(params)}`),
     upload: (entidad: EntidadDocumento, entidadId: string, fichero: File) => {
       const formulario = new FormData()
       formulario.append('entidad', entidad)
@@ -3837,6 +4272,372 @@ export const api = {
     remove: (id: string) => del(`/api/pedidos-mediciones/${id}`),
   },
 
+  /** Lo de uno mismo: su perfil y sus favoritos. */
+  yo: {
+    perfil: () => request<Perfil>('/api/yo/perfil'),
+    favoritos: {
+      list: () => request<Favorito[]>('/api/yo/favoritos'),
+      /** Guardar la misma ruta dos veces solo cambia la etiqueta. */
+      guardar: (datos: { etiqueta: string; ruta: string }) =>
+        post<Favorito>('/api/yo/favoritos', datos),
+      remove: (id: string) => del(`/api/yo/favoritos/${id}`),
+    },
+  },
+
+  /** Informes agregados. Cada uno se ejecuta con el alcance de quien lo
+   *  abre, no con el de quien lo guardó. */
+  informes: {
+    fuentes: () => request<FuenteInforme[]>('/api/informes/fuentes'),
+    list: () => request<Informe[]>('/api/informes'),
+    consultar: (consulta: {
+      fuente: string
+      dimensiones: string[]
+      metricas: string[]
+      filtros: Record<string, string>
+    }) => post<{ filas: FilaInforme[] }>('/api/informes/consultar', consulta),
+    create: (datos: {
+      nombre: string
+      descripcion?: string | null
+      fuente: string
+      dimensiones: string[]
+      metricas: string[]
+      filtros: Record<string, string>
+      grafico: string
+      compartido: boolean
+    }) => post<Informe>('/api/informes', datos),
+    ejecutar: (id: string) =>
+      request<{ informe: Informe; filas: FilaInforme[] }>(`/api/informes/${id}/ejecutar`),
+    csvUrl: (id: string) => `/api/informes/${id}/csv`,
+    remove: (id: string) => del(`/api/informes/${id}`),
+  },
+
+  /** Traer datos de otro sistema desde una hoja. */
+  importador: {
+    destinos: () => request<DestinoImportacion[]>('/api/importador/destinos'),
+    list: () => request<Importacion[]>('/api/importador/importaciones'),
+    /** Sube y lee la hoja. Todavía no importa nada.
+     *
+     *  Con `subir` y no con `request`: este último fuerza
+     *  `Content-Type: application/json`, y en un `FormData` el navegador
+     *  tiene que poner él la cabecera con su `boundary`. */
+    subir: (destino: string, archivo: File) => {
+      const cuerpo = new FormData()
+      cuerpo.append('destino', destino)
+      cuerpo.append('archivo', archivo)
+      return subir<Importacion>('/api/importador/importaciones', cuerpo)
+    },
+    mapeo: (id: string, mapeo: Record<string, string>) =>
+      put<Importacion>(`/api/importador/importaciones/${id}/mapeo`, { mapeo }),
+    ejecutar: (id: string) =>
+      post<Importacion>(`/api/importador/importaciones/${id}/ejecutar`, {}),
+    remove: (id: string) => del(`/api/importador/importaciones/${id}`),
+  },
+
+  /** Flujos de nodos que se disparan solos. */
+  automatizaciones: {
+    nodos: () => request<TipoNodo[]>('/api/automatizaciones/nodos'),
+    list: () => request<Automatizacion[]>('/api/automatizaciones'),
+    get: (id: string) => request<Automatizacion>(`/api/automatizaciones/${id}`),
+    create: (datos: {
+      nombre: string
+      descripcion?: string | null
+      activa?: boolean
+      definicion: DefinicionFlujo
+    }) => post<Automatizacion>('/api/automatizaciones', datos),
+    update: (
+      id: string,
+      datos: {
+        nombre: string
+        descripcion?: string | null
+        activa: boolean
+        definicion: DefinicionFlujo
+      },
+    ) => put<Automatizacion>(`/api/automatizaciones/${id}`, datos),
+    remove: (id: string) => del(`/api/automatizaciones/${id}`),
+    /** Lo ejecuta de verdad: si tiene un nodo de aviso, manda el aviso. */
+    probar: (id: string, entrada: Record<string, unknown>) =>
+      post<EjecucionFlujo>(`/api/automatizaciones/${id}/probar`, entrada),
+    ejecuciones: (id: string) =>
+      request<EjecucionFlujo[]>(`/api/automatizaciones/${id}/ejecuciones`),
+  },
+
+  /** Claves de API y webhooks: la puerta para integrar con otros sistemas. */
+  desarrolladores: {
+    eventos: () => request<EventoWebhook[]>('/api/desarrolladores/eventos'),
+    claves: {
+      list: () => request<ClaveApi[]>('/api/desarrolladores/claves'),
+      /** El secreto viene SOLO en esta respuesta: guárdalo o se pierde. */
+      create: (datos: { nombre: string; ambitos: Record<string, AmbitoModulo>; dias_validez?: number | null }) =>
+        post<ClaveApiCreada>('/api/desarrolladores/claves', datos),
+      update: (id: string, datos: { nombre?: string; ambitos?: Record<string, AmbitoModulo>; activa?: boolean }) =>
+        patch<ClaveApi>(`/api/desarrolladores/claves/${id}`, datos),
+      remove: (id: string) => del(`/api/desarrolladores/claves/${id}`),
+    },
+    webhooks: {
+      list: () => request<WebhookSuscripcion[]>('/api/desarrolladores/webhooks'),
+      create: (datos: { nombre: string; url: string; eventos: string[]; activa?: boolean }) =>
+        post<WebhookSuscripcion>('/api/desarrolladores/webhooks', datos),
+      update: (id: string, datos: { nombre: string; url: string; eventos: string[]; activa: boolean }) =>
+        put<WebhookSuscripcion>(`/api/desarrolladores/webhooks/${id}`, datos),
+      remove: (id: string) => del(`/api/desarrolladores/webhooks/${id}`),
+      entregas: (id: string) =>
+        request<EntregaWebhook[]>(`/api/desarrolladores/webhooks/${id}/entregas`),
+      reintentar: (entregaId: string) =>
+        post<EntregaWebhook>(`/api/desarrolladores/entregas/${entregaId}/reintentar`, {}),
+    },
+  },
+
+  /** Qué recibe cada persona o grupo y por dónde. Distinto de
+   *  `notificaciones`, que es la bandeja de lo que YA ha llegado. */
+  avisos: {
+    eventos: () => request<TipoEvento[]>('/api/avisos/eventos'),
+    suscripciones: {
+      list: (de: { usuario_subject?: string; grupo_id?: string }) =>
+        request<SuscripcionAviso[]>(`/api/avisos/suscripciones${query(de)}`),
+      /** Crea, actualiza o borra la de ese destinatario y ese evento.
+       *  Devuelve `null` cuando se queda sin canales y se borra. */
+      guardar: (datos: DatosSuscripcion) =>
+        put<SuscripcionAviso | null>('/api/avisos/suscripciones', datos),
+    },
+    preferenciasDe: {
+      get: (subject: string) =>
+        request<PreferenciaAvisos>(`/api/avisos/usuarios/${subject}/preferencias`),
+      update: (subject: string, datos: PreferenciaAvisos) =>
+        put<PreferenciaAvisos>(`/api/avisos/usuarios/${subject}/preferencias`, datos),
+    },
+    misPreferencias: {
+      get: () => request<PreferenciaAvisos>('/api/avisos/mis-preferencias'),
+      update: (datos: PreferenciaAvisos) =>
+        put<PreferenciaAvisos>('/api/avisos/mis-preferencias', datos),
+    },
+  },
+
+
+  copiloto: {
+    conversar: (mensajes: MensajeCopiloto[], ruta_actual?: string | null) =>
+      post<RespuestaCopiloto>('/api/ia/copiloto/conversar', { mensajes, ruta_actual }),
+    confirmar: (propuesta: PropuestaCopiloto) =>
+      post<ConfirmadaCopiloto>('/api/ia/copiloto/confirmar', {
+        accion: propuesta.accion,
+        datos: propuesta.datos,
+      }),
+  },
+
+  /** El universo Plexo: buscarse y conectar con otras organizaciones. Esta
+   *  primera pieza solo establece el vínculo — no mueve todavía ningún
+   *  documento de negocio entre las dos. */
+  plexo: {
+    perfil: () => request<PerfilPlexo>('/api/plexo/perfil'),
+    fijarVisible: (visible: boolean) =>
+      put<PerfilPlexo>('/api/plexo/perfil', { visible }),
+    buscar: (q: string) =>
+      request<OrganizacionPublica[]>(`/api/plexo/buscar${query({ q })}`),
+    vinculos: {
+      list: (estado?: EstadoVinculoPlexo) =>
+        request<VinculoPlexo[]>(`/api/plexo/vinculos${query({ estado })}`),
+      invitar: (organizacion_destino_id: string, mensaje?: string) =>
+        post<VinculoPlexo>('/api/plexo/vinculos', { organizacion_destino_id, mensaje }),
+      aceptar: (id: string) => post<VinculoPlexo>(`/api/plexo/vinculos/${id}/aceptar`, {}),
+      rechazar: (id: string) => post<VinculoPlexo>(`/api/plexo/vinculos/${id}/rechazar`, {}),
+      revocar: (id: string) => post<VinculoPlexo>(`/api/plexo/vinculos/${id}/revocar`, {}),
+    },
+  },
+
+  /** Biblioteca de planos: subir, calibrar, dibujar y medir encima. */
+  planos: {
+    list: (params: { obra_id?: string; presupuesto_id?: string } = {}) =>
+      request<Plano[]>(`/api/planos${query(params)}`),
+    get: (id: string) => request<PlanoDetalle>(`/api/planos/${id}`),
+    /** Ruta del fichero original. No se pasa tal cual a pdf.js ni a un
+     *  `<img>`: exige sesión, y ninguno de los dos manda la cabecera. Se
+     *  descarga con `traerBlob` y se les da el blob. */
+    rutaArchivo: (id: string) => `/api/planos/${id}/archivo`,
+    subir: (
+      datos: {
+        nombre: string
+        descripcion?: string | null
+        obra_id?: string | null
+        presupuesto_id?: string | null
+      },
+      archivo: File,
+      hojas: { ancho: number; alto: number; nombre?: string | null }[],
+    ) => {
+      const cuerpo = new FormData()
+      cuerpo.append('nombre', datos.nombre)
+      if (datos.descripcion) cuerpo.append('descripcion', datos.descripcion)
+      if (datos.obra_id) cuerpo.append('obra_id', datos.obra_id)
+      if (datos.presupuesto_id) cuerpo.append('presupuesto_id', datos.presupuesto_id)
+      cuerpo.append('hojas', JSON.stringify(hojas))
+      cuerpo.append('fichero', archivo)
+      return subir<PlanoDetalle>('/api/planos', cuerpo)
+    },
+    update: (
+      id: string,
+      datos: Partial<{
+        nombre: string
+        descripcion: string | null
+        obra_id: string | null
+        presupuesto_id: string | null
+      }>,
+    ) => patch<PlanoDetalle>(`/api/planos/${id}`, datos),
+    remove: (id: string) => del(`/api/planos/${id}`),
+
+    capas: {
+      create: (planoId: string, datos: DatosCapaPlano) =>
+        post<CapaPlano>(`/api/planos/${planoId}/capas`, datos),
+      update: (capaId: string, datos: DatosCapaPlano) =>
+        put<CapaPlano>(`/api/planos/capas/${capaId}`, datos),
+      remove: (capaId: string) => del(`/api/planos/capas/${capaId}`),
+    },
+
+    /** Fija la escala de una hoja con dos puntos y la cota real entre ellos.
+     *  Recalcula además todo lo ya medido en esa hoja. */
+    calibrar: (hojaId: string, a: PuntoPlano, b: PuntoPlano, distancia_m: string) =>
+      post<HojaPlano>(`/api/planos/hojas/${hojaId}/calibrar`, { a, b, distancia_m }),
+
+    /** Lee el plano con IA. No escribe nada: devuelve lo que ha leído. */
+    leerConIa: (hojaId: string) =>
+      post<LecturaIaPlano>(`/api/planos/hojas/${hojaId}/leer-con-ia`, {}),
+
+    /** Calibra con la escala impresa en el cajetín. Exacto: la cuenta es
+     *  geometría del papel, sin estimar ningún píxel. Solo PDF. */
+    calibrarPorEscala: (hojaId: string, denominador: number) =>
+      post<HojaPlano>(`/api/planos/hojas/${hojaId}/calibrar-por-escala`, { denominador }),
+
+    elementos: {
+      list: (hojaId: string) =>
+        request<ElementoPlano[]>(`/api/planos/hojas/${hojaId}/elementos`),
+      create: (hojaId: string, datos: DatosElementoPlano) =>
+        post<ElementoPlano>(`/api/planos/hojas/${hojaId}/elementos`, datos),
+      update: (elementoId: string, datos: DatosElementoPlano) =>
+        put<ElementoPlano>(`/api/planos/elementos/${elementoId}`, datos),
+      remove: (elementoId: string) => del(`/api/planos/elementos/${elementoId}`),
+      /** Lleva la medición a una partida como una línea más. Exige permiso de
+       *  edición en presupuestos, no solo en planos. */
+      aplicar: (elementoId: string, partida_id: string) =>
+        post<{ linea_medicion_id: string; valor: string; unidad: string }>(
+          `/api/planos/elementos/${elementoId}/aplicar`,
+          { partida_id },
+        ),
+    },
+  },
+
+  /** Tickets de ayuda y wiki de la casa. La wiki se indexa por significado,
+   *  así que el buscador entiende sinónimos y no solo palabras exactas. */
+  soporte: {
+    tickets: {
+      list: (mios = false) => request<Ticket[]>(`/api/soporte/tickets${query({ mios })}`),
+      get: (id: string) => request<Ticket>(`/api/soporte/tickets/${id}`),
+      create: (datos: {
+        titulo: string
+        descripcion: string
+        tipo?: TipoTicket
+        prioridad?: PrioridadTicket
+        ruta_origen?: string | null
+      }) => post<Ticket>('/api/soporte/tickets', datos),
+      update: (
+        id: string,
+        datos: {
+          estado?: EstadoTicket
+          prioridad?: PrioridadTicket
+          asignado_a_subject?: string | null
+          asignado_a_nombre?: string | null
+        },
+      ) => patch<Ticket>(`/api/soporte/tickets/${id}`, datos),
+      responder: (id: string, cuerpo: string, interno = false) =>
+        post<Ticket>(`/api/soporte/tickets/${id}/mensajes`, { cuerpo, interno }),
+    },
+    wiki: {
+      list: () => request<PaginaWiki[]>('/api/soporte/wiki'),
+      create: (datos: DatosPaginaWiki) => post<PaginaWiki>('/api/soporte/wiki', datos),
+      update: (id: string, datos: DatosPaginaWiki) =>
+        put<PaginaWiki>(`/api/soporte/wiki/${id}`, datos),
+      remove: (id: string) => del(`/api/soporte/wiki/${id}`),
+      reindexar: () => post<{ paginas: number; fragmentos: number }>(
+        '/api/soporte/wiki/reindexar',
+        {},
+      ),
+    },
+    buscar: (q: string) =>
+      request<ResultadoBusquedaWiki[]>(`/api/soporte/buscar${query({ q })}`),
+  },
+
+  prl: {
+    recursos: {
+      list: (params: {
+        tipo?: TipoRecurso
+        obra_id?: string
+        solo_activos?: boolean
+        q?: string
+        limit?: number
+        offset?: number
+      }) => request<Page<Recurso>>(`/api/prl/recursos${query(params)}`),
+      get: (id: string) => request<Recurso>(`/api/prl/recursos/${id}`),
+      create: (datos: DatosRecurso) => post<Recurso>('/api/prl/recursos', datos),
+      update: (id: string, datos: Partial<DatosRecurso>) =>
+        patch<Recurso>(`/api/prl/recursos/${id}`, datos),
+      remove: (id: string) => del(`/api/prl/recursos/${id}`),
+    },
+    tipos: {
+      list: (params: { ambito?: AmbitoPRL; solo_activos?: boolean } = {}) =>
+        request<TipoDocumentoPRL[]>(`/api/prl/tipos${query(params)}`),
+      create: (datos: DatosTipoPRL) => post<TipoDocumentoPRL>('/api/prl/tipos', datos),
+      update: (id: string, datos: Partial<DatosTipoPRL>) =>
+        patch<TipoDocumentoPRL>(`/api/prl/tipos/${id}`, datos),
+      remove: (id: string) => del(`/api/prl/tipos/${id}`),
+    },
+    documentos: {
+      list: (params: { ambito: AmbitoPRL; entidad_id?: string; solo_problemas?: boolean }) =>
+        request<DocumentoPRL[]>(`/api/prl/documentos${query(params)}`),
+      resumen: (params: { ambito: AmbitoPRL; entidad_id?: string }) =>
+        request<ResumenVigencia>(`/api/prl/documentos/resumen${query(params)}`),
+      create: (datos: DatosDocumentoPRL) => post<DocumentoPRL>('/api/prl/documentos', datos),
+      update: (id: string, datos: Partial<DatosDocumentoPRL>) =>
+        patch<DocumentoPRL>(`/api/prl/documentos/${id}`, datos),
+      remove: (id: string) => del(`/api/prl/documentos/${id}`),
+    },
+    personal: (solo_activos = true) =>
+      request<PersonalPRL[]>(`/api/prl/personal${query({ solo_activos })}`),
+    obra: (obraId: string) => request<FichaPRLObra>(`/api/prl/obras/${obraId}`),
+    plantillas: {
+      /** Qué marcadores admite una plantilla. Viene del servidor para que no
+       *  pueda quedar desfasado respecto a lo que se sustituye de verdad. */
+      etiquetas: () => request<EtiquetaPlantilla[]>('/api/prl/plantillas/etiquetas'),
+      list: (params: { ambito?: AmbitoPRL; solo_activas?: boolean } = {}) =>
+        request<PlantillaDocumento[]>(`/api/prl/plantillas${query(params)}`),
+      get: (id: string) => request<PlantillaDocumento>(`/api/prl/plantillas/${id}`),
+      create: (datos: DatosPlantilla) => post<PlantillaDocumento>('/api/prl/plantillas', datos),
+      update: (id: string, datos: Partial<DatosPlantilla>) =>
+        patch<PlantillaDocumento>(`/api/prl/plantillas/${id}`, datos),
+      remove: (id: string) => del(`/api/prl/plantillas/${id}`),
+    },
+    firmas: {
+      list: (params: { obra_id?: string; estado?: EstadoFirma; limit?: number; offset?: number }) =>
+        request<Page<SolicitudFirma>>(`/api/prl/firmas${query(params)}`),
+      get: (id: string) => request<SolicitudFirmaDetalle>(`/api/prl/firmas/${id}`),
+      create: (datos: DatosSolicitudFirma) =>
+        post<SolicitudFirmaDetalle>('/api/prl/firmas', datos),
+      update: (id: string, datos: Partial<DatosSolicitudFirma>) =>
+        patch<SolicitudFirmaDetalle>(`/api/prl/firmas/${id}`, datos),
+      /** Sin `firmanteId` va a todos los pendientes; con él, solo a ese. */
+      enviar: (id: string, firmanteId?: string) =>
+        post<EnvioFirma[]>(`/api/prl/firmas/${id}/enviar${query({ firmante_id: firmanteId })}`, {}),
+      cancelar: (id: string) => post<SolicitudFirma>(`/api/prl/firmas/${id}/cancelar`, {}),
+      /** Suma un firmante a una solicitud YA enviada — el caso de «se me
+       *  olvidó uno». No manda su enlace: eso es `enviar(id, firmanteId)`. */
+      anadirFirmante: (id: string, firmante: FirmanteIn) =>
+        post<SolicitudFirmaDetalle>(`/api/prl/firmas/${id}/firmantes`, firmante),
+      /** 409 si esa persona ya firmó o rechazó: eso es evidencia. */
+      quitarFirmante: (id: string, firmanteId: string) =>
+        del<SolicitudFirmaDetalle>(`/api/prl/firmas/${id}/firmantes/${firmanteId}`),
+      /** Dónde colocar la firma sobre el PDF, tal como se dejó en el visor. */
+      posiciones: (id: string, porFirmante: { firmante_id: string; posiciones: PosicionFirma[] }[]) =>
+        put<SolicitudFirmaDetalle>(`/api/prl/firmas/${id}/posiciones`, {
+          por_firmante: porFirmante,
+        }),
+    },
+  },
+
   contratos: {
     list: (params: { obra_id?: string; tipo?: TipoContrato; limit?: number; offset?: number }) =>
       request<Page<ContratoResumen>>(`/api/contratos${query(params)}`),
@@ -4581,6 +5382,45 @@ export const apiPublico = {
       }),
   },
 
+  /** Firma de un documento por un tercero sin cuenta. El token de la URL es
+   *  lo único que autoriza — ver `prl/firma.py`. */
+  firma: {
+    ver: (token: string) => peticionPublica<DocumentoParaFirmar>(`/api/publico/firma/${token}`),
+    /** No es una petición: es la URL para el visor de PDF incrustado. */
+    urlDocumento: (token: string) => `/api/publico/firma/${token}/documento`,
+    /** Pide un código de un solo uso. Va por el canal CONTRARIO al que llevó
+     *  el enlace, así que la respuesta dice por cuál salió. El enlace por sí
+     *  solo ya no basta para firmar: es el segundo factor. */
+    pedirCodigo: (token: string) =>
+      peticionPublica<{
+        enviado: boolean
+        destino: string
+        canales: CanalEnvio[]
+        error: string | null
+      }>(
+        `/api/publico/firma/${token}/codigo`,
+        { method: 'POST', body: '{}' },
+      ),
+    firmar: (
+      token: string,
+      datos: {
+        firmante_nombre: string
+        firmante_dni?: string | null
+        firma_imagen: string
+        codigo: string
+      },
+    ) =>
+      peticionPublica<{ estado: EstadoFirma; mensaje: string; completado: boolean }>(
+        `/api/publico/firma/${token}/firmar`,
+        { method: 'POST', body: JSON.stringify(datos) },
+      ),
+    rechazar: (token: string, motivo: string) =>
+      peticionPublica<{ estado: EstadoFirma; mensaje: string }>(
+        `/api/publico/firma/${token}/rechazar`,
+        { method: 'POST', body: JSON.stringify({ motivo }) },
+      ),
+  },
+
   /** Prueba de concepto del medidor por foto (`/testmeter`): sin token, sin
    *  organización — solo la clave de Gemini del `.env`. Va con `FormData`,
    *  igual que `leerDocumentoIA`. */
@@ -4644,6 +5484,304 @@ export interface LecturaIA {
   separata: Separata
 }
 
+// ── PRL y recursos ──────────────────────────────────────────────────────
+
+export type AmbitoPRL = 'empresa' | 'personal' | 'recurso' | 'obra' | 'proveedor'
+export type TipoRecurso = 'vehiculo' | 'maquinaria' | 'herramienta' | 'epi' | 'otro'
+export type EstadoVigencia = 'vigente' | 'por_caducar' | 'caducado' | 'pendiente'
+export type EstadoFirma =
+  | 'borrador'
+  | 'enviada'
+  | 'vista'
+  /** Ya hay firmas válidas pero faltan firmantes. */
+  | 'parcial'
+  | 'firmada'
+  | 'rechazada'
+  | 'cancelada'
+
+export type EstadoFirmante = 'pendiente' | 'vista' | 'firmada' | 'rechazada'
+
+export interface Firmante {
+  id: string
+  orden: number
+  nombre: string
+  email: string
+  telefono: string | null
+  /** Por dónde se le mandó el enlace. Vacío mientras no se le haya mandado. */
+  canales_envio: CanalEnvio[] | null
+  contacto_id: string | null
+  estado: EstadoFirmante
+  enviada_en: string | null
+  vista_en: string | null
+  firmada_en: string | null
+  firmante_nombre: string | null
+  firmante_dni: string | null
+  motivo_rechazo: string | null
+  posiciones_firma: PosicionFirma[] | null
+  firma_imagen: string | null
+  ip_firma: string | null
+}
+
+/** Por dónde sale un mensaje. */
+export type CanalEnvio = 'email' | 'whatsapp'
+
+/** Por dónde se QUIERE que salga. `auto` deja decidir al servidor: el enlace
+ *  por WhatsApp si hay móvil, y el código por un canal que el enlace no haya
+ *  usado — si los dos llegan al mismo sitio, el segundo factor no aporta
+ *  nada. Una elección explícita se respeta aunque sea peor, pero nunca se
+ *  cambia de canal a escondidas: si se pide WhatsApp y no hay móvil, se
+ *  avisa en vez de mandar un correo. */
+export type PreferenciaCanal = 'auto' | 'email' | 'whatsapp' | 'ambos'
+
+export interface FirmanteIn {
+  nombre: string
+  email: string
+  /** Con teléfono, el enlace va por WhatsApp y el código por correo. */
+  telefono?: string | null
+  contacto_id?: string | null
+  /** Si se marca y no venía de la agenda, se da de alta como contacto. */
+  guardar_como_contacto?: boolean
+  tercero_id?: string | null
+}
+
+/** De dónde sale el documento que se firma. `pdf` no se regenera: se firma el
+ *  fichero tal cual y la hoja de firma se anexa al final. */
+export type OrigenFirma = 'plantilla' | 'html' | 'pdf'
+
+export interface EtiquetaPlantilla {
+  etiqueta: string
+  descripcion: string
+  ejemplo: string
+}
+
+export interface Recurso {
+  id: string
+  codigo: string
+  nombre: string
+  tipo: TipoRecurso
+  marca: string | null
+  modelo: string | null
+  matricula: string | null
+  numero_serie: string | null
+  anio_fabricacion: number | null
+  fecha_adquisicion: string | null
+  obra_id: string | null
+  responsable_id: string | null
+  activo: boolean
+  notas: string | null
+  obra_nombre?: string | null
+  responsable_nombre?: string | null
+  documentos_caducados: number
+  documentos_por_caducar: number
+  created_at: string
+  updated_at: string
+}
+
+export interface DatosRecurso {
+  nombre: string
+  tipo: TipoRecurso
+  marca?: string | null
+  modelo?: string | null
+  matricula?: string | null
+  numero_serie?: string | null
+  anio_fabricacion?: number | null
+  fecha_adquisicion?: string | null
+  obra_id?: string | null
+  responsable_id?: string | null
+  activo?: boolean
+  notas?: string | null
+}
+
+export interface TipoDocumentoPRL {
+  id: string
+  codigo: string
+  nombre: string
+  ambito: AmbitoPRL
+  meses_validez: number
+  obligatorio: boolean
+  descripcion: string | null
+  activo: boolean
+}
+
+export interface DatosTipoPRL {
+  nombre: string
+  ambito: AmbitoPRL
+  meses_validez?: number
+  obligatorio?: boolean
+  descripcion?: string | null
+  activo?: boolean
+}
+
+export interface DocumentoPRL {
+  id: string
+  tipo_id: string
+  ambito: AmbitoPRL
+  entidad_id: string | null
+  fecha_emision: string | null
+  fecha_caducidad: string
+  documento_id: string | null
+  notas: string | null
+  tipo_nombre: string | null
+  /** Calculado en el servidor a partir de la caducidad — no se guarda. */
+  estado: EstadoVigencia | null
+  dias_para_caducar: number | null
+  nombre_archivo: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DatosDocumentoPRL {
+  tipo_id: string
+  ambito: AmbitoPRL
+  entidad_id?: string | null
+  fecha_emision?: string | null
+  fecha_caducidad: string
+  documento_id?: string | null
+  notas?: string | null
+}
+
+export interface ResumenVigencia {
+  total: number
+  vigentes: number
+  por_caducar: number
+  caducados: number
+  pendientes: number
+  faltan_obligatorios: string[]
+}
+
+export interface PersonalPRL {
+  id: string
+  codigo: string
+  nombre: string
+  apellidos: string | null
+  categoria: string | null
+  activo: boolean
+  tpc_caducidad: string | null
+  proximo_reconocimiento: string | null
+  aptitud_medica: string | null
+  formacion_prl_horas: number | null
+  es_recurso_preventivo: boolean
+  documentos_caducados: number
+  documentos_por_caducar: number
+}
+
+export interface AvisoPersonal {
+  personal_id: string
+  nombre: string
+  motivos: string[]
+}
+
+export interface FichaPRLObra {
+  documentos: DocumentoPRL[]
+  resumen: ResumenVigencia
+  firmas: SolicitudFirma[]
+  personal_con_avisos: AvisoPersonal[]
+}
+
+export interface PlantillaDocumento {
+  id: string
+  codigo: string
+  nombre: string
+  ambito: AmbitoPRL
+  tipo_documento_id: string | null
+  contenido: string
+  requiere_firma: boolean
+  activa: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface DatosPlantilla {
+  nombre: string
+  ambito?: AmbitoPRL
+  tipo_documento_id?: string | null
+  contenido?: string
+  requiere_firma?: boolean
+  activa?: boolean
+}
+
+export interface SolicitudFirma {
+  id: string
+  codigo: string
+  titulo: string
+  estado: EstadoFirma
+  origen: OrigenFirma
+  documento_origen_id: string | null
+  obra_id: string | null
+  tercero_id: string | null
+  enviada_en: string | null
+  expira_en: string | null
+  documento_id: string | null
+  canal_enlace: PreferenciaCanal
+  canal_codigo: PreferenciaCanal
+  created_at: string
+  obra_nombre?: string | null
+  tercero_nombre?: string | null
+  total_firmantes: number
+  firmas_hechas: number
+  firmantes: Firmante[]
+}
+
+export interface SolicitudFirmaDetalle extends SolicitudFirma {
+  contenido_html: string
+  /** SHA-256 de lo que se firmó: permite verificar después que un PDF es ese. */
+  hash_documento: string | null
+}
+
+export interface DatosSolicitudFirma {
+  titulo: string
+  /** PDF ya existente (subido o de la biblioteca). Tiene prioridad sobre los
+   *  otros dos orígenes. */
+  documento_origen_id?: string | null
+  plantilla_id?: string | null
+  contenido_html?: string | null
+  obra_id?: string | null
+  tercero_id?: string | null
+  firmantes: FirmanteIn[]
+  dias_validez?: number
+  /** Por dónde mandar el enlace y por dónde el código de verificación. */
+  canal_enlace?: PreferenciaCanal
+  canal_codigo?: PreferenciaCanal
+}
+
+export interface EnvioFirma {
+  firmante_nombre: string
+  enviado: boolean
+  /** Por dónde salió de verdad: en automático, si WhatsApp falla se
+   *  reintenta por correo. */
+  canales: CanalEnvio[]
+  error: string | null
+  /** Siempre válido aunque el correo falle: se puede copiar y mandar a mano. */
+  enlace: string
+}
+
+/** Lo que ve quien abre el enlace de firma, sin sesión. */
+export interface PosicionFirma {
+  pagina: number
+  /** Fracciones de 0 a 1 del tamaño de página, no puntos del PDF. */
+  x: number
+  y: number
+  ancho: number
+  alto: number
+}
+
+export interface DocumentoParaFirmar {
+  titulo: string
+  /** Con `pdf`, `contenido_html` va vacío y el fichero se pide aparte. */
+  origen: OrigenFirma
+  contenido_html: string
+  posiciones_firma: PosicionFirma[] | null
+  destinatario_nombre: string
+  emisor: string
+  estado: EstadoFirma
+  /** El de ESTE firmante; `estado` es el del documento entero. */
+  mi_estado: EstadoFirmante
+  /** Los demás firmantes y cómo van — sin correos ni identificadores. */
+  otros_firmantes: { nombre: string; estado: EstadoFirmante; firmada_en: string | null }[]
+  firmada_en: string | null
+  expira_en: string | null
+}
+
 export interface ElementoMedido {
   label: string
   /** Formato de detección de Gemini: [ymin, xmin, ymax, xmax] en 0-1000,
@@ -4692,4 +5830,241 @@ export interface DatosMedicion {
   longitud?: string | null
   anchura?: string | null
   altura?: string | null
+}
+
+// ── Soporte: tickets y wiki ─────────────────────────────────────────────
+
+export type TipoTicket = 'incidencia' | 'peticion' | 'duda'
+export type EstadoTicket = 'nuevo' | 'abierto' | 'esperando' | 'resuelto' | 'cerrado'
+export type PrioridadTicket = 'baja' | 'normal' | 'alta' | 'urgente'
+
+export interface MensajeTicket {
+  id: string
+  cuerpo: string
+  interno: boolean
+  de_ia: boolean
+  creado_por_nombre: string | null
+  created_at: string
+}
+
+export interface Ticket {
+  id: string
+  codigo: string
+  titulo: string
+  descripcion: string
+  tipo: TipoTicket
+  estado: EstadoTicket
+  prioridad: PrioridadTicket
+  asignado_a_nombre: string | null
+  ruta_origen: string | null
+  creado_por_nombre: string | null
+  created_at: string
+  mensajes: MensajeTicket[]
+}
+
+export interface PaginaWiki {
+  id: string
+  slug: string
+  titulo: string
+  contenido: string
+  categoria: string | null
+  publicada: boolean
+  version: number
+  indexada_en: string | null
+  updated_at: string
+  /** `false` si se editó después de indexarla: el asistente todavía responde
+   *  con la versión anterior. */
+  indice_al_dia: boolean
+}
+
+export interface DatosPaginaWiki {
+  titulo: string
+  contenido: string
+  categoria?: string | null
+  publicada?: boolean
+}
+
+export interface ResultadoBusquedaWiki {
+  titulo: string
+  texto: string
+  origen: string
+  origen_id: string
+  distancia: number
+}
+
+// ── Copiloto: el chat que acompaña a toda la aplicación ─────────────────
+
+export interface MensajeCopiloto {
+  rol: 'user' | 'assistant'
+  contenido: string
+}
+
+export interface CampoPropuesta {
+  etiqueta: string
+  valor: string
+}
+
+/** Una escritura que el copiloto plantea pero NO ha hecho: no se aplica hasta
+ *  que la persona la confirma, y al confirmarla el servidor vuelve a
+ *  comprobar el permiso. */
+export interface PropuestaCopiloto {
+  accion: string
+  resumen: string
+  datos: Record<string, unknown>
+  campos: CampoPropuesta[]
+}
+
+export interface RespuestaCopiloto {
+  respuesta: string
+  propuesta: PropuestaCopiloto | null
+}
+
+export interface ConfirmadaCopiloto {
+  descripcion: string
+  ruta: string | null
+}
+
+// ── Planos: biblioteca, hojas calibrables y lo dibujado encima ──────────
+
+export type TipoElementoPlano = 'nota' | 'auxiliar' | 'longitud' | 'area' | 'conteo'
+
+/** Coordenadas en el espacio propio de la hoja (puntos PDF o píxeles del
+ *  bitmap a escala 1), NO en píxeles de pantalla: así el dibujo sobrevive al
+ *  zoom y al tamaño de la ventana. */
+export interface PuntoPlano {
+  x: number
+  y: number
+}
+
+/** Los trazos de un DXF, ya aplanados y en coordenadas de hoja. Las claves
+ *  van cortas y los puntos como pares: en un plano de veinte mil trazos, las
+ *  claves repetidas multiplican por tres lo que viaja por el cable. */
+export interface DibujoVectorial {
+  capas: string[]
+  trazos: { c: string; p: [number, number][]; z?: boolean }[]
+  omitidas: Record<string, number>
+}
+
+export interface HojaPlano {
+  id: string
+  numero: number
+  nombre: string | null
+  ancho: string
+  alto: string
+  /** Nulo mientras la hoja no esté calibrada: sin esto no se puede medir. */
+  metros_por_unidad: string | null
+  calibracion: { a: PuntoPlano; b: PuntoPlano; distancia_m: string } | null
+  /** Solo en DXF. Es a la vez lo que se pinta y lo que se mide. */
+  dibujo: DibujoVectorial | null
+}
+
+export interface CapaPlano {
+  id: string
+  nombre: string
+  color: string
+  visible: boolean
+  bloqueada: boolean
+  orden: number
+}
+
+export interface ElementoPlano {
+  id: string
+  hoja_id: string
+  capa_id: string | null
+  tipo: TipoElementoPlano
+  geometria: PuntoPlano[]
+  texto: string | null
+  color: string | null
+  /** Ya en unidades reales, calculado por el servidor. */
+  valor: string | null
+  unidad: string | null
+  linea_medicion_id: string | null
+  creado_por_nombre: string | null
+  created_at: string
+}
+
+export interface Plano {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  obra_id: string | null
+  presupuesto_id: string | null
+  origen: 'pdf' | 'imagen' | 'dxf'
+  nombre_archivo: string
+  content_type: string
+  tamano_bytes: number
+  creado_por_nombre: string | null
+  created_at: string
+}
+
+export interface PlanoDetalle extends Plano {
+  hojas: HojaPlano[]
+  capas: CapaPlano[]
+}
+
+export interface DatosElementoPlano {
+  tipo: TipoElementoPlano
+  geometria: PuntoPlano[]
+  capa_id?: string | null
+  texto?: string | null
+  color?: string | null
+}
+
+export interface DatosCapaPlano {
+  nombre: string
+  color?: string
+  visible?: boolean
+  bloqueada?: boolean
+  orden?: number
+}
+
+export interface CotaLeida {
+  texto: string
+  metros: string
+  donde: string | null
+}
+
+/** Lo que la IA ha leído del plano. Nada de esto está aplicado: son
+ *  propuestas. A la IA no se le piden coordenadas —las estimaría mal y un 3 %
+ *  de error en la escala es un 6 % en todas las áreas— solo texto. */
+export interface LecturaIaPlano {
+  /** Denominador de la escala impresa: 50 para «1:50». */
+  escala_impresa: number | null
+  escala_texto: string | null
+  /** `false` en una imagen: un píxel no mide nada sin saber la resolución del
+   *  escaneo, así que la escala impresa no se puede aplicar. */
+  escala_aplicable: boolean
+  cotas: CotaLeida[]
+  resumen: string | null
+  avisos: string[]
+}
+
+// ── Plexo: vínculo entre organizaciones ──────────────────────────────────
+
+export type EstadoVinculoPlexo = 'pendiente' | 'aceptado' | 'rechazado' | 'revocado'
+
+export interface PerfilPlexo {
+  visible: boolean
+  activado_en: string | null
+}
+
+export interface OrganizacionPublica {
+  id: string
+  name: string
+  cif: string | null
+}
+
+/** Un vínculo, ya resuelto desde el punto de vista de quien lo mira: no hace
+ *  falta saber si eres el origen o el destino para pintarlo. */
+export interface VinculoPlexo {
+  id: string
+  estado: EstadoVinculoPlexo
+  mensaje: string | null
+  otra_organizacion: OrganizacionPublica
+  soy_quien_invito: boolean
+  invitado_por_nombre: string
+  respondido_por_nombre: string | null
+  created_at: string
+  respondido_en: string | null
 }

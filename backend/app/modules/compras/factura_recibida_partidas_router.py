@@ -96,7 +96,7 @@ async def crear_capitulo(
     datos: FacturaRecibidaCapituloCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> dict:
     await _factura_propia(session, factura_id, alcance, principal)
     capitulo = await service.crear_capitulo(session, factura_id, datos)
@@ -154,7 +154,7 @@ async def eliminar_capitulo(
     capitulo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     await service.eliminar_capitulo(session, capitulo_id)
@@ -171,7 +171,7 @@ async def crear_partida(
     datos: FacturaRecibidaPartidaCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> FacturaRecibidaPartidaDetalle:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     try:
@@ -266,7 +266,7 @@ async def eliminar_partida(
     partida_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     await _partida_propia(session, partida_id, alcance, principal)
     await service.eliminar_partida(session, partida_id)
@@ -283,7 +283,7 @@ async def crear_medicion(
     datos: FacturaRecibidaMedicionCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> FacturaRecibidaMedicionOut:
     await _partida_propia(session, partida_id, alcance, principal)
     medicion = await service.crear_medicion(session, partida_id, datos)
@@ -339,7 +339,7 @@ async def eliminar_medicion(
     medicion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     await _medicion_propia(session, medicion_id, alcance, principal)
     await service.eliminar_medicion(session, medicion_id)

@@ -14,8 +14,8 @@ from app.core.schemas import Page
 from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.terceros import apariciones_service, service
-from app.modules.terceros.models import Contacto, EntidadContacto, Tercero
 from app.modules.terceros.apariciones_schemas import AparicionOut
+from app.modules.terceros.models import Contacto, EntidadContacto, Tercero
 from app.modules.terceros.schemas import (
     ContactoAsociadoCreate,
     ContactoAsociadoOut,
@@ -70,7 +70,7 @@ async def listar(
 async def crear(
     datos: TerceroCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "crear")),
 ) -> TerceroDetalle:
     try:
         tercero = await service.crear_tercero(session, datos)
@@ -150,7 +150,7 @@ async def eliminar(
     tercero_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    alcance: Alcance = Depends(require_permiso("terceros", "borrar")),
 ) -> None:
     existente = await service.obtener_tercero(session, tercero_id)
     if existente is None:
@@ -198,7 +198,7 @@ async def listar_contactos(
 async def crear_contacto(
     datos: ContactoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "crear")),
 ) -> ContactoOut:
     contacto = await service.crear_contacto(session, datos)
     return ContactoOut.model_validate(contacto)
@@ -270,7 +270,7 @@ async def eliminar_contacto(
     contacto_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    alcance: Alcance = Depends(require_permiso("terceros", "borrar")),
 ) -> None:
     existente = await service.obtener_contacto(session, contacto_id)
     if existente is None:
@@ -324,7 +324,7 @@ async def asociar_contacto(
     entidad_id: uuid.UUID,
     datos: ContactoAsociadoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "crear")),
 ) -> ContactoAsociadoOut:
     try:
         asociado = await service.asociar_contacto(session, entidad, entidad_id, datos)
@@ -337,7 +337,7 @@ async def asociar_contacto(
 async def eliminar_asociacion(
     asociacion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "borrar")),
 ) -> None:
     encontrado = await service.eliminar_asociacion(session, asociacion_id)
     if not encontrado:
@@ -370,7 +370,7 @@ async def crear_cuenta_bancaria(
     tercero_id: uuid.UUID,
     datos: CuentaBancariaTerceroCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "crear")),
 ) -> CuentaBancariaTerceroOut:
     if datos.tercero_id != tercero_id:
         raise HTTPException(
@@ -400,7 +400,7 @@ async def eliminar_cuenta_bancaria(
     tercero_id: uuid.UUID,
     cuenta_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("terceros", "editar")),
+    _alcance: Alcance = Depends(require_permiso("terceros", "borrar")),
 ) -> None:
     encontrado = await service.eliminar_cuenta_bancaria(session, cuenta_id)
     if not encontrado:

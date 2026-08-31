@@ -1,15 +1,137 @@
-# Obras — ERP de construcción
+# Flexómetro — ERP de construcción
 
-Presupuestación, ejecución y cobro de obra. El núcleo del negocio es la
-presupuestación según el sistema clásico español de mediciones y presupuestos
-(modelo de Ramírez de Arellano):
+**flexometro.online**
+
+Presupuestación, ejecución y cobro de obra, con el ciclo entero en un solo
+sitio. El núcleo es la presupuestación según el sistema clásico español de
+mediciones y presupuestos (modelo de Ramírez de Arellano):
 
 ```
 Precio de suministro → Precio básico → Precio auxiliar → Precio unitario
                             → Medición → Presupuesto (capítulos y partidas)
 ```
 
-## Estado: Fase 25 — banco de precios
+Lo que lo distingue de un ERP genérico con un módulo de obras encima: el
+descompuesto, el BC3 y la certificación por medición acumulada no son un
+añadido, son el centro. Y lo que lo distingue de un programa de mediciones
+clásico: de la partida sale un pedido, del pedido un albarán, del albarán el
+coste real, y de la medición ejecutada la certificación y la factura — sin
+volver a teclear nada.
+
+## Qué puede hacer
+
+### Presupuestar como se presupuesta aquí
+
+Descompuesto en cascada (suministro → básico → auxiliar → unitario) con
+recálculo automático hacia arriba, mediciones con fórmulas, capítulos
+anidados, versionado y plantillas. **Importa y exporta FIEBDC-3 (BC3)**, que
+es el formato en el que viajan los bancos de precios en España — soltar un
+BC3 sobre un capítulo coloca ahí sus partidas.
+
+Un **banco de precios** propio, compartible entre las organizaciones de una
+misma cuenta: el mismo precio de hormigón para todas las empresas del grupo,
+mantenido una vez.
+
+### Llevar la obra, no solo presupuestarla
+
+Pedidos a proveedor, albaranes, facturas recibidas, personal asignado y
+partes de trabajo. El **coste real frente a lo presupuestado**, partida a
+partida, en el momento — que es la pregunta que de verdad se hace en obra.
+
+**Solicitudes de precios a varios proveedores** con una separata pública: el
+proveedor entra por un enlace, sin cuenta, rellena sus precios y se comparan.
+Si ese proveedor ya usa Flexómetro, le llega dentro de su propia aplicación.
+
+### Certificar y cobrar
+
+Certificaciones por medición acumulada a fecha, facturas con numeración legal
+por serie, y el enganche para Veri\*Factu / Facturae a través de un flujo de
+n8n propio del despliegue.
+
+### IA donde ahorra trabajo de verdad
+
+- **Patrones de presupuesto** (DeepSeek): redacta partidas y descompuestos
+  a partir de una descripción.
+- **Medición desde planos** (Gemini): lee cotas de un plano acotado.
+- **Conversación sobre documentos**: se le sueltan PDFs y responde sobre ellos.
+- **Medidor por cámara** (`testmeter`): levantamiento de planta con realidad
+  aumentada. Es una prueba de concepto, no producto.
+
+### PRL y firma electrónica
+
+Control de caducidades de toda la documentación de PRL —empresa, personal,
+recursos, obra y proveedores—, con vehículos y maquinaria y sus documentos.
+
+Y **envío a firma a terceros**, tipo Documenso: multifirma, verificación en
+dos pasos por un canal distinto del que llevó el enlace, sello semitransparente
+en el PDF y una hoja de evidencias por firmante (IP, hora, navegador, huella
+SHA-256 del documento).
+
+> Es firma electrónica **simple** con evidencias (art. 3.10 eIDAS), no
+> avanzada: la avanzada exige un certificado bajo control exclusivo del
+> firmante y un prestador de servicios de confianza.
+
+### Medir sobre el plano
+
+- **Biblioteca de planos** por obra o por presupuesto. El PDF se sube entero y
+  no se toca: cada lámina es una hoja, y cada hoja se calibra por su cuenta —
+  un plano de situación y un detalle constructivo en el mismo fichero van a
+  escalas distintas.
+- **Se calibra sobre una cota que ya conoces**: pinchas sus dos extremos,
+  tecleas cuánto mide y de ahí sale la escala de la hoja. Recalibrar recalcula
+  lo que ya hubieras medido, en vez de dejar unas cifras a una escala y otras a
+  otra.
+- **Longitudes, áreas y conteos** por capas, junto a anotaciones y líneas
+  auxiliares. Mientras la hoja no esté calibrada no se puede medir: mejor no
+  poder que dar un número inventado.
+- **Un DXF no hay ni que calibrarlo.** Trae sus capas y casi siempre sus
+  unidades, así que se mide desde el primer momento — y pinchando una entidad,
+  no yendo vértice a vértice. Ahí el número es exacto: sobre la misma sala, un
+  PDF pinchado a ojo da 50,56 m² y el DXF da 50,00.
+- **Un PDF se puede leer con IA** en vez de calibrar a ciegas: si el cajetín
+  dice «E 1:50», la escala sale exacta de la geometría del papel — a la IA no
+  se le piden coordenadas, solo el texto que ya sabe leer bien. Si no hay
+  escala escrita, propone las cotas del plano para que se pinchen sus dos
+  extremos, en vez de tener que ir buscando una a ojo.
+- **Lo medido se lleva a una partida** como una línea de medición más, por el
+  mismo camino que si lo tecleases. Y no deja meter metros cuadrados en una
+  partida de metros lineales.
+
+### Preguntar en vez de buscar
+
+- **Copiloto** en toda la aplicación: un chat que busca tus datos, los resume
+  y te explica cómo se hace algo. Cada herramienta que se le ofrece está
+  filtrada por los permisos de quien pregunta — a quien no ve facturas ni
+  siquiera le existe la herramienta de buscarlas, así que no puede pedirla.
+- **Nunca escribe solo.** Cuando propone crear algo, lo enseña campo a campo y
+  hace falta confirmarlo; al confirmar se vuelve a comprobar el permiso y se
+  crea por el servicio del módulo dueño, con su validación de siempre. Un NIF
+  que no cuadra lo rechaza igual que si lo hubieras tecleado tú.
+- **Tickets** para pedir ayuda: los abre cualquiera, sin permisos especiales,
+  y quedan con la pantalla desde la que se abrieron.
+- **Wiki** de la casa, indexada por significado (pgvector + embeddings): el
+  buscador entiende «no encuentro el proyecto» aunque la página diga «obra».
+  Es también lo que lee el copiloto para responder, y si la wiki no lo cuenta
+  lo dice en vez de improvisar un procedimiento.
+
+### Avisar, integrar y automatizar
+
+- **Notificaciones** configurables por persona o grupo, por campana, correo o
+  WhatsApp, con vigilancias periódicas («una obra lleva 90 días parada»).
+- **WhatsApp** detrás de un puerto con adaptadores: hoy un puente de WhatsApp
+  Web, mañana la API oficial, sin tocar el circuito de firma.
+- **Claves de API** con los mismos ámbitos que los permisos de una persona, y
+  **webhooks firmados** con reintentos y registro de envíos.
+- **Automatizaciones** con nodos, al estilo n8n: disparador, ramas y acciones.
+
+### Y como plataforma
+
+Multi-tenant de verdad (RLS forzado en PostgreSQL), módulos activables por
+organización, permisos por módulo con cuatro acciones y alcance, numeración
+configurable, campos libres, diccionarios y traducción de la interfaz — todo
+por cuenta, al estilo Dolibarr.
+
+## Estado
 
 | | |
 |---|---|
@@ -19,6 +141,8 @@ Precio de suministro → Precio básico → Precio auxiliar → Precio unitario
 | Frontend | React 19 + TypeScript + Vite |
 | Auth | Keycloak (JWT + PKCE), rol de BD de mínimo privilegio |
 | Multi-tenant | RLS forzado en PostgreSQL sobre todas las tablas de negocio |
+| Mensajería | Puerto con adaptadores: SMTP, WhatsApp (puente y API oficial) |
+| Búsqueda por significado | pgvector sobre PostgreSQL, embeddings por API |
 | Despliegue | Docker Compose, etiquetas Traefik listas |
 
 ### Fases
@@ -50,8 +174,30 @@ Precio de suministro → Precio básico → Precio auxiliar → Precio unitario
 | 23 | Monedas y tipo de cambio; IVA/recargo de equivalencia/retención en el diccionario | hecha |
 | 24 | Tabla de datos genérica (DataTable): orden, filtro, columnas configurables, export CSV/PDF | hecha |
 | 25 | Banco de precios: fusión de Producto/Familia/PrecioSuministro (antiguo catálogo) en Concepto | hecha |
-| 26 | Iconos + tooltips en toda la interfaz | en curso |
-| 27 | Ficha genérica con cabecera y pestañas (piloto) | en curso |
+| 26 | Iconos + tooltips en toda la interfaz | hecha |
+| 27 | Ficha genérica con cabecera y pestañas | hecha |
+| 28-52 | Gestor documental, CRM, contratos, auditoría, campos y diccionarios ampliados, compras y facturación completas, IA sobre documentos… | hechas |
+| 53 | PRL y recursos: caducidades, vehículos y maquinaria, plantillas de documento | hecha |
+| 54 | Firma electrónica a terceros: multifirma, 2FA por canal distinto, sello y evidencias | hecha |
+| 55 | Mensajería como puerto con adaptadores: SMTP y WhatsApp (puente GOWA / API oficial) | hecha; el adaptador de la API oficial sin verificar contra Meta |
+| 56 | Permisos: cuatro acciones (ver, modificar, crear, borrar) con alcance | hecha |
+| 57 | Notificaciones: suscripciones por persona o grupo, vigilancias periódicas | hecha |
+| 58 | Desarrolladores: claves de API con ámbitos y webhooks firmados con reintentos | hecha |
+| 59 | Automatizaciones: flujos de nodos con disparadores, ramas y acciones | hecha |
+| 60 | Menú de usuario: favoritos, perfil y salir | hecha |
+| 61 | Importador de datos desde CSV y Excel, fila a fila y por el servicio dueño | hecha |
+| 62 | Informes y BI: agrupar y sumar con el alcance de permisos de quien abre | hecha |
+| 63 | Versión app (PWA): manifest, service worker e instalable | hecha; para instalarse de verdad el despliegue tiene que servir el build de producción (`FRONTEND_TARGET=produccion`) |
+| 64 | Soporte: tickets y wiki indexada por significado (pgvector + embeddings) | hecha |
+| 65 | Copiloto: chat en toda la aplicación, herramientas filtradas por permisos, escritura solo con confirmación | hecha; sabe crear terceros, contactos y personal, y abrir tickets — modificar y borrar todavía no |
+| 66 | Planos: biblioteca, calibrado sobre una cota, capas, anotaciones y medición sobre PDF/imagen | hecha |
+| 67 | Importación de DXF: capas y unidades del propio fichero, medición exacta pinchando la entidad | hecha; BIM/IFC todavía no |
+| 68 | Lectura de plano con IA: escala del cajetín y cotas escritas, para calibrar sin pinchar nada | hecha; BIM/IFC todavía no |
+| 69 | Universo Plexo: vínculo entre organizaciones de cuentas distintas, con perfil de visibilidad opcional | hecha; solo el vínculo — intercambio de documentos, directorio, scoring, gamificación y precios agregados quedan por delante |
+
+> El detalle de las fases 28 a 52 vive en los docstrings del código, no en
+> esta tabla: se fueron construyendo más rápido de lo que se documentaron
+> aquí. Las de la 53 en adelante sí están descritas más abajo.
 
 ## Arrancar
 
@@ -958,6 +1104,309 @@ perder datos ni FKs) y se repuntan `PrecioSuministro`/`AlbaranLinea` al
 concepto resultante. Verificado en vivo contra la base real de desarrollo
 (fusión de datos, recálculo en cascada, histórico, cruce con facturación) con
 un script desechable y rollback antes de darla por buena.
+
+### Mensajería: un puerto, varios adaptadores (Fase 55)
+
+`app/core/mensajeria/` es un puerto hexagonal. El dominio dice «manda este
+mensaje a esta persona por este canal» y no sabe qué hay detrás:
+
+```
+firma.py  ──►  ProveedorMensajeria  ◄──┬── AdaptadorSmtp
+              (enviar / direccion_de   ├── AdaptadorGowa          (WhatsApp Web)
+               / ofuscar)              └── AdaptadorWhatsAppCloud (API oficial)
+                        ▲
+                     fabrica.py  ← el único que conoce a los concretos
+```
+
+Existe porque el proveedor de WhatsApp **va a cambiar**: hoy es un puente de
+WhatsApp Web (GOWA), que vale para enseñar el producto pero no se sostiene —
+la cuenta que hay detrás es personal y mandar automatismos por ahí acaba en
+cierre. Pasar a la API oficial es un adaptador y un ajuste, no una reescritura.
+
+Dos conceptos del dominio viven en el puerto, no en el adaptador:
+
+- **`Canal`** (email/whatsapp) — el dominio razona sobre canales, no sobre
+  proveedores.
+- **`TipoMensaje`** (aviso / código de verificación) — nace de que la API
+  oficial obliga a clasificar (plantilla de «autenticación» para un código,
+  de «utilidad» para un aviso). El dominio dice QUÉ manda; el adaptador
+  traduce.
+
+### Firma electrónica (Fase 54)
+
+Un documento (plantilla, HTML o PDF) se manda a firmar a gente de fuera, sin
+cuenta. Cada firmante tiene **su propio enlace, su código y sus evidencias**:
+`Firmante` es una tabla aparte porque cada firma es un acto independiente.
+
+La regla que sostiene el valor probatorio: **el enlace y su código de
+verificación nunca viajan por el mismo canal**. Si los dos llegan al mismo
+buzón, quien acceda a ese canal tiene las dos mitades y el segundo factor deja
+de ser «algo que tienes». Con teléfono se reparten (enlace por WhatsApp,
+código por correo); sin él, todo por correo y se sabe que es peor.
+
+Un rechazo tumba el documento entero aunque otros ya hubieran firmado —si una
+parte se niega, el acuerdo no existe—, pero **las firmas hechas no se borran**:
+son evidencia de que esas personas sí aceptaron.
+
+### Permisos: cuatro acciones y alcance (Fase 56)
+
+`GrupoPermiso` da, por módulo, un `Alcance` (`ninguno` / `propios` / `todos`)
+para **ver, editar, crear y borrar**. `crear` y `borrar` salieron de `editar`
+porque no son el mismo riesgo: hay perfiles enteros que necesitan dar de alta
+y modificar sin poder borrar nada.
+
+En `crear` el alcance no significa nada —lo que creas es tuyo— y el panel solo
+ofrece No/Sí. La columna existe por uniformidad.
+
+Perteneciendo a varios grupos manda el más amplio **de cada acción por
+separado**: un grupo puede dar «borrar los míos» y otro «editar todos».
+
+### Eventos: un catálogo, tres públicos (Fases 57-59)
+
+`app/core/eventos.py` declara qué cosas merecen que alguien se entere. Vive en
+`core` y no dentro de notificaciones porque tiene **tres consumidores** del
+mismo hecho:
+
+| Público | Qué recibe |
+|---|---|
+| Personas | Campana, correo o WhatsApp, según su suscripción |
+| Sistemas de fuera | Webhook firmado con HMAC y reintentos |
+| Automatizaciones | Un flujo que arranca |
+
+Dos familias de evento, y son distintas de verdad:
+
+- **Hecho** — ha pasado algo. Lo emite el código en el momento.
+- **Vigilancia** — no ha pasado nada, y ESE es el problema (una obra parada,
+  un documento que caduca). No hay momento en que «ocurra», así que un latido
+  horario va a buscarlo. Con memoria de lo ya avisado: repetir «esta obra
+  lleva 90 días parada» cada hora enseña a ignorar el aviso en una semana.
+
+### Claves de API y webhooks (Fase 58)
+
+Una clave usa **los mismos ámbitos que los permisos de una persona**, así que
+`require_permiso` funciona igual venga quien venga: una integración no puede
+hacer nada que un usuario no pudiera. Nunca es `admin` —sin roles— y su
+`subject` es `clave:<uuid>`, de modo que lo que cree queda firmado por la
+integración.
+
+De la clave solo se guarda su SHA-256. El secreto del webhook sí va en claro,
+al revés, porque hace falta para **firmar** cada envío y una firma no se
+calcula con un hash. Formato `t=<epoch>,v1=<hmac>`, con el timestamp dentro de
+la firma para que una copia capturada no valga mañana.
+
+### Automatizaciones (Fase 59)
+
+Flujos de nodos: un disparador (evento, URL o reloj) y acciones que reciben lo
+que produjeron los anteriores y deciden **por qué rama** sigue el flujo. Las
+expresiones son `{{ nodo.campo }}`.
+
+Tres guardas, y ninguna es teórica:
+
+- **Las expresiones no se evalúan.** Solo navegan por diccionarios. Un
+  `eval()` aquí sería ejecución remota para cualquier usuario.
+- **El nodo HTTP no alcanza la red interna.** Resuelve el nombre y rechaza
+  direcciones privadas: sin eso, un flujo podría llamar a la base de datos.
+- **Un ciclo termina.** Cada nodo se ejecuta como mucho una vez por pasada,
+  más un tope de 50.
+
+Un fallo no borra lo anterior: la ejecución queda `parcial`, distinto de
+`fallida`. Si tres nodos mandaron correos, negarlo sería mentir.
+
+
+### Soporte: tickets y wiki que entiende (Fase 64)
+
+Los tickets los abre cualquiera **sin permiso de módulo**: quien menos permisos
+tiene es justo quien más necesita poder pedir ayuda. Lo que sí lo pide es
+gestionarlos y ver los de los demás; un ticket que no es tuyo devuelve 404 y no
+403, porque decir «existe pero no es tuyo» ya confirma que existe.
+
+La wiki se indexa por significado. Cada página se trocea con solape —una frase
+partida por la mitad no la encuentra nadie— y cada trozo se guarda como un
+vector de 768 dimensiones en `pgvector`, con índice IVFFlat y distancia coseno.
+
+Dos decisiones que conviene tener presentes:
+
+- **Los embeddings se piden por API, no se calculan aquí.** El servidor tiene
+  ~1,6 GB libres y el modelo multilingüe que funciona bien en español no cabe.
+  El que cabría deja la máquina al borde compitiendo con Postgres y Keycloak, y
+  responde mal en español.
+- **La búsqueda tiene corte de distancia.** Sin él siempre devuelve algo —lo
+  más parecido que haya— y el copiloto acabaría respondiendo con la página que
+  menos desencaja. Medido contra la wiki real: lo que la página responde queda
+  en 0,19–0,28; una pregunta del dominio que no responde, en 0,39; algo ajeno,
+  por encima de 0,47. El corte está en 0,35.
+
+Indexar nunca tumba el guardado: si falla, la página se guarda igual y sale
+marcada «sin indexar». Una wiki sin indexar sigue siendo una wiki.
+
+### Copiloto (Fase 65)
+
+Un chat en toda la aplicación, encima de lo que ya había: la wiki de `soporte`
+para el «cómo se hace», el motor de `informes` para las cifras, los destinos de
+`importador` para crear y el registro de módulos para saber dónde está cada
+pantalla.
+
+Lo propio de aquí son dos cosas:
+
+- **El permiso decide qué herramientas existen.** Cada herramienta declara
+  módulo y acción, y el catálogo se filtra por persona antes de enseñárselo al
+  modelo. A quien no ve facturas no se le enumera «factura» ni en el JSON
+  Schema: la puerta no está cerrada, es que no existe, y por tanto no puede
+  «equivocarse» y abrirla.
+- **Escribir siempre pasa por una confirmación.** Las herramientas que
+  escribirían no escriben: devuelven una propuesta que vuelve al navegador con
+  sus campos a la vista. Al confirmar, otro endpoint vuelve a comprobar el
+  permiso desde cero —lo que llega ha estado en manos del cliente— y crea por
+  el servicio del módulo dueño. Por eso un NIF que no cuadra lo rechaza igual
+  que si lo hubieras tecleado tú: el copiloto no tiene una puerta de atrás.
+
+Una propuesta por turno: confirmar tres cosas de golpe con un botón es no
+confirmar nada. Y si el modelo anuncia una propuesta sin llegar a crearla —pasa
+cuando el hilo ya tiene texto suyo con esa pinta y se imita a sí mismo—, se le
+avisa una vez y se le da otra vuelta, porque «confírmalo abajo» sin botón que
+pulsar es peor que no ofrecerlo.
+
+
+### Planos (Fase 66)
+
+Nada se rasteriza en el servidor. El PDF lo pinta pdf.js en el navegador, que
+además es quien lee cuántas páginas tiene y cuánto mide cada una y se lo manda
+al alta. Fiarse de él no abre ninguna puerta: esas dimensiones solo definen el
+sistema de coordenadas en el que se dibuja, y la escala real se fija después
+calibrando dentro de ese mismo sistema — una página declarada con el doble de
+tamaño da exactamente las mismas mediciones en metros. La alternativa habría
+sido meter una librería de PDF y bastante memoria en la API a cambio de nada.
+
+El dibujo va en un SVG superpuesto **con el viewBox en coordenadas de hoja**,
+así que no hay conversiones de coordenadas por ninguna parte: el navegador
+escala solo, y un punto guardado se pinta igual con cualquier zoom y en
+cualquier ventana.
+
+Tres cosas que sostienen que el número sea de fiar:
+
+- **Lo calcula el servidor**, aunque el navegador lo enseñe mientras dibujas.
+  Lo que se guarda y lo que acaba en una partida no puede depender del cliente.
+- **Todo en `Decimal`, incluida la raíz cuadrada.** Sumar cien tramos de
+  fachada en coma flotante arrastra un error que se acaba viendo en la
+  certificación, y eso es dinero.
+- **Sin escala no hay número.** Un valor «en unidades de hoja» se leería como
+  metros, así que se deja vacío hasta que la hoja se calibre.
+
+Una capa borrada no se lleva por delante lo dibujado en ella (`ON DELETE SET
+NULL`): perder mediciones por ordenar las capas sería una trampa. Y llevar una
+medición a una partida exige permiso de edición en `presupuestos` además del de
+planos — si no, este módulo sería la manera de escribir en un presupuesto que
+no puedes tocar.
+
+
+### DXF (Fase 67)
+
+Un DXF no se rasteriza: se **aplana**. Cada entidad —línea, arco, círculo,
+polilínea, spline— se convierte en una lista de puntos con `ezdxf`, y esa lista
+es a la vez lo que se pinta y lo que se mide. Por eso medir sobre un DXF es
+exacto: no se estima dónde está la pared, se sabe.
+
+Tres cosas que hay que hacer bien o el plano sale mal sin avisar:
+
+- **Los bloques se explotan, y heredan la capa del `INSERT`.** Un plano real
+  mete puertas, ventanas y mobiliario como referencias a bloques. Sin
+  explotarlos el plano se ve medio vacío; y sin la herencia de capa —lo que
+  dentro de un bloque está en la capa «0» pertenece a la capa de quien lo
+  inserta— acaba todo en la capa «0», y apagar la capa de verdad no oculta
+  nada.
+- **El eje Y se invierte.** En DXF crece hacia arriba y en pantalla hacia
+  abajo. Sin invertirlo el plano sale del revés, y con las cotas al revés
+  nadie se da cuenta hasta haber medido mal.
+- **La escala sale de `$INSUNITS`.** Un DXF suele declarar sus unidades, así
+  que nace calibrado. Cuando dice «sin unidades» no se supone milímetros: se
+  acertaría casi siempre y se fallaría en silencio el resto.
+
+El dibujo se pinta en un **canvas, no en SVG**. Un plano de arquitectura trae
+decenas de miles de entidades, y otros tantos nodos del DOM dejan el navegador
+inservible al hacer zoom. Lo que hay que pinchar se resuelve contra las
+coordenadas, que ya están en memoria — con tolerancia, y sin poder elegir nada
+de una capa apagada: medir lo que no se está viendo es peor que no medir.
+
+Se rechaza el fichero entero por encima de 60 000 trazos en vez de importar la
+mitad: medio plano es peor que ninguno, porque no se nota.
+
+
+### Lectura de plano con IA (Fase 68)
+
+La decisión que sostiene este módulo: **a la IA no se le piden coordenadas.**
+Un modelo de visión estimando píxeles se equivoca un 2-5 %, y ese error se
+mete en la escala — un 3 % de error en la escala es un 3 % en cada longitud y
+un 6 % en cada área. No se ve: se cobra de más o de menos sin que nadie lo
+note, porque «lo ha medido el programa».
+
+Lo que sí se le pide es leer texto, que es donde un modelo de visión es bueno
+de verdad. Con eso basta casi siempre, porque la escala de un plano suele
+estar escrita en el cajetín: «E 1:50» más el tamaño de la página bastan para
+calibrar sin estimar un solo píxel — un punto PDF son 25,4/72 mm de papel, y a
+escala 1:N cada milímetro de papel son N milímetros de obra. Es geometría, no
+visión.
+
+Dos filtros que existen porque un dato malo aquí no da un error, da un
+presupuesto equivocado:
+
+- **Solo se aceptan denominadores de escala reales** (1, 2, 5, 10, 20, 25, 50,
+  100…). Si el modelo lee «1:57» es casi seguro un «1:50» mal leído, y
+  aceptarlo calibraría el plano entero con un número inventado.
+- **La escala impresa solo vale sobre un PDF**, nunca sobre una imagen: las
+  coordenadas de un PDF son puntos, una medida de papel; las de una imagen son
+  píxeles, y un píxel no mide nada sin saber a qué resolución se escaneó — un
+  JPG a 150 o a 600 ppp se ve igual y daría escalas que difieren por cuatro.
+
+Cuando no hay escala escrita, se cae a leer las cotas acotadas del plano
+(«10,00 m») y proponerlas. Ahí el valor sí es de fiar —está escrito— pero
+dónde empieza y acaba no, así que vuelve como sugerencia: hay que pinchar sus
+dos extremos, igual que al calibrar a mano.
+
+
+### Universo Plexo (Fase 69)
+
+La primera vez que un dato cruza a propósito la frontera de organización que
+RLS impone en el resto de la aplicación: dos organizaciones de **cuentas
+distintas** —empresas que no se conocían— pueden encontrarse y conectarse.
+Nada que ver con `compartir_maestros` (Fase 15), que es de solo lectura y
+solo entre organizaciones hermanas de la misma cuenta.
+
+Dos tablas, cada una con su propio problema de RLS:
+
+- **`perfil`** — un interruptor por organización («que me puedan
+  encontrar»), apagado por defecto. Su `SELECT` está ensanchado igual que
+  `activar_rls_maestro()`, pero con una condición distinta: no «misma
+  cuenta», sino `visible = true`. Escribir sigue estricto — nadie cambia la
+  visibilidad de otra organización.
+- **`vinculo`** — la invitación en sí, y no pertenece a una sola
+  organización: referencia a dos. Política propia, sin precedente en el
+  resto de la base: `SELECT`/`UPDATE` visibles si `app.organization_id`
+  coincide con el origen O con el destino; `INSERT` exige que sea el origen
+  (nadie puede fabricar una invitación en tu nombre). Como mucho una
+  invitación viva por pareja de organizaciones —columna generada en
+  Postgres con `LEAST`/`GREATEST` para que A→B y B→A cuenten como la
+  misma pareja, e índice único parcial solo sobre `pendiente`/`aceptado`
+  para que un rechazo no bloquee un intento posterior.
+
+Avisar al otro lado de una invitación o de una respuesta necesita escribir
+en SU bandeja, no en la propia: mismo patrón ya usado en
+`compras/solicitud_service.py::avisar_si_tiene_cuenta`. Se cruza el
+`SET LOCAL` de Postgres con `fijar_organizacion_activa()` para ese único
+INSERT y se vuelve a la organización propia en un `finally`, inmediatamente
+después — nunca se mueve el ContextVar de `tenancy`, que confundiría a todo
+lo demás que corre en esa misma request (numeración, autoría).
+
+La máquina de estados vive en `service.py`, no en la política RLS —esta
+solo decide QUIÉN puede tocar la fila, no QUÉ transición es legal para
+cuál—: pendiente → aceptado/rechazado solo lo decide el destino; pendiente
+→ revocado (retirar la invitación) solo el origen; aceptado → revocado,
+cualquiera de los dos. Rechazado y revocado son finales.
+
+Esto solo establece el vínculo. Todavía no mueve ningún documento de
+negocio entre las dos organizaciones — eso, el directorio para colaborar en
+proyectos, el scoring y la gamificación son piezas que se construyen
+encima, no parte de esta.
+
 
 ## Tests
 

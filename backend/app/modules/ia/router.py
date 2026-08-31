@@ -12,6 +12,7 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.ia import documento, estadisticas, gemini, medicion, service
+from app.modules.ia.copiloto_router import router as copiloto_router
 from app.modules.ia.deepseek import DeepSeekError
 from app.modules.ia.gemini import GeminiError
 from app.modules.ia.models import LecturaPlano, SugerenciaPatron
@@ -34,6 +35,7 @@ from app.modules.presupuestos.presupuesto_schemas import LineaMedicionOut, Presu
 
 guard = Depends(require_module("ia"))
 router = APIRouter(prefix="/api/ia", tags=["ia"], dependencies=[guard])
+router.include_router(copiloto_router)
 
 
 def _detalle(sugerencia: SugerenciaPatron) -> SugerenciaDetalle:
@@ -96,7 +98,7 @@ async def solicitar_sugerencia(
     datos: SolicitarSugerencia,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+    _alcance: Alcance = Depends(require_permiso("ia", "crear")),
 ) -> SugerenciaDetalle:
     try:
         sugerencia = await service.solicitar_sugerencia(session, datos, principal)
@@ -141,7 +143,7 @@ async def crear_plantilla(
     datos: CrearPlantillaDesdeSugerencia,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("ia", "editar")),
+    alcance: Alcance = Depends(require_permiso("ia", "crear")),
 ) -> PresupuestoOut:
     await _sugerencia_propia(session, sugerencia_id, alcance, principal)
     try:
@@ -205,7 +207,7 @@ async def leer_plano(
     fichero: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    _alcance: Alcance = Depends(require_permiso("ia", "editar")),
+    _alcance: Alcance = Depends(require_permiso("ia", "crear")),
 ) -> LecturaPlanoDetalle:
     contenido = await fichero.read()
     try:

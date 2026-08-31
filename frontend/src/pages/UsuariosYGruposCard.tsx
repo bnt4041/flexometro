@@ -1,9 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Mail, Pencil, Plus, Power, Save, Trash2, UserMinus, UserPlus, X } from 'lucide-react'
 
+import { AvisosDeDestinatario } from '../components/AvisosDeDestinatario'
 import { Checkbox, ErrorNotice, Field, ModalPantalla } from '../components/ui'
 import type { Alcance, Grupo, ModuloDisponible, UsuarioKeycloak, UsuariosGruposAPI } from '../lib/api'
 import { useToast } from '../toast'
+
+/** Las cuatro acciones, en el mismo orden que `ACCIONES` del backend. */
+const ACCIONES: [keyof PermisosModulo, string][] = [
+  ['ver', 'Ver'],
+  ['editar', 'Modificar'],
+  ['crear', 'Crear'],
+  ['borrar', 'Borrar'],
+]
+
+type PermisosModulo = { ver: Alcance; editar: Alcance; crear: Alcance; borrar: Alcance }
+
+const PERMISO_VACIO: PermisosModulo = {
+  ver: 'ninguno',
+  editar: 'ninguno',
+  crear: 'ninguno',
+  borrar: 'ninguno',
+}
 
 const ETIQUETA_ALCANCE: Record<Alcance, string> = {
   ninguno: 'Ninguno',
@@ -400,6 +418,11 @@ function UsuarioEditarModal({
           </button>
         </div>
       </div>
+
+      <div className="card" style={{ padding: 'var(--sp-5)', marginTop: 'var(--sp-4)' }}>
+        <div className="form-section__title">Notificaciones</div>
+        <AvisosDeDestinatario usuarioSubject={usuario.id} />
+      </div>
     </ModalPantalla>
   )
 }
@@ -442,7 +465,7 @@ function GruposSeccion({
   return (
     <Seccion
       titulo="Grupos y permisos"
-      nota="Cada grupo da, por módulo, un alcance de lectura y otro de edición: ninguno, solo lo propio, o todo. Pertenecer a varios grupos nunca resta, solo puede ampliar."
+      nota="Cada grupo da, por módulo, qué puede ver, modificar, crear y borrar: nada, solo lo propio, o todo. Pertenecer a varios grupos nunca resta, solo puede ampliar."
       accion={{ etiqueta: 'Crear grupo', onClick: () => setCreando(true) }}
     >
       <ErrorNotice error={error} />
@@ -580,8 +603,8 @@ function GrupoGestionarModal({
   onClose: () => void
   onCambio: () => Promise<void>
 }) {
-  const [permisos, setPermisos] = useState<Record<string, { ver: Alcance; editar: Alcance }>>(
-    Object.fromEntries(modulos.map((m) => [m.code, { ver: 'ninguno', editar: 'ninguno' }])),
+  const [permisos, setPermisos] = useState<Record<string, PermisosModulo>>(
+    Object.fromEntries(modulos.map((m) => [m.code, PERMISO_VACIO])),
   )
   const [guardandoPermisos, setGuardandoPermisos] = useState(false)
   const [miembroId, setMiembroId] = useState('')
@@ -592,7 +615,15 @@ function GrupoGestionarModal({
     const actuales = Object.fromEntries(
       modulos.map((m) => {
         const existente = grupo.permisos.find((p) => p.module_code === m.code)
-        return [m.code, { ver: existente?.ver ?? 'ninguno', editar: existente?.editar ?? 'ninguno' }]
+        return [
+          m.code,
+          {
+            ver: existente?.ver ?? 'ninguno',
+            editar: existente?.editar ?? 'ninguno',
+            crear: existente?.crear ?? 'ninguno',
+            borrar: existente?.borrar ?? 'ninguno',
+          },
+        ]
       }),
     )
     setPermisos(actuales)
@@ -658,50 +689,48 @@ function GrupoGestionarModal({
           <thead>
             <tr>
               <th>Módulo</th>
-              <th>Ver</th>
-              <th>Editar</th>
+              {ACCIONES.map(([accion, etiqueta]) => (
+                <th key={accion}>{etiqueta}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {modulos.map((m) => (
               <tr key={m.code}>
                 <td>{m.name}</td>
-                <td>
-                  <select
-                    className="select"
-                    value={permisos[m.code]?.ver ?? 'ninguno'}
-                    onChange={(e) =>
-                      setPermisos((actual) => ({
-                        ...actual,
-                        [m.code]: { ...actual[m.code], ver: e.target.value as Alcance },
-                      }))
-                    }
-                  >
-                    {(['ninguno', 'propios', 'todos'] as Alcance[]).map((a) => (
-                      <option key={a} value={a}>
-                        {ETIQUETA_ALCANCE[a]}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="select"
-                    value={permisos[m.code]?.editar ?? 'ninguno'}
-                    onChange={(e) =>
-                      setPermisos((actual) => ({
-                        ...actual,
-                        [m.code]: { ...actual[m.code], editar: e.target.value as Alcance },
-                      }))
-                    }
-                  >
-                    {(['ninguno', 'propios', 'todos'] as Alcance[]).map((a) => (
-                      <option key={a} value={a}>
-                        {ETIQUETA_ALCANCE[a]}
-                      </option>
-                    ))}
-                  </select>
-                </td>
+                {ACCIONES.map(([accion]) => (
+                  <td key={accion}>
+                    <select
+                      className="select"
+                      value={permisos[m.code]?.[accion] ?? 'ninguno'}
+                      onChange={(e) =>
+                        setPermisos((actual) => ({
+                          ...actual,
+                          [m.code]: {
+                            ...(actual[m.code] ?? PERMISO_VACIO),
+                            [accion]: e.target.value as Alcance,
+                          },
+                        }))
+                      }
+                    >
+                      {/* En «crear» no hay medias tintas: lo que das de alta
+                          es tuyo, así que «sólo los míos» y «los de todos»
+                          serían lo mismo y confundirían. */}
+                      {(accion === 'crear'
+                        ? (['ninguno', 'todos'] as Alcance[])
+                        : (['ninguno', 'propios', 'todos'] as Alcance[])
+                      ).map((a) => (
+                        <option key={a} value={a}>
+                          {accion === 'crear'
+                            ? a === 'ninguno'
+                              ? 'No'
+                              : 'Sí'
+                            : ETIQUETA_ALCANCE[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -754,6 +783,11 @@ function GrupoGestionarModal({
           Añadir
         </button>
       </div>
+
+      <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 650, margin: 'var(--sp-5) 0 var(--sp-2)' }}>
+        Notificaciones
+      </h3>
+      <AvisosDeDestinatario grupoId={grupo.id} />
     </ModalPantalla>
   )
 }

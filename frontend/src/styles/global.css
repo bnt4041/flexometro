@@ -4088,3 +4088,311 @@ input[type='file'].input {
   border-top: 2px solid var(--c-border);
   background: var(--c-surface-2);
 }
+
+/* ── Copiloto ─────────────────────────────────────────────────────────
+   Panel acoplado a la esquina inferior derecha, por encima de todo menos
+   de los modales: se consulta MIENTRAS se trabaja, no en vez de trabajar.
+   En móvil ocupa la pantalla, porque a 360 px un panel de 380 no cabe al
+   lado de nada. */
+.copiloto__lanzador {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: none;
+  border-radius: 50%;
+  background: var(--c-primary);
+  color: var(--c-primary-contrast);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.copiloto__lanzador:hover {
+  background: var(--c-primary-hover);
+}
+
+.copiloto {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - var(--sp-6));
+  height: 560px;
+  max-height: calc(100vh - var(--sp-6));
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  box-shadow: var(--shadow);
+}
+
+.copiloto__cabecera {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.copiloto__titulo {
+  flex: 1;
+  font-weight: 600;
+}
+
+.copiloto__cerrar {
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.copiloto__hilo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  overflow-y: auto;
+}
+
+.copiloto__bienvenida {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.copiloto__sugerencia {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.copiloto__sugerencia:hover {
+  border-color: var(--c-border-strong);
+}
+
+.copiloto__msg {
+  max-width: 88%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.copiloto__msg--mio {
+  align-self: flex-end;
+  background: var(--c-primary);
+  color: var(--c-primary-contrast);
+}
+
+.copiloto__msg--pensando {
+  color: var(--c-text-subtle);
+  font-style: italic;
+}
+
+/* La propuesta se distingue del hilo a propósito: es lo único que puede
+   cambiar datos, y tiene que verse que no es una respuesta más. */
+.copiloto__propuesta {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-accent-strong);
+  border-radius: var(--radius);
+  background: var(--c-accent-soft);
+  color: var(--c-text);
+  font-size: var(--fs-sm);
+}
+
+.copiloto__campos {
+  margin: var(--sp-2) 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.copiloto__campos div {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.copiloto__campos dt {
+  min-width: 90px;
+  color: var(--c-text-muted);
+}
+
+.copiloto__campos dd {
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.copiloto__aviso {
+  margin: 0 0 var(--sp-2);
+  color: var(--c-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.copiloto__acciones {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.copiloto__error {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+  font-size: var(--fs-sm);
+}
+
+.copiloto__pie {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.copiloto__pie .input {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .copiloto {
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+}
+
+/* ── Planos ───────────────────────────────────────────────────────────
+   El visor manda: la barra y el panel se quedan quietos y solo el plano
+   hace scroll, porque al ampliar una lámina A1 al 400 % se pierde el
+   norte si además se va la barra de herramientas. */
+.plano {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  height: 100%;
+  min-height: 0;
+}
+
+.plano__barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.plano__separador {
+  flex: 1;
+}
+
+.plano__ayuda {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.plano__cuerpo {
+  display: flex;
+  flex: 1;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.plano__visor {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  /* Un cuadriculado tenue detrás: sin él, un plano con fondo blanco y otro
+     transparente parecen el mismo y no se ve dónde acaba la hoja. */
+  background: var(--c-surface-2);
+}
+
+.plano__panel {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.lienzo {
+  position: relative;
+  /* Ancho controlado por el zoom desde el componente. `min-width: 100%`
+     evita que un plano muy apaisado quede flotando en el hueco. */
+  min-width: 100%;
+}
+
+.lienzo__fondo {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+.lienzo__capa {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.lienzo__error {
+  padding: var(--sp-4);
+  color: var(--c-danger);
+}
+
+.plano__capa {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.plano__capa input[type='color'] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: none;
+}
+
+.plano__capa--activa {
+  font-weight: 600;
+}
+
+.plano__medicion--activa {
+  background: var(--c-accent-soft);
+}
+
+@media (max-width: 900px) {
+  .plano__cuerpo {
+    flex-direction: column;
+  }
+
+  .plano__panel {
+    width: auto;
+  }
+}

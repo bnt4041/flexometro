@@ -86,7 +86,7 @@ async def crear_tarea(
     obra_id: uuid.UUID,
     datos: TareaCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> TareaOut:
     obra = await service.obtener_obra(session, obra_id)
     if obra is None:
@@ -168,7 +168,7 @@ async def eliminar_tarea(
     tarea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    alcance: Alcance = Depends(require_permiso("obras", "borrar")),
 ) -> None:
     tarea = await _tarea_o_404(session, tarea_id)
     verificar_propiedad(alcance, principal, tarea.creado_por_subject)

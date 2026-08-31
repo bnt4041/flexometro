@@ -198,3 +198,36 @@ class Notificacion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base)
     mapa_lineas: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # Cuándo se le devolvió la oferta al emisor.
     enviada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Favorito(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
+    """Una página que alguien quiere tener a mano.
+
+    Va en base de datos y no en el navegador a propósito: en una obra se
+    entra desde la oficina, desde el portátil y desde el móvil, y unos
+    favoritos que solo existen en un equipo son un cajón que hay que volver
+    a llenar en cada sitio.
+
+    `ruta` es la del frontend (`/obras/<id>`), no un endpoint. Se guarda como
+    texto y sin FK a nada: apunta a lo que sea —un listado, un detalle, un
+    filtro— y si ese objeto desaparece, el favorito lleva a un 404 normal.
+    Validar aquí que la ruta siga existiendo obligaría a que este módulo
+    conociera las rutas de todos los demás.
+    """
+
+    __tablename__ = "favorito"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "usuario_subject", "ruta", name="favorito_unique"
+        ),
+        Index("ix_core_favorito_usuario", "organization_id", "usuario_subject"),
+        {"schema": "core"},
+    )
+
+    usuario_subject: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: Lo que se enseña en el menú. Editable: el título de la página puede ser
+    #: larguísimo y quien lo guarda sabe mejor cómo quiere llamarlo.
+    etiqueta: Mapped[str] = mapped_column(String(120), nullable=False)
+    ruta: Mapped[str] = mapped_column(String(400), nullable=False)
+    #: Para ordenarlos a mano. Empatados, manda el más reciente.
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

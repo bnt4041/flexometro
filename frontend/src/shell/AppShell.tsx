@@ -6,7 +6,6 @@ import {
   Building2,
   ChevronLeft,
   ChevronRight,
-  LogOut,
   Menu,
   Receipt,
   Settings,
@@ -15,6 +14,9 @@ import {
   Users,
 } from 'lucide-react'
 
+import { Copiloto } from '../components/Copiloto'
+import { EstadoConexion } from '../components/EstadoConexion'
+import { MenuUsuario } from './MenuUsuario'
 import { Campana } from '../components/Campana'
 import logoOscuro from '../assets/logo-sobre-oscuro.png'
 import { Icon } from '../components/Icon'
@@ -61,11 +63,29 @@ export function AppShell({ children }: { children: ReactNode }) {
       gruposPorTitulo.get(titulo)!.items.push({ item, codigoModulo: module.code })
     }
   }
-  const grupos = [...gruposPorTitulo.values()].filter((g) => g.items.length > 0)
   const varias = (principal?.organizaciones.length ?? 0) > 1
   const esSuperadmin = principal?.roles.includes('superadmin') ?? false
   const esAdminOrganizacion =
     (principal?.roles.includes('admin') ?? false) && principal?.organization_id != null
+
+  // "Organización" es una sección MIXTA: la mayoría de sus enlaces vienen de
+  // módulos (banco de precios, personal, PRL, recursos) y uno —usuarios y
+  // grupos— no es de ningún módulo, es de la propia aplicación. Antes se
+  // pintaba aparte y salían DOS cabeceras «Organización» seguidas, con lo que
+  // los enlaces de módulo parecían perdidos. Se reserva aquí el grupo para
+  // que exista aunque ningún módulo aporte nada, y el enlace suelto se añade
+  // al final de ese mismo grupo al renderizar.
+  const etiquetaOrganizacion = t('nav.grupoOrganizacion')
+  if (esAdminOrganizacion && !gruposPorTitulo.has(etiquetaOrganizacion)) {
+    gruposPorTitulo.set(etiquetaOrganizacion, {
+      titulo: etiquetaOrganizacion,
+      items: [],
+      moduloAjustes: null,
+    })
+  }
+  const grupos = [...gruposPorTitulo.values()].filter(
+    (g) => g.items.length > 0 || (esAdminOrganizacion && g.titulo === etiquetaOrganizacion),
+  )
 
   // El menú es un cajón que se superpone en pantallas estrechas (no reduce el
   // ancho del contenido), y una barra lateral fija a partir de la anchura de
@@ -124,23 +144,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {item.label}
                 </NavLink>
               ))}
+              {/* Enlace propio de la aplicación, no de ningún módulo: cierra
+                  la sección "Organización" en vez de abrir una segunda. */}
+              {esAdminOrganizacion && grupo.titulo === etiquetaOrganizacion && (
+                <NavLink
+                  to="/usuarios-grupos"
+                  className={({ isActive }) =>
+                    isActive ? 'nav__link nav__link--active' : 'nav__link'
+                  }
+                >
+                  <UserCog size={16} aria-hidden="true" />
+                  {t('nav.usuariosYGrupos')}
+                </NavLink>
+              )}
             </div>
           ))}
-
-          {esAdminOrganizacion && (
-            <div>
-              <div className="nav__group-label">{t('nav.grupoOrganizacion')}</div>
-              <NavLink
-                to="/usuarios-grupos"
-                className={({ isActive }) =>
-                  isActive ? 'nav__link nav__link--active' : 'nav__link'
-                }
-              >
-                <UserCog size={16} aria-hidden="true" />
-                {t('nav.usuariosYGrupos')}
-              </NavLink>
-            </div>
-          )}
 
           {esSuperadmin && (
             <div>
@@ -240,17 +258,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="topbar__usuario">
             <Campana />
-            <span className="muted topbar__usuario-nombre">{principal?.username ?? 'sin sesión'}</span>
-            {principal?.roles.includes('admin') && <span className="badge">admin</span>}
-            <Tooltip texto={t('nav.salir')}>
-              <button className="btn btn--sm" onClick={salir}>
-                <LogOut size={14} aria-hidden="true" />
-                {t('nav.salir')}
-              </button>
-            </Tooltip>
+            <MenuUsuario
+              nombre={principal?.username ?? 'sin sesión'}
+              esAdmin={principal?.roles.includes('admin') ?? false}
+              onSalir={salir}
+            />
           </div>
         </header>
         <main className="content">{children}</main>
+        <EstadoConexion />
+        <Copiloto />
       </div>
     </div>
   )

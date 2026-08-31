@@ -104,7 +104,7 @@ async def listar(
 async def crear(
     datos: ConceptoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> ConceptoDetalle:
     try:
         concepto = await service.crear_concepto(session, datos)
@@ -165,7 +165,7 @@ async def eliminar(
     concepto_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     existente = await service.obtener_concepto(session, concepto_id)
     if existente is None:
@@ -246,7 +246,7 @@ async def anadir_linea(
     datos: LineaCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> LineaOut:
     padre = await service.obtener_concepto(session, concepto_id)
     if padre is None:
@@ -296,7 +296,7 @@ async def eliminar_linea(
     linea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _verificar_propiedad_linea(session, linea_id, alcance, principal)
     await service.eliminar_linea(session, linea_id)
@@ -321,7 +321,7 @@ async def listar_familias(
 async def crear_familia(
     datos: FamiliaCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> FamiliaOut:
     try:
         familia = await service.crear_familia(session, datos)
@@ -351,7 +351,7 @@ async def eliminar_familia(
     familia_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     existente = await service.obtener_familia(session, familia_id)
     if existente is None:
@@ -373,7 +373,7 @@ async def crear_suministro(
     datos: PrecioSuministroCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PrecioSuministroOut:
     concepto = await service.obtener_concepto(session, concepto_id)
     if concepto is None:
@@ -423,7 +423,7 @@ async def eliminar_suministro(
     suministro_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _verificar_propiedad_suministro(session, suministro_id, alcance, principal)
     await service.eliminar_suministro(session, suministro_id)
@@ -474,7 +474,7 @@ async def fichas_banco(
 async def crear_capitulo_banco(
     datos: CapituloBancoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> CapituloBancoOut:
     try:
         capitulo = await banco_service.crear_capitulo(session, datos)
@@ -507,7 +507,7 @@ async def actualizar_capitulo_banco(
 async def eliminar_capitulo_banco(
     capitulo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     try:
         encontrado = await banco_service.eliminar_capitulo(session, capitulo_id)

@@ -66,6 +66,22 @@ RUTAS_PUBLICAS_PERMITIDAS = frozenset(
         # a la clave de Gemini del .env — limitada por IP en vez de por enlace.
         "/api/publico/testmeter/escala",
         "/api/publico/testmeter/planta",
+        # Firma de un documento por un tercero sin cuenta (módulo `prl`).
+        # Mismo mecanismo que la separata: el token de la URL es lo único que
+        # autoriza, y se resuelve en `prl/firma.py:acceso_firma`.
+        "/api/publico/firma/{token}",
+        # El PDF que hay que firmar, cuando el origen es un fichero: quien
+        # firma no tiene sesión y la descarga normal sí la exige.
+        "/api/publico/firma/{token}/documento",
+        # Segundo factor: manda un código al correo del DESTINATARIO (nunca
+        # a uno que venga en la petición), así que tener el enlace no basta.
+        "/api/publico/firma/{token}/codigo",
+        "/api/publico/firma/{token}/firmar",
+        "/api/publico/firma/{token}/rechazar",
+        # Disparo de una automatización desde otro sistema. El token de la
+        # URL es lo único que autoriza, y su hash es único: identifica el
+        # flujo Y la organización en la que corre.
+        "/api/publico/automatizacion/{token}",
     }
 )
 

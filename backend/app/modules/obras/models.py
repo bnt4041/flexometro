@@ -14,13 +14,14 @@ partida, un registro día a día que se acumula en un coste materializado.
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
     Date,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -28,12 +29,19 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import enum_column
-from app.core.models import AutoriaMixin, Base, OrganizationMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.core.models import (
+    AutoriaMixin,
+    Base,
+    OrganizationMixin,
+    TimestampMixin,
+    UUIDPrimaryKeyMixin,
+)
 
 SCHEMA = "obras"
 
@@ -92,6 +100,13 @@ class Obra(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin,
         nullable=True,
     )
 
+    #: Desde cuándo está en el estado actual. `updated_at` no vale para esto:
+    #: cambia al tocar cualquier campo, así que una obra parada de la que se
+    #: corrige el teléfono parecería recién movida. Lo usa la vigilancia de
+    #: «obra estancada».
+    estado_desde: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     estado: Mapped[EstadoObra] = mapped_column(
         enum_column(EstadoObra, "estado_obra"), nullable=False, default=EstadoObra.PLANIFICADA
     )
@@ -388,8 +403,41 @@ class Tarea(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin
     completada_en: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
+class TipoContratoLaboral(StrEnum):
+    """Los que de verdad cambian el tratamiento en obra. No pretende cubrir
+    todas las claves de contrato del SEPE: para eso está `notas`."""
+
+    INDEFINIDO = "indefinido"
+    TEMPORAL = "temporal"
+    FIJO_DISCONTINUO = "fijo_discontinuo"
+    OBRA_Y_SERVICIO = "obra_y_servicio"
+    FORMACION = "formacion"
+    PRACTICAS = "practicas"
+    AUTONOMO = "autonomo"
+    OTRO = "otro"
+
+
+class AptitudMedica(StrEnum):
+    """Resultado de la vigilancia de la salud (art. 22 Ley 31/1995). Se guarda
+    el VEREDICTO, nunca el dato médico: el resultado clínico es información
+    sensible que la empresa no puede tratar — solo si es apto o no."""
+
+    APTO = "apto"
+    APTO_CON_RESTRICCIONES = "apto_con_restricciones"
+    NO_APTO = "no_apto"
+    PENDIENTE = "pendiente"
+
+
 class Personal(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMixin, Base):
-    """Un trabajador propio de la organización."""
+    """Un trabajador propio de la organización, con su ficha laboral y de PRL.
+
+    Sobre los datos personales que hay aquí: son los mínimos que exige la
+    normativa laboral y de prevención (identificación para el parte de
+    accidente, NAF para la Seguridad Social, aptitud médica para saber si
+    puede subir a un andamio). Deliberadamente NO hay diagnóstico médico ni
+    ningún dato de salud más allá del veredicto de aptitud — eso es categoría
+    especial del art. 9 RGPD y la empresa no puede tratarlo.
+    """
 
     __tablename__ = "personal"
     __table_args__ = (
@@ -411,6 +459,63 @@ class Personal(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, AutoriaMi
     )
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Identificación ──────────────────────────────────────────────────
+    nif: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fecha_nacimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nacionalidad: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    direccion: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    codigo_postal: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    poblacion: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provincia: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    # ── Contacto en caso de emergencia ──────────────────────────────────
+    # Obligado en la práctica: si hay un accidente en obra hay que poder
+    # avisar a alguien sin buscar el teléfono en la cartera del accidentado.
+    contacto_emergencia: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    telefono_emergencia: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # ── Laboral ─────────────────────────────────────────────────────────
+    #: Número de afiliación a la Seguridad Social.
+    naf: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
+    tipo_contrato: Mapped[TipoContratoLaboral | None] = mapped_column(
+        enum_column(TipoContratoLaboral, "tipo_contrato_laboral"), nullable=True
+    )
+    fecha_alta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Cuándo termina el contrato temporal. Vacío en un indefinido.
+    fecha_fin_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_baja: Mapped[date | None] = mapped_column(Date, nullable=True)
+    grupo_cotizacion: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    convenio: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    jornada_horas_semana: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    salario_bruto_anual: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+    # ── PRL ─────────────────────────────────────────────────────────────
+    #: Tarjeta Profesional de la Construcción (Ley 32/2006 y convenio del
+    #: sector). Sin ella no se puede acceder a muchas obras.
+    tpc_numero: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tpc_caducidad: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Formación en prevención (art. 19): las 20 h de oficio o las 60 h de
+    #: directivo del convenio de construcción.
+    formacion_prl_horas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    formacion_prl_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Vigilancia de la salud (art. 22). Solo el veredicto — ver el docstring.
+    aptitud_medica: Mapped[AptitudMedica | None] = mapped_column(
+        enum_column(AptitudMedica, "aptitud_medica"), nullable=True
+    )
+    fecha_reconocimiento_medico: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Cuándo toca el siguiente. Es lo que alimenta el aviso de caducidad.
+    proximo_reconocimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Art. 17: hay que poder acreditar que se entregaron.
+    epis_entregados: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fecha_entrega_epis: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Art. 18: información de los riesgos de su puesto.
+    informacion_riesgos_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Designado recurso preventivo (RD 604/2006) para presencia en obra.
+    es_recurso_preventivo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class Asignacion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):

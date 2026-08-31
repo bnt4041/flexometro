@@ -4,10 +4,65 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.modules.obras.models import EstadoObra, EstadoTarea, PrioridadTarea, TipoVinculo
+from app.modules.obras.models import (
+    AptitudMedica,
+    EstadoObra,
+    EstadoTarea,
+    PrioridadTarea,
+    TipoContratoLaboral,
+    TipoVinculo,
+)
 
 
-class PersonalBase(BaseModel):
+class PersonalFichaMixin(BaseModel):
+    """Ficha laboral y de PRL, aparte de los cuatro campos de siempre para que
+    se vea de un golpe qué es identificación, qué es contrato y qué es
+    prevención. Todo opcional: hay plantillas ya cargadas que no pueden
+    rellenar esto de golpe, y el módulo PRL avisa de lo que falta en vez de
+    impedir guardar.
+
+    Nada de datos de salud más allá de `aptitud_medica` (apto / no apto): el
+    resultado clínico es categoría especial del art. 9 RGPD."""
+
+    # Identificación
+    nif: str | None = Field(default=None, max_length=20)
+    fecha_nacimiento: date | None = None
+    nacionalidad: str | None = Field(default=None, max_length=60)
+    telefono: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=200)
+    direccion: str | None = Field(default=None, max_length=200)
+    codigo_postal: str | None = Field(default=None, max_length=10)
+    poblacion: str | None = Field(default=None, max_length=120)
+    provincia: str | None = Field(default=None, max_length=80)
+    # Emergencia
+    contacto_emergencia: str | None = Field(default=None, max_length=160)
+    telefono_emergencia: str | None = Field(default=None, max_length=40)
+    # Laboral
+    naf: str | None = Field(default=None, max_length=20)
+    iban: str | None = Field(default=None, max_length=34)
+    tipo_contrato: TipoContratoLaboral | None = None
+    fecha_alta: date | None = None
+    fecha_fin_contrato: date | None = None
+    fecha_baja: date | None = None
+    grupo_cotizacion: str | None = Field(default=None, max_length=10)
+    convenio: str | None = Field(default=None, max_length=120)
+    jornada_horas_semana: Decimal | None = Field(default=None, ge=0, le=168)
+    salario_bruto_anual: Decimal | None = Field(default=None, ge=0)
+    # PRL
+    tpc_numero: str | None = Field(default=None, max_length=40)
+    tpc_caducidad: date | None = None
+    formacion_prl_horas: int | None = Field(default=None, ge=0, le=2000)
+    formacion_prl_fecha: date | None = None
+    aptitud_medica: AptitudMedica | None = None
+    fecha_reconocimiento_medico: date | None = None
+    proximo_reconocimiento: date | None = None
+    epis_entregados: str | None = None
+    fecha_entrega_epis: date | None = None
+    informacion_riesgos_fecha: date | None = None
+    es_recurso_preventivo: bool = False
+
+
+class PersonalBase(PersonalFichaMixin):
     nombre: str = Field(min_length=1, max_length=120)
     apellidos: str | None = Field(default=None, max_length=160)
     categoria: str | None = Field(default=None, max_length=60)
@@ -20,7 +75,7 @@ class PersonalCreate(PersonalBase):
     codigo: str | None = Field(default=None, max_length=32)
 
 
-class PersonalUpdate(BaseModel):
+class PersonalUpdate(PersonalFichaMixin):
     model_config = ConfigDict(extra="forbid")
 
     nombre: str | None = Field(default=None, min_length=1, max_length=120)
@@ -29,6 +84,9 @@ class PersonalUpdate(BaseModel):
     coste_hora: Decimal | None = Field(default=None, ge=0)
     activo: bool | None = None
     notas: str | None = None
+    # Se redeclara sin el `False` por defecto de la ficha: en un PATCH parcial
+    # un valor por defecto apagaría la marca sin que nadie la tocara.
+    es_recurso_preventivo: bool | None = None
 
 
 class PersonalOut(PersonalBase):

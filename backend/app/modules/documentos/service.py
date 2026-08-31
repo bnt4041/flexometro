@@ -26,6 +26,13 @@ _TABLA_POR_ENTIDAD: dict[EntidadDocumento, tuple[str, str]] = {
     EntidadDocumento.CONTRATO: ("contratos.contrato", "codigo"),
     EntidadDocumento.ALBARAN: ("compras.albaran", "codigo"),
     EntidadDocumento.FACTURA_RECIBIDA: ("compras.factura_recibida", "codigo"),
+    EntidadDocumento.PERSONAL: ("obras.personal", "codigo"),
+    EntidadDocumento.RECURSO: ("prl.recurso", "codigo"),
+    EntidadDocumento.SOLICITUD_FIRMA: ("prl.solicitud_firma", "codigo"),
+    # `PRL_EMPRESA` no aparece a propósito: su `entidad_id` es la propia
+    # organización, y `core.organization` no tiene `organization_id` con el
+    # que filtrar. Se queda sin código, que es lo correcto — no cuelga de
+    # ninguna ficha.
 }
 
 
@@ -113,10 +120,18 @@ async def buscar_documentos(
 
     codigos: dict[tuple[EntidadDocumento, uuid.UUID], str] = {}
     for entidad, ids in ids_por_entidad.items():
+        # `.get()` y no `[...]`: un tipo de entidad sin tabla asociada (o uno
+        # nuevo que se añada al enum y se olvide aquí) tiene que dejar el
+        # documento SIN código, no tumbar la búsqueda entera. Pasó al añadir
+        # el módulo PRL: un solo documento de un tipo no mapeado rompía el
+        # buscador para todos los demás.
+        mapeo = _TABLA_POR_ENTIDAD.get(entidad)
+        if mapeo is None:
+            continue
         # `tabla`/`columna` salen del diccionario fijo de arriba, nunca de
         # `q` ni de ningún dato de entrada: no hay inyección posible al
         # interpolarlos.
-        tabla, columna = _TABLA_POR_ENTIDAD[entidad]
+        tabla, columna = mapeo
         filas_codigo = await session.execute(
             text(f"SELECT id, {columna} FROM {tabla} WHERE id = ANY(:ids) AND organization_id = :org_id"),
             {"ids": list(ids), "org_id": org_id},
@@ -125,3 +140,56 @@ async def buscar_documentos(
             codigos[(entidad, entidad_id)] = codigo
 
     return [(d, codigos.get((d.entidad, d.entidad_id))) for d in documentos]
+
+
+async def arbol_documentos(
+    session: AsyncSession, *, content_type: str | None = None, limite: int = 500
+) -> list[tuple[EntidadDocumento, uuid.UUID, str | None, list[Documento]]]:
+    """La biblioteca agrupada por ficha de origen, para poder NAVEGARLA en vez
+    de tener que acertar el nombre en el buscador.
+
+    Devuelve `(entidad, entidad_id, código, documentos)`. La agrupación se
+    hace aquí y no en el cliente porque el código de cada ficha solo se puede
+    resolver con una consulta por tipo de entidad — igual que en
+    `buscar_documentos`, cuya lógica de resolución se reutiliza."""
+    org_id = require_organization_id()
+    filtros = [Documento.organization_id == org_id]
+    if content_type:
+        filtros.append(Documento.content_type == content_type)
+    documentos = list(
+        (
+            await session.execute(
+                select(Documento).where(*filtros).order_by(Documento.created_at.desc()).limit(limite)
+            )
+        ).scalars()
+    )
+    if not documentos:
+        return []
+
+    ids_por_entidad: dict[EntidadDocumento, set[uuid.UUID]] = {}
+    for documento in documentos:
+        ids_por_entidad.setdefault(documento.entidad, set()).add(documento.entidad_id)
+
+    codigos: dict[tuple[EntidadDocumento, uuid.UUID], str] = {}
+    for entidad, ids in ids_por_entidad.items():
+        mapeo = _TABLA_POR_ENTIDAD.get(entidad)
+        if mapeo is None:
+            continue
+        tabla, columna = mapeo
+        filas = await session.execute(
+            text(
+                f"SELECT id, {columna} FROM {tabla} WHERE id = ANY(:ids) AND organization_id = :org_id"
+            ),
+            {"ids": list(ids), "org_id": org_id},
+        )
+        for entidad_id, codigo in filas:
+            codigos[(entidad, entidad_id)] = codigo
+
+    grupos: dict[tuple[EntidadDocumento, uuid.UUID], list[Documento]] = {}
+    for documento in documentos:
+        grupos.setdefault((documento.entidad, documento.entidad_id), []).append(documento)
+
+    return [
+        (entidad, entidad_id, codigos.get((entidad, entidad_id)), docs)
+        for (entidad, entidad_id), docs in grupos.items()
+    ]

@@ -10,6 +10,9 @@ SPEC = ModuleSpec(
     depends_on=("presupuestos", "ia"),
     nav=(
         NavItem(label="Obras", path="/obras", icon="hard-hat"),
-        NavItem(label="Personal", path="/personal", icon="users"),
+        # La plantilla es de la empresa, no de una obra concreta: vive con el
+        # resto de lo que describe a la organización (banco de precios, PRL,
+        # recursos) y no bajo "Obras", que es ejecución.
+        NavItem(label="Personal", path="/personal", icon="users", section="Organización"),
     ),
 )

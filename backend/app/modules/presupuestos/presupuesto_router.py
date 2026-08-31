@@ -11,50 +11,46 @@ from app.core.enums import Alcance
 from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
-from app.modules.presupuestos import exportador_excel, formulas
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
+from app.modules.core.tenant_utils import cuenta_id_del_principal
+from app.modules.presupuestos import exportador_excel, formulas, sustitucion_service, versionado
 from app.modules.presupuestos import presupuesto_calculo as calc
 from app.modules.presupuestos import presupuesto_service as service
 from app.modules.presupuestos import service as banco_service
-from app.modules.presupuestos import sustitucion_service
-from app.modules.presupuestos import versionado
 from app.modules.presupuestos.models import NaturalezaConcepto
 from app.modules.presupuestos.models_presupuesto import (
     EstadoPresupuesto,
     Presupuesto,
     TipoPresupuesto,
 )
-from app.modules.core import auditoria_service
-from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.core.tenant_utils import cuenta_id_del_principal
-from app.modules.presupuestos.schemas import ConceptoCreate
 from app.modules.presupuestos.presupuesto_schemas import (
     AplicarCapituloConComponentesIA,
     AplicarPropuestaIA,
     BuscarSustitutosIn,
-    CambioOut,
-    CapituloCreate,
-    CapituloUpdate,
     CambioNaturalezaComponente,
+    CambioOut,
     CambioPrecioComponente,
     CambioRendimientoComponente,
     CambioResumenComponente,
     CambioUnidadComponente,
+    CapituloCreate,
+    CapituloUpdate,
     ComparacionOut,
     ComponenteNuevo,
     ConvertirLinea,
+    CopiarPresupuesto,
     DescomposicionPartidaOut,
     FormulaMedicionCreate,
     FormulaMedicionOut,
     FormulaMedicionUpdate,
-    ProbarFormulaIn,
-    ProbarFormulaOut,
     GuardarComoPlantilla,
-    LineaDescomposicionOut,
-    CopiarPresupuesto,
     InstanciarPlantilla,
+    LineaDescomposicionOut,
     LineaMedicionCreate,
     LineaMedicionOut,
     LineaMedicionUpdate,
+    LineaReajusteOut,
     LoteLineas,
     PartidaCreate,
     PartidaDetalle,
@@ -68,18 +64,20 @@ from app.modules.presupuestos.presupuesto_schemas import (
     PresupuestoDetalle,
     PresupuestoOut,
     PresupuestoResumen,
-    ResultadoPegado,
     PresupuestoUpdate,
-    LineaReajusteOut,
+    ProbarFormulaIn,
+    ProbarFormulaOut,
     ReajusteIn,
     ReajusteOut,
     RecursosPresupuesto,
     ResultadoCambioPrecio,
+    ResultadoPegado,
     ResultadoSincronizacion,
     SustituirPartidaIn,
     SustitutoCandidatoOut,
     VersionOut,
 )
+from app.modules.presupuestos.schemas import ConceptoCreate
 
 guard = Depends(require_module("presupuestos"))
 
@@ -143,7 +141,7 @@ async def listar(
 async def crear(
     datos: PresupuestoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PresupuestoOut:
     try:
         presupuesto = await service.crear(session, datos)
@@ -205,7 +203,7 @@ async def aplicar_propuesta_ia(
     datos: AplicarPropuestaIA,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> dict:
     """Crea el capítulo + partidas que la IA propuso al leer un documento
     (Fase 39/41) en un solo paso, y deja constancia en el historial —
@@ -258,7 +256,7 @@ async def aplicar_capitulo_ia(
     datos: AplicarCapituloConComponentesIA,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> dict:
     """Como `aplicar_propuesta_ia`, pero para partidas con descompuesto real
     (Fase 42: "Ayuda con IA" proponiendo una fase de obra entera) en vez de
@@ -538,7 +536,7 @@ async def eliminar(
     presupuesto_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     await service.eliminar(session, presupuesto_id)
@@ -574,7 +572,7 @@ async def crear_capitulo(
     datos: CapituloCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> dict:
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     capitulo = await service.crear_capitulo(session, presupuesto_id, datos)
@@ -639,7 +637,7 @@ async def eliminar_capitulo(
     capitulo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     await service.eliminar_capitulo(session, capitulo_id)
@@ -657,7 +655,7 @@ async def crear_partida(
     datos: PartidaCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PartidaOut:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     try:
@@ -756,7 +754,7 @@ async def eliminar_partida(
     partida_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _partida_propia(session, partida_id, alcance, principal)
     await service.eliminar_partida(session, partida_id)
@@ -820,7 +818,7 @@ async def anadir_componente(
     datos: ComponenteNuevo,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> DescomposicionPartidaOut:
     """Añade un componente al descompuesto de la partida, independizándola del
     banco de precios si aún lo heredaba (Fase 34)."""
@@ -867,7 +865,7 @@ async def quitar_componente(
     linea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> DescomposicionPartidaOut:
     await _partida_propia(session, partida_id, alcance, principal)
     if not await service.quitar_componente(session, partida_id, linea_id):
@@ -1031,7 +1029,7 @@ async def crear_linea(
     datos: LineaMedicionCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> LineaMedicionOut:
     await _partida_propia(session, partida_id, alcance, principal)
     linea = await service.crear_linea(session, partida_id, datos)
@@ -1087,7 +1085,7 @@ async def eliminar_linea(
     linea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     await _linea_medicion_propia(session, linea_id, alcance, principal)
     await service.eliminar_linea(session, linea_id)
@@ -1134,7 +1132,7 @@ async def nueva_version(
     presupuesto_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PresupuestoOut:
     """Duplica el presupuesto como versión siguiente, en borrador y con los
     precios sueltos otra vez."""
@@ -1207,7 +1205,7 @@ async def guardar_como_plantilla(
     datos: GuardarComoPlantilla,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PresupuestoOut:
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
     try:
@@ -1234,7 +1232,7 @@ async def instanciar(
     plantilla_id: uuid.UUID,
     datos: InstanciarPlantilla,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PresupuestoOut:
     """Crea un presupuesto nuevo con la estructura de la plantilla.
 
@@ -1268,7 +1266,7 @@ async def copiar(
     datos: CopiarPresupuesto,
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
-    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> PresupuestoOut:
     """Duplica el presupuesto, aquí mismo o en otra empresa de la cuenta."""
     await _presupuesto_propio(session, presupuesto_id, alcance, principal)
@@ -1359,7 +1357,7 @@ async def crear_formula(
     datos: FormulaMedicionCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "crear")),
 ) -> FormulaMedicionOut:
     cuenta_id = await cuenta_id_del_principal(session, principal)
     try:
@@ -1412,7 +1410,7 @@ async def eliminar_formula(
     formula_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    _alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("presupuestos", "borrar")),
 ) -> None:
     cuenta_id = await cuenta_id_del_principal(session, principal)
     if not await service.eliminar_formula(session, cuenta_id, formula_id):

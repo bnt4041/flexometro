@@ -57,7 +57,7 @@ async def listar(
 async def crear(
     datos: ContratoCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("contratos", "editar")),
+    _alcance: Alcance = Depends(require_permiso("contratos", "crear")),
 ) -> ContratoOut:
     try:
         contrato = await service.crear(session, datos)
@@ -133,7 +133,7 @@ async def eliminar(
     contrato_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("contratos", "editar")),
+    alcance: Alcance = Depends(require_permiso("contratos", "borrar")),
 ) -> None:
     await _contrato_propio(session, contrato_id, alcance, principal)
     await service.eliminar(session, contrato_id)

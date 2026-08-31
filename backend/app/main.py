@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,7 +36,42 @@ async def lifespan(app: FastAPI):
         await asegurar_plantillas_sistema()
     except Exception:
         logger.warning("No se pudieron preparar las plantillas de sistema", exc_info=True)
-    yield
+
+    # Catálogo de avisos y su latido. La tarea se guarda para poder pararla
+    # al apagar: sin eso, un reinicio en caliente dejaría dos evaluando.
+    from app.modules.notificaciones import vigilancia
+    from app.modules.notificaciones.eventos import registrar_catalogo_inicial
+
+    registrar_catalogo_inicial()
+
+    from app.modules.automatizaciones import nodos as nodos_automatizacion
+    from app.modules.automatizaciones import service as automatizaciones
+    from app.modules.desarrolladores import webhooks
+
+    nodos_automatizacion.registrar_catalogo_inicial()
+
+    from app.modules.importador.destinos import registrar_catalogo_inicial as _destinos
+
+    _destinos()
+
+    from app.modules.informes.fuentes import registrar_catalogo_inicial as _fuentes
+
+    _fuentes()
+
+    tareas = [
+        asyncio.create_task(vigilancia.bucle()),
+        asyncio.create_task(webhooks.bucle()),
+        asyncio.create_task(automatizaciones.bucle()),
+    ]
+
+    try:
+        yield
+    finally:
+        for tarea in tareas:
+            tarea.cancel()
+        for tarea in tareas:
+            with suppress(asyncio.CancelledError):
+                await tarea
 
 
 def _verificar_rutas_publicas(app: FastAPI) -> None:

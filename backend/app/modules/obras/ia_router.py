@@ -19,7 +19,8 @@ from app.modules.ia import documento as ia_documento
 from app.modules.ia.documento import DocumentoInvalido
 from app.modules.ia.gemini import GeminiError
 from app.modules.ia.schemas import MensajeConversacionIn, RespuestaDocumento
-from app.modules.obras import arbol_service, ia_documento as obra_ia_documento, service
+from app.modules.obras import arbol_service, service
+from app.modules.obras import ia_documento as obra_ia_documento
 from app.modules.obras.schemas import (
     AplicarMedicionesIAObra,
     AplicarPropuestaIAObra,
@@ -83,7 +84,7 @@ async def aplicar_propuesta_ia(
     obra_id: uuid.UUID,
     datos: AplicarPropuestaIAObra,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("obras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("obras", "crear")),
 ) -> dict:
     """Crea el capítulo + partidas alzadas que la IA propuso al leer un
     documento, en un solo paso — como `aplicar_propuesta_ia` en presupuestos,

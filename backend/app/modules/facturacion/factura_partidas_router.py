@@ -112,7 +112,7 @@ async def crear_capitulo(
     datos: FacturaCapituloCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> dict:
     await _factura_propia(session, factura_id, alcance, principal)
     capitulo = await service.crear_capitulo(session, factura_id, datos)
@@ -168,7 +168,7 @@ async def eliminar_capitulo(
     capitulo_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     await service.eliminar_capitulo(session, capitulo_id)
@@ -183,7 +183,7 @@ async def crear_partida(
     datos: FacturaPartidaCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> FacturaPartidaDetalle:
     await _capitulo_propio(session, capitulo_id, alcance, principal)
     try:
@@ -279,7 +279,7 @@ async def eliminar_partida(
     partida_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     await _partida_propia(session, partida_id, alcance, principal)
     await service.eliminar_partida(session, partida_id)
@@ -322,7 +322,7 @@ async def anadir_componente(
     datos: FacturaComponenteNuevo,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> FacturaDescomposicionOut:
     await _partida_propia(session, partida_id, alcance, principal)
     try:
@@ -362,7 +362,7 @@ async def quitar_componente(
     linea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> FacturaDescomposicionOut:
     await _partida_propia(session, partida_id, alcance, principal)
     if not await service.quitar_componente(session, partida_id, linea_id):
@@ -497,7 +497,7 @@ async def crear_medicion(
     datos: FacturaMedicionCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "crear")),
 ) -> FacturaMedicionOut:
     await _partida_propia(session, partida_id, alcance, principal)
     medicion = await service.crear_medicion(session, partida_id, datos)
@@ -551,7 +551,7 @@ async def eliminar_medicion(
     medicion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("facturacion", "editar")),
+    alcance: Alcance = Depends(require_permiso("facturacion", "borrar")),
 ) -> None:
     await _medicion_propia(session, medicion_id, alcance, principal)
     await service.eliminar_medicion(session, medicion_id)

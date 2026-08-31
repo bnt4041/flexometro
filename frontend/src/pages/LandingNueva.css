@@ -1,0 +1,822 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap');
+
+/* Estilos de la landing pública nueva.
+ *
+ * Todo cuelga de `.flx` a propósito: `global.css` es un fichero de casi 4000
+ * líneas con clases genéricas (`.btn`, `.panel`, `.tarjeta`) que chocarían con
+ * las de aquí. Escoparlo evita el choque en las dos direcciones sin tocar el
+ * resto de la aplicación.
+ *
+ * El tema sigue el mismo patrón de tres estados que el resto del proyecto: la
+ * paleta clara en `.flx`, y la oscura redefinida DOS veces — una para quien
+ * lleva el sistema en oscuro sin haber elegido nada, y otra para la elección
+ * explícita. Los colores se declaran siempre como variables aquí arriba y
+ * nunca dentro de un bloque de tema: así ningún componente se queda con el
+ * texto de un tema sobre el fondo del otro.
+ */
+
+.flx,
+.flx-cookies {
+  --papel: #f1f2f4;
+  --sup: #ffffff;
+  --sup2: #f8f9fb;
+  --tinta: #14171b;
+  --tinta2: #4e5661;
+  --tinta3: #7b838f;
+  --linea: #dde0e5;
+  --linea2: #c2c8d0;
+  --amarillo: #f8b408;
+  --ambar: #7a5200;
+  --ambar-suave: #fdf2d6;
+  --verde: #1e6e49;
+  --verde-suave: #e3f0e9;
+  --rojo: #9b3520;
+  --rojo-suave: #fae6e2;
+  --rojo-barra: #c4462f;
+  --sombra: 0 1px 2px rgba(20, 23, 27, 0.05), 0 14px 34px -22px rgba(20, 23, 27, 0.35);
+  --sombra-alta: 0 2px 4px rgba(20, 23, 27, 0.06), 0 30px 60px -34px rgba(20, 23, 27, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .flx,
+  :root:not([data-theme='light']) .flx-cookies {
+    --papel: #0e1116;
+    --sup: #161a20;
+    --sup2: #1c212a;
+    --tinta: #eaedf2;
+    --tinta2: #a5adb9;
+    --tinta3: #79828f;
+    --linea: #272d36;
+    --linea2: #39414d;
+    --amarillo: #f8b408;
+    --ambar: #f9be33;
+    --ambar-suave: #2a2313;
+    --verde: #54b183;
+    --verde-suave: #15261e;
+    --rojo: #e4785f;
+    --rojo-suave: #2c1916;
+    --rojo-barra: #c4462f;
+    --sombra: 0 1px 2px rgba(0, 0, 0, 0.45), 0 14px 34px -22px rgba(0, 0, 0, 0.8);
+    --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.5), 0 30px 60px -34px rgba(0, 0, 0, 0.9);
+  }
+}
+
+:root[data-theme='dark'] .flx,
+:root[data-theme='dark'] .flx-cookies {
+  --papel: #0e1116;
+  --sup: #161a20;
+  --sup2: #1c212a;
+  --tinta: #eaedf2;
+  --tinta2: #a5adb9;
+  --tinta3: #79828f;
+  --linea: #272d36;
+  --linea2: #39414d;
+  --amarillo: #f8b408;
+  --ambar: #f9be33;
+  --ambar-suave: #2a2313;
+  --verde: #54b183;
+  --verde-suave: #15261e;
+  --rojo: #e4785f;
+  --rojo-suave: #2c1916;
+  --rojo-barra: #c4462f;
+  --sombra: 0 1px 2px rgba(0, 0, 0, 0.45), 0 14px 34px -22px rgba(0, 0, 0, 0.8);
+  --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.5), 0 30px 60px -34px rgba(0, 0, 0, 0.9);
+}
+
+.flx,
+.flx *,
+.flx *::before,
+.flx *::after {
+  box-sizing: border-box;
+}
+
+.flx {
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  line-height: 1.62;
+  min-height: 100vh;
+  padding: 0 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.flx .pagina {
+  max-width: 1000px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* ---------- la cinta métrica que recorre la página ---------- */
+.flx .cinta {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 46px;
+  border-right: 1px solid var(--linea2);
+  background-image:
+    repeating-linear-gradient(to bottom, var(--linea2) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(to bottom, var(--tinta3) 0 1px, transparent 1px 100px);
+  background-size: 12px 100%, 22px 100%;
+  background-position: right 0 top 0;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.flx .cinta b {
+  position: absolute;
+  right: 26px;
+  transform: translateY(-50%);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--tinta3);
+  font-variant-numeric: tabular-nums;
+}
+.flx .lienzo {
+  padding-left: 0;
+}
+@media (min-width: 1080px) {
+  .flx .lienzo {
+    padding-left: 96px;
+  }
+}
+@media (max-width: 1079px) {
+  .flx .cinta {
+    display: none;
+  }
+}
+
+/* ---------- tipografía ---------- */
+.flx h1,
+.flx h2,
+.flx h3,
+.flx .ui {
+  font-family: Archivo, 'Helvetica Neue', Arial, sans-serif;
+}
+.flx h1 {
+  font-weight: 700;
+  font-size: clamp(40px, 6.6vw, 74px);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  margin: 0;
+  text-wrap: balance;
+}
+.flx h2 {
+  font-weight: 700;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -0.024em;
+  margin: 0;
+  text-wrap: balance;
+}
+.flx h3 {
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.25;
+  letter-spacing: -0.008em;
+  margin: 0;
+  text-wrap: balance;
+}
+.flx p {
+  margin: 0;
+  max-width: 64ch;
+  text-wrap: pretty;
+}
+.flx strong {
+  font-weight: 600;
+}
+.flx .eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--tinta3);
+  margin: 0;
+}
+.flx .guia {
+  font-size: clamp(18px, 2.2vw, 20.5px);
+  line-height: 1.5;
+  color: var(--tinta2);
+  max-width: 58ch;
+}
+.flx a {
+  color: inherit;
+}
+.flx a:focus-visible,
+.flx button:focus-visible {
+  outline: 2px solid var(--amarillo);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* ---------- cabecera ---------- */
+.flx .barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 26px 0 0;
+}
+.flx .barra img {
+  display: block;
+  width: min(212px, 44vw);
+  height: auto;
+}
+
+/* ---------- avisos y botones ---------- */
+.flx .aviso {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--amarillo);
+  color: #14171b;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  border-radius: 2px;
+  align-self: flex-start;
+}
+.flx .acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.flx .boton {
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  padding: 14px 24px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  display: inline-block;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.flx .boton.principal {
+  background: var(--tinta);
+  color: var(--papel);
+  box-shadow: var(--sombra);
+}
+.flx .boton.principal:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sombra-alta);
+}
+.flx .boton.secundario {
+  background: transparent;
+  color: var(--tinta);
+  border-color: var(--linea2);
+}
+.flx .boton.secundario:hover {
+  border-color: var(--tinta);
+  transform: translateY(-1px);
+}
+.flx .boton.compacto {
+  padding: 10px 18px;
+  font-size: 14.5px;
+}
+.flx .apunte {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--tinta3);
+  letter-spacing: 0.03em;
+}
+
+/* ---------- secciones ---------- */
+.flx section {
+  padding: 76px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  position: relative;
+  border-top: 1px solid var(--linea);
+}
+.flx section.hero {
+  border-top: none;
+  padding: 52px 0 84px;
+  gap: 28px;
+}
+.flx section.sinlinea {
+  border-top: none;
+}
+
+/* ---------- panel de control de coste ---------- */
+.flx .panel {
+  background: var(--sup);
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  box-shadow: var(--sombra-alta);
+  overflow: hidden;
+}
+.flx .panel-cab,
+.flx .panel-pie {
+  padding: 13px 18px;
+  background: var(--sup2);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tinta3);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.flx .panel-cab {
+  border-bottom: 1px solid var(--linea);
+}
+.flx .panel-pie {
+  border-top: 1px solid var(--linea);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 11.5px;
+}
+.flx .panel-cab b {
+  color: var(--tinta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.flx .panel-tabla {
+  overflow-x: auto;
+}
+.flx .panel table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 560px;
+  font-size: 15px;
+}
+.flx .panel th,
+.flx .panel td {
+  text-align: left;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--linea);
+  vertical-align: top;
+}
+.flx .panel thead th {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--tinta3);
+  white-space: nowrap;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.flx .panel tbody tr:last-child td {
+  border-bottom: none;
+}
+.flx .panel th:not(:first-child),
+.flx .panel td.num {
+  text-align: right;
+}
+.flx .panel td.num {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flx .panel td b {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--tinta3);
+  margin-right: 7px;
+}
+.flx .barra-medida {
+  display: block;
+  height: 5px;
+  background: var(--linea);
+  border-radius: 2px;
+  margin-top: 9px;
+  max-width: 280px;
+  overflow: hidden;
+}
+.flx .barra-medida i {
+  display: block;
+  height: 100%;
+  background: var(--amarillo);
+}
+.flx .barra-medida i.mal {
+  background: var(--rojo-barra);
+}
+.flx .delta {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.flx .delta.bien {
+  background: var(--verde-suave);
+  color: var(--verde);
+}
+.flx .delta.mal {
+  background: var(--rojo-suave);
+  color: var(--rojo);
+}
+
+/* ---------- cadena de la obra ---------- */
+.flx .cadena-envoltorio {
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.flx .cadena {
+  display: flex;
+  align-items: stretch;
+  min-width: 640px;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  background: var(--sup);
+  box-shadow: var(--sombra);
+}
+.flx .paso {
+  flex: 1;
+  padding: 18px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-right: 1px solid var(--linea);
+  position: relative;
+}
+.flx .paso:last-child {
+  border-right: none;
+}
+.flx .paso::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: var(--amarillo);
+  opacity: 0.25;
+}
+.flx .paso:first-child::before {
+  opacity: 1;
+}
+.flx .paso .n {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tinta3);
+}
+.flx .paso .q {
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.flx .paso .d {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--tinta2);
+}
+
+/* ---------- rejillas ---------- */
+.flx .rejilla {
+  display: grid;
+  gap: 14px;
+}
+.flx .rejilla.dos {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.flx .rejilla.tres {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+.flx .tarjeta {
+  background: var(--sup);
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--sombra);
+}
+.flx .tarjeta p {
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--tinta2);
+  max-width: none;
+}
+.flx .tarjeta .sello {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ambar);
+}
+
+/* ---------- estados de la red ---------- */
+.flx .estado {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 2px;
+  align-self: flex-start;
+  border: 1px solid transparent;
+}
+.flx .estado.vivo {
+  background: var(--verde-suave);
+  color: var(--verde);
+  border-color: color-mix(in srgb, var(--verde) 30%, transparent);
+}
+.flx .estado.camino {
+  background: var(--ambar-suave);
+  color: var(--ambar);
+  border-color: color-mix(in srgb, var(--ambar) 30%, transparent);
+}
+
+/* ---------- listas ---------- */
+.flx .lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.flx .lista li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 15.5px;
+  color: var(--tinta2);
+  line-height: 1.5;
+}
+.flx .lista li::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex: none;
+  background: var(--amarillo);
+  border-radius: 1px;
+  transform: translateY(-1px);
+}
+
+/* ---------- planes ---------- */
+.flx .planes {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+.flx .plan {
+  background: var(--sup);
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--sombra);
+}
+.flx .plan.destacado {
+  border-color: var(--amarillo);
+  border-width: 2px;
+  box-shadow: var(--sombra-alta);
+}
+.flx .plan .nombre {
+  font-family: Archivo, sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.flx .plan .para {
+  font-size: 14.5px;
+  color: var(--tinta3);
+  line-height: 1.45;
+}
+.flx .plan ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+}
+.flx .plan li {
+  font-size: 15px;
+  color: var(--tinta2);
+  line-height: 1.45;
+  padding-left: 16px;
+  position: relative;
+}
+.flx .plan li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  background: var(--amarillo);
+  border-radius: 1px;
+}
+
+/* ---------- nota ---------- */
+.flx .nota {
+  border-left: 3px solid var(--amarillo);
+  background: var(--ambar-suave);
+  padding: 16px 20px;
+  border-radius: 0 3px 3px 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--tinta2);
+  max-width: 64ch;
+}
+.flx .nota strong {
+  color: var(--tinta);
+}
+
+/* ---------- cierre ---------- */
+.flx .cierre {
+  background: var(--tinta);
+  border-radius: 4px;
+  padding: clamp(32px, 5vw, 56px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.flx .cierre h2,
+.flx .cierre p,
+.flx .cierre .apunte {
+  color: var(--papel);
+}
+.flx .cierre p {
+  max-width: 56ch;
+}
+.flx .cierre .boton.principal {
+  background: var(--amarillo);
+  color: #14171b;
+}
+.flx .cierre .boton.secundario {
+  color: var(--papel);
+  border-color: color-mix(in srgb, var(--papel) 35%, transparent);
+}
+.flx .cierre .boton.secundario:hover {
+  border-color: var(--papel);
+}
+
+/* ---------- pie ---------- */
+.flx footer {
+  padding: 44px 0 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  color: var(--tinta3);
+  border-top: 1px solid var(--linea);
+  margin-top: 56px;
+}
+.flx footer .firma {
+  margin-top: 6px;
+  color: var(--tinta2);
+}
+.flx footer .firma a {
+  color: var(--ambar);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  border-bottom: 2px solid var(--amarillo);
+  padding-bottom: 1px;
+}
+.flx footer .firma a:hover {
+  color: var(--tinta);
+  border-bottom-color: var(--tinta);
+}
+
+/* ---------- aviso de desarrollo ---------- */
+.flx-aviso {
+  background: #14171b;
+  color: #f1f2f4;
+  padding: 9px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  line-height: 1.5;
+}
+.flx-aviso .punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f8b408;
+  flex: none;
+}
+.flx-aviso b {
+  color: #f8b408;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ---------- cookies ---------- */
+.flx-cookies {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  max-width: 520px;
+  margin-left: auto;
+  background: var(--sup);
+  border: 1px solid var(--linea2);
+  border-radius: 4px;
+  box-shadow: var(--sombra-alta);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--tinta);
+  font-family: 'Source Serif 4', Georgia, serif;
+}
+.flx-cookies h3 {
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  margin: 0;
+}
+.flx-cookies p {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--tinta2);
+  margin: 0;
+}
+.flx-cookies .botones {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.flx-cookies button {
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 18px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.flx-cookies .aceptar {
+  background: var(--tinta);
+  color: var(--papel);
+}
+.flx-cookies .rechazar {
+  background: transparent;
+  color: var(--tinta);
+  border-color: var(--linea2);
+}
+.flx-cookies summary {
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tinta3);
+}
+.flx-cookies details p {
+  font-size: 13.5px;
+  margin-top: 9px;
+  color: var(--tinta3);
+}
+
+@media (max-width: 620px) {
+  .flx {
+    font-size: 16.5px;
+  }
+  .flx section {
+    padding: 56px 0;
+  }
+  .flx .boton {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flx .boton {
+    transition: none;
+  }
+}

@@ -117,6 +117,8 @@ async def establecer_permisos(
                 module_code=permiso["module_code"],
                 ver=Alcance(permiso["ver"]),
                 editar=Alcance(permiso["editar"]),
+                crear=Alcance(permiso["crear"]),
+                borrar=Alcance(permiso["borrar"]),
             )
         )
     await session.flush()

@@ -13,9 +13,36 @@ from app.core.auth import get_principal
 from app.core.database import get_session
 from app.modules.documentos import service
 from app.modules.documentos.models import EntidadDocumento
-from app.modules.documentos.schemas import DocumentoBusquedaOut, DocumentoOut
+from app.modules.documentos.schemas import (
+    DocumentoBusquedaOut,
+    DocumentoOut,
+    FichaConDocumentos,
+)
 
 router = APIRouter(prefix="/api/documentos", tags=["documentos"], dependencies=[Depends(get_principal)])
+
+
+@router.get("/arbol", response_model=list[FichaConDocumentos])
+async def arbol(
+    content_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[FichaConDocumentos]:
+    """La biblioteca agrupada por ficha, para navegarla sin tener que acertar
+    el nombre en el buscador. `content_type` acota a un tipo de fichero (el
+    selector de documento a firmar solo admite PDF).
+
+    Va antes de `/{documento_id}` para que "arbol" no se interprete como un
+    UUID."""
+    grupos = await service.arbol_documentos(session, content_type=content_type)
+    return [
+        FichaConDocumentos(
+            entidad=entidad,
+            entidad_id=entidad_id,
+            entidad_codigo=codigo,
+            documentos=[DocumentoOut.model_validate(d) for d in docs],
+        )
+        for entidad, entidad_id, codigo, docs in grupos
+    ]
 
 
 @router.get("/buscar", response_model=list[DocumentoBusquedaOut])

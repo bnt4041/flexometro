@@ -44,9 +44,20 @@ class Grupo(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base):
 
 
 class GrupoPermiso(UUIDPrimaryKeyMixin, OrganizationMixin, Base):
-    """Un módulo, dos alcances. `module_code` no es FK: los módulos viven en
-    el registro de código (`app.core.modules.registry`), no en base de datos
-    — mismo motivo que `OrganizationModule.module_code`."""
+    """Un módulo y sus cuatro acciones, cada una con su alcance.
+
+    `crear` y `borrar` salieron de `editar` porque no son lo mismo: dar de
+    alta un pedido y borrarlo son riesgos distintos, y hay perfiles enteros
+    (administrativos, encargados) que necesitan poder crear y modificar sin
+    poder borrar nada.
+
+    En `crear` el alcance no significa nada —lo que creas es tuyo por
+    definición— y solo se distingue entre NINGUNO y el resto. Se guarda igual
+    como `Alcance` para no tener una columna con otra forma que las demás.
+
+    `module_code` no es FK: los módulos viven en el registro de código
+    (`app.core.modules.registry`), no en base de datos — mismo motivo que
+    `OrganizationModule.module_code`."""
 
     __tablename__ = "grupo_permiso"
     __table_args__ = (
@@ -63,6 +74,12 @@ class GrupoPermiso(UUIDPrimaryKeyMixin, OrganizationMixin, Base):
     )
     editar: Mapped[Alcance] = mapped_column(
         enum_column(Alcance, "alcance_editar"), nullable=False, default=Alcance.NINGUNO
+    )
+    crear: Mapped[Alcance] = mapped_column(
+        enum_column(Alcance, "alcance_crear"), nullable=False, default=Alcance.NINGUNO
+    )
+    borrar: Mapped[Alcance] = mapped_column(
+        enum_column(Alcance, "alcance_borrar"), nullable=False, default=Alcance.NINGUNO
     )
 
     grupo: Mapped[Grupo] = relationship(back_populates="permisos")

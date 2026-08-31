@@ -38,9 +38,18 @@ import { FacturaRecibidaCrear, FacturasRecibidas } from './pages/FacturasRecibid
 import { IaPatrones } from './pages/IaPatrones'
 import { ImportarBC3 } from './pages/ImportarBC3'
 import { Landing } from './pages/Landing'
+import { LandingNueva } from './pages/LandingNueva'
 import { ObraCrear, Obras } from './pages/Obras'
 import { ObraDetalle } from './pages/ObraDetalle'
 import { OfertaProveedor } from './pages/OfertaProveedor'
+import { Firmar } from './pages/Firmar'
+import { Automatizaciones } from './pages/Automatizaciones'
+import { Importador } from './pages/Importador'
+import { Informes } from './pages/Informes'
+import { Desarrolladores } from './pages/Desarrolladores'
+import { Firmas } from './pages/Firmas'
+import { Prl } from './pages/Prl'
+import { RecursoDetalle, Recursos } from './pages/Recursos'
 import { TestMeter } from './pages/TestMeter'
 import { Personal } from './pages/Personal'
 import { Placeholder } from './pages/Placeholder'
@@ -52,6 +61,10 @@ import { PresupuestosProveedor } from './pages/PresupuestosProveedor'
 import { TerceroCrear, Terceros } from './pages/Terceros'
 import { TerceroDetalle } from './pages/TerceroDetalle'
 import { UsuariosGrupos } from './pages/UsuariosGrupos'
+import { PlanoDetalle } from './pages/PlanoDetalle'
+import { Plexo } from './pages/Plexo'
+import { Planos } from './pages/Planos'
+import { Soporte } from './pages/Soporte'
 import { AppShell } from './shell/AppShell'
 import { ToastProvider } from './toast'
 import { WorkspaceProvider, useWorkspace } from './workspace'
@@ -78,6 +91,16 @@ const PANTALLAS: Record<string, ComponentType> = {
   '/certificaciones': Certificaciones,
   '/facturas': Facturas,
   '/ia/patrones': IaPatrones,
+  '/prl': Prl,
+  '/recursos': Recursos,
+  '/firmas': Firmas,
+  '/desarrolladores': Desarrolladores,
+  '/automatizaciones': Automatizaciones,
+  '/importador': Importador,
+  '/informes': Informes,
+  '/soporte': Soporte,
+  '/planos': Planos,
+  '/plexo': Plexo,
 }
 
 /** Alta y detalle de cada listado, como rutas HIJAS de su propio listado: el
@@ -104,6 +127,7 @@ const MODALES: Record<
     { path: 'nueva', modulo: 'obras', componente: ObraCrear },
     { path: ':id', modulo: 'obras', componente: ObraDetalle },
   ],
+  '/planos': [{ path: ':id', modulo: 'planos', componente: PlanoDetalle }],
   '/pedidos': [
     { path: 'nuevo', modulo: 'compras', componente: PedidoCrear },
     { path: ':id', modulo: 'compras', componente: PedidoDetalle },
@@ -135,6 +159,11 @@ const MODALES: Record<
     { path: 'nueva', modulo: 'facturacion', componente: FacturaSueltaCrear },
     { path: ':id', modulo: 'facturacion', componente: FacturaDetalle },
   ],
+  '/recursos': [
+    // Sin alta propia: un recurso se da de alta desde el modal del listado,
+    // que ya lleva el formulario entero.
+    { path: ':id', modulo: 'prl', componente: RecursoDetalle },
+  ],
 }
 
 /** Rutas de detalle que NO son "un registro más" del listado que las
@@ -164,6 +193,14 @@ function Workspace() {
   }
 
   if (estado === 'sin-sesion') {
+    // Vista previa de la landing nueva en /nueva, mientras se decide si
+    // sustituye a la actual. Se mira el `pathname` a pelo y no con una `Route`
+    // porque sin sesión no se llega a montar el enrutador de más abajo.
+    // Cuando se apruebe: cambiar `Landing` por `LandingNueva` en la línea de
+    // abajo y borrar esta condición entera.
+    if (window.location.pathname === '/nueva') {
+      return <LandingNueva onEntrar={() => void entrar()} />
+    }
     return <Landing onEntrar={() => void entrar()} />
   }
 
@@ -301,6 +338,9 @@ export function App() {
           precios a proveedor», §2): fuera de `WorkspaceProvider` a propósito,
           para que el arranque de Keycloak de éste no llegue a dispararse. */}
       <Route path="/oferta/:token" element={<OfertaProveedor />} />
+      {/* Segundo tramo sin sesión: quien firma llega desde un correo y no
+          tiene cuenta. Fuera de `WorkspaceProvider` por el mismo motivo. */}
+      <Route path="/firmar/:token" element={<Firmar />} />
       {/* Prueba de concepto del medidor por cámara — tampoco lleva sesión ni
           organización, ni siquiera token: es una prueba abierta. */}
       <Route path="/testmeter" element={<TestMeter />} />

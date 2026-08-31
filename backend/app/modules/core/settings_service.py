@@ -14,6 +14,7 @@ from app.modules.core.settings_models import (
     ConfiguracionPasarelaPago,
     ConfiguracionSmtpOrganizacion,
     ConfiguracionSmtpPlataforma,
+    ConfiguracionWhatsApp,
 )
 
 
@@ -49,6 +50,25 @@ async def actualizar_configuracion_smtp_plataforma(
     session: AsyncSession, datos: dict
 ) -> ConfiguracionSmtpPlataforma:
     config = await obtener_configuracion_smtp_plataforma(session)
+    for campo, valor in datos.items():
+        setattr(config, campo, valor)
+    await session.flush()
+    return config
+
+
+async def obtener_configuracion_whatsapp(session: AsyncSession) -> ConfiguracionWhatsApp:
+    config = await session.get(ConfiguracionWhatsApp, 1)
+    if config is None:
+        config = ConfiguracionWhatsApp(id=1)
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def actualizar_configuracion_whatsapp(
+    session: AsyncSession, datos: dict
+) -> ConfiguracionWhatsApp:
+    config = await obtener_configuracion_whatsapp(session)
     for campo, valor in datos.items():
         setattr(config, campo, valor)
     await session.flush()

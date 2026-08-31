@@ -12,6 +12,17 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+
+    <!-- Instalable en el móvil y en el escritorio. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="description" content="Presupuesta, ejecuta y cobra tu obra desde un solo sitio." />
+    <!-- iOS no lee el manifest para esto: necesita sus propias etiquetas o
+         la aplicación se abre en Safari con su barra en vez de a pantalla
+         completa. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Flexómetro" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body>
     <div id="root"></div>

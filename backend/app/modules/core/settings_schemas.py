@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.modules.core.settings_models import ProveedorWhatsApp
+
 
 class ConfiguracionIAOut(BaseModel):
     """Nunca se devuelve la clave real, solo si hay una configurada: es una
@@ -45,6 +47,82 @@ class ConfiguracionSmtpUpdate(BaseModel):
     password: str | None = None
     remitente: str | None = None
     usa_tls: bool | None = None
+
+
+class ConfiguracionWhatsAppOut(BaseModel):
+    """Ni la contraseña del puente ni el token de Meta salen nunca: solo si
+    hay uno puesto."""
+
+    proveedor: ProveedorWhatsApp
+    activa: bool
+    prefijo_pais: str
+
+    base_url: str | None
+    usuario: str | None
+    device_id: str | None
+    tiene_password: bool
+
+    cloud_phone_number_id: str | None
+    cloud_version: str
+    plantilla_aviso: str | None
+    plantilla_codigo: str | None
+    idioma_plantilla: str
+    tiene_cloud_token: bool
+
+
+class ConfiguracionWhatsAppUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proveedor: ProveedorWhatsApp | None = None
+    activa: bool | None = None
+    prefijo_pais: str | None = Field(default=None, min_length=1, max_length=5)
+
+    base_url: str | None = None
+    usuario: str | None = None
+    password: str | None = None
+    device_id: str | None = None
+
+    cloud_phone_number_id: str | None = None
+    cloud_token: str | None = None
+    cloud_version: str | None = Field(default=None, min_length=2, max_length=10)
+    plantilla_aviso: str | None = None
+    plantilla_codigo: str | None = None
+    idioma_plantilla: str | None = Field(default=None, min_length=2, max_length=10)
+
+
+class VinculacionWhatsAppOut(BaseModel):
+    """Estado del emparejamiento del número."""
+
+    #: Si el proveedor seleccionado se vincula escaneando. La API oficial no
+    #: (allí se da de alta el número en Meta), y la pantalla esconde el QR.
+    soporta_qr: bool
+    vinculado: bool
+    #: Qué número o qué cuenta hay detrás, para no mandar desde el móvil que
+    #: no toca.
+    descripcion: str | None = None
+    error: str | None = None
+
+
+class QrVinculacionOut(BaseModel):
+    #: El PNG en base64 listo para un `src`. Se manda la imagen y no la URL
+    #: del proveedor porque esa apunta a su propio host, que el navegador de
+    #: quien configura no tiene por qué alcanzar.
+    imagen: str
+    segundos: int
+    error: str | None = None
+
+
+class PruebaWhatsAppIn(BaseModel):
+    telefono: str = Field(min_length=6, max_length=30)
+
+
+class PruebaWhatsAppOut(BaseModel):
+    """Como en la prueba de SMTP: `enviado=False` con `error` sigue siendo un
+    200, porque lo que ha fallado es el envío, no el endpoint — y ese error
+    tal cual lo dio el proveedor es justo lo que hay que enseñar."""
+
+    enviado: bool
+    error: str | None = None
 
 
 class PruebaSmtpIn(BaseModel):

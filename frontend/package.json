@@ -17,6 +17,7 @@
     "@tiptap/starter-kit": "^3.30.2",
     "i18next": "^26.3.6",
     "lucide-react": "^1.31.0",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-grid-layout": "^2.2.4",

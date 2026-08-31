@@ -15,21 +15,21 @@ from app.core.modules import require_module
 from app.core.permisos import require_permiso, verificar_propiedad
 from app.core.schemas import Page
 from app.modules.compras import costes, oferta_service, service, solicitud_service
+from app.modules.compras.factura_recibida_partidas_router import (
+    router as factura_recibida_partidas_router,
+)
+from app.modules.compras.factura_recibida_router import (
+    router as facturas_recibidas_router,
+)
+from app.modules.compras.factura_recibida_router import (
+    totales_router as compras_totales_router,
+)
 from app.modules.compras.models import (
     Albaran,
     OfertaLinea,
     SolicitudDestinatario,
     SolicitudLinea,
     TipoAlbaran,
-)
-from app.modules.core import auditoria_service
-from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
-from app.modules.compras.factura_recibida_router import (
-    router as facturas_recibidas_router,
-    totales_router as compras_totales_router,
-)
-from app.modules.compras.factura_recibida_partidas_router import (
-    router as factura_recibida_partidas_router,
 )
 from app.modules.compras.pedido_ia_router import router as pedido_ia_router
 from app.modules.compras.pedido_router import router as pedido_router
@@ -57,6 +57,8 @@ from app.modules.compras.solicitud_schemas import (
     SolicitudLineaOut,
     SolicitudOut,
 )
+from app.modules.core import auditoria_service
+from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.terceros.models import Tercero
 
 guard = Depends(require_module("compras"))
@@ -111,7 +113,7 @@ async def listar(
 async def crear(
     datos: AlbaranCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> AlbaranDetalle:
     try:
         albaran = await service.crear_albaran(session, datos)
@@ -202,7 +204,7 @@ async def eliminar(
     albaran_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     await _albaran_propio(session, albaran_id, alcance, principal)
     await service.eliminar_albaran(session, albaran_id)
@@ -216,7 +218,7 @@ async def anadir_linea(
     datos: AlbaranLineaCreate,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> AlbaranLineaOut:
     await _albaran_propio(session, albaran_id, alcance, principal)
     try:
@@ -258,7 +260,7 @@ async def eliminar_linea(
     linea_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     await _linea_propia(session, linea_id, alcance, principal)
     await service.eliminar_linea(session, linea_id)
@@ -380,7 +382,7 @@ _ERRORES_422 = (
 async def crear_solicitud(
     datos: SolicitudCrear,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> SolicitudOut:
     """Deja el paquete en borrador — no manda nada todavía. Se completa y se
     envía proveedor a proveedor desde su ficha en la pestaña Comparativo."""
@@ -448,7 +450,7 @@ async def actualizar_lineas_solicitud(
 async def eliminar_solicitud(
     solicitud_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     """Borra la solicitud en cualquier estado. Se lleva por cascada lo que
     hubieran ofertado los proveedores y sus enlaces; los presupuestos-oferta
@@ -507,7 +509,7 @@ async def quitar_destinatario(
     solicitud_id: uuid.UUID,
     destinatario_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> SolicitudOut:
     """Saca al proveedor en cualquier estado. Se lleva su acceso y lo que
     hubiera ofertado, y deja sin adjudicar sus líneas; su presupuesto-oferta

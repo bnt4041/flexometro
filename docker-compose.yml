@@ -2,7 +2,15 @@ name: obras
 
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector en vez de postgres:16-alpine — misma versión mayor (16), así
+    # que el directorio de datos vale tal cual.
+    #
+    # OJO al cambiarla: alpine usa musl y ésta glibc, y el orden de colación
+    # NO es el mismo. Los índices sobre texto quedan ordenados según la
+    # colación con la que se crearon, así que hay que hacer
+    # `REINDEX DATABASE` después del cambio o una búsqueda por rango puede
+    # devolver de menos sin dar ningún error.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -192,6 +200,18 @@ services:
   web:
     build:
       context: ./frontend
+      # `desarrollo` por defecto (recarga en caliente). Para producción:
+      #   FRONTEND_TARGET=produccion docker compose up -d --build web
+      # Eso compila el bundle y lo sirve con nginx: arranque rápido, sin
+      # código fuente expuesto, y con el service worker activo — que es lo
+      # que hace la aplicación instalable en el móvil.
+      target: ${FRONTEND_TARGET:-desarrollo}
+      args:
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8081}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-obras}
+        VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-obras-web}
+        VITE_AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
+        VITE_APP_VERSION: ${APP_VERSION:-0.0}
     restart: unless-stopped
     environment:
       # El navegador habla con Keycloak directamente, así que necesita la URL
@@ -202,8 +222,10 @@ services:
       VITE_AUTH_BACKEND: ${AUTH_BACKEND:-keycloak}
       VITE_APP_VERSION: ${APP_VERSION:-0.0}
     ports:
-      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+      - "127.0.0.1:${WEB_PORT:-5173}:${FRONTEND_PUERTO:-5173}"
     volumes:
+      # Para la recarga en caliente en desarrollo. En producción es inerte:
+      # nginx sirve desde /usr/share/nginx/html, no desde /app.
       - ./frontend:/app
       # Volumen anónimo: evita que el bind mount tape el node_modules
       # instalado dentro de la imagen.
@@ -217,7 +239,8 @@ services:
       - "traefik.http.routers.obras-web.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`)"
       - "traefik.http.routers.obras-web.entrypoints=websecure"
       - "traefik.http.routers.obras-web.tls.certresolver=letsencrypt"
-      - "traefik.http.services.obras-web.loadbalancer.server.port=5173"
+      # 5173 con el servidor de desarrollo, 80 con nginx en producción.
+      - "traefik.http.services.obras-web.loadbalancer.server.port=${FRONTEND_PUERTO:-5173}"
     networks: [obras, traefik_proxy]
 
   # Perfil "proxy": en desarrollo se accede por los puertos publicados, pero el
@@ -238,9 +261,81 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [obras]
 
+  # Puente de WhatsApp (GOWA). Se conecta a WhatsApp como si fuera un
+  # WhatsApp Web más, vinculando un móvil por QR.
+  #
+  # NO se publica en Traefik a propósito: quien llegue a esta interfaz puede
+  # mandar mensajes como el número vinculado y leer sus conversaciones. Se
+  # queda en localhost del servidor, y para vincular el móvil se abre un túnel
+  # SSH y se escanea el QR desde el navegador de tu equipo:
+  #
+  #     ssh -L 3000:127.0.0.1:3000 usuario@servidor
+  #     # y abrir http://127.0.0.1:3000 en el navegador
+  #
+  # `perfil` opcional: sin `--profile whatsapp` el stack sube igual, porque
+  # esto es una pieza que no todas las instalaciones quieren.
+  gowa:
+    image: aldinokemal2104/go-whatsapp-web-multidevice:latest
+    profiles: [whatsapp]
+    restart: unless-stopped
+    command: rest
+    environment:
+      APP_PORT: 3000
+      # Sin esto, cualquiera que alcance el puerto manda mensajes. La API lo
+      # usa como usuario/contraseña en Ajustes → WhatsApp.
+      # OBLIGATORIO ponerlo en .env antes de levantar este perfil: sin valor,
+      # GOWA arranca SIN autenticación y cualquiera que alcance el puerto
+      # manda mensajes como el número vinculado.
+      #
+      # No lleva `:?` (que abortaría si falta) porque Compose interpola todos
+      # los servicios aunque su perfil esté apagado: una guarda aquí impediría
+      # arrancar el stack entero a quien no use WhatsApp.
+      APP_BASIC_AUTH: ${GOWA_BASIC_AUTH:-}
+    volumes:
+      # La sesión vinculada vive aquí: sin volumen, cada reinicio obligaría a
+      # volver a escanear el QR.
+      - gowadata:/app/storages
+    ports:
+      - "127.0.0.1:${GOWA_PORT:-3000}:3000"
+    networks: [obras]
+
+  # Web de PIRUETA (la empresa que desarrolla Flexómetro), servida bajo
+  # /pirueta del mismo dominio. Es estática: un nginx sobre la carpeta, sin
+  # el server.js de Node que se usa para verla en local.
+  #
+  # Vive fuera del repositorio a propósito (/var/www/pirueta): es un sitio
+  # independiente que se edita por su cuenta, y montarlo de solo lectura
+  # evita duplicarlo aquí y que las dos copias se separen.
+  #
+  # Dos middlewares, y los dos hacen falta:
+  #   - `pirueta-barra` añade la barra final. Sin ella, /pirueta resuelve las
+  #     rutas relativas del index.html (favicon.svg, logo.png, el vídeo)
+  #     contra la raíz del dominio y la página sale sin imágenes.
+  #   - `pirueta-prefijo` quita /pirueta antes de llegar a nginx, que sirve
+  #     desde su propia raíz.
+  # El `$$` es escapado de Compose: Traefik recibe un `$` normal.
+  pirueta:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - /var/www/pirueta:/usr/share/nginx/html:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
+      - "traefik.http.routers.obras-pirueta.rule=Host(`${TRAEFIK_DOMAIN:-obras.localhost}`) && PathPrefix(`/pirueta`)"
+      - "traefik.http.routers.obras-pirueta.entrypoints=websecure"
+      - "traefik.http.routers.obras-pirueta.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.obras-pirueta.middlewares=pirueta-barra,pirueta-prefijo"
+      - "traefik.http.middlewares.pirueta-barra.redirectregex.regex=^https?://([^/]+)/pirueta$$"
+      - "traefik.http.middlewares.pirueta-barra.redirectregex.replacement=https://$${1}/pirueta/"
+      - "traefik.http.middlewares.pirueta-prefijo.stripprefix.prefixes=/pirueta"
+      - "traefik.http.services.obras-pirueta.loadbalancer.server.port=80"
+    networks: [traefik_proxy]
+
 volumes:
   pgdata:
   miniodata:
+  gowadata:
 
 networks:
   obras:

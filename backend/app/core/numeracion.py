@@ -62,6 +62,13 @@ PATRON_POR_DEFECTO: dict[str, str] = {
     # decidir a quién) — son tres momentos distintos del mismo proceso.
     "pedido": "PED{SEQ:05d}",
     "contrato": "CON{SEQ:05d}",
+    # Recursos (vehículos y maquinaria) y solicitudes de firma. Series
+    # propias: un recurso es inventario y una firma es un envío a un tercero,
+    # nada que ver con la numeración de ningún documento comercial.
+    "recurso": "REC{SEQ:05d}",
+    "solicitud_firma": "FIR{SEQ:05d}",
+    "ticket": "TCK{SEQ:05d}",
+    "plano": "PLN{SEQ:05d}",
 }
 
 _TOKEN_RE = re.compile(r"\{(SEQ|YYYY|YY|MM|DD|ORG)(?::0(\d+)d)?\}")

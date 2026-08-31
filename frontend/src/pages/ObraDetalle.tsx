@@ -25,6 +25,7 @@ import { RejillaObra } from '../components/RejillaObra'
 import { WidgetGrid } from '../components/WidgetGrid'
 import { ContactosAsociados } from '../components/ContactosAsociados'
 import { Documentos } from '../components/Documentos'
+import { PrlObra } from '../components/PrlObra'
 import type { PestanaFicha } from '../components/FichaDetalle'
 import { PresupuestosObra } from '../components/PresupuestosObra'
 import { FichaDetalle } from '../components/FichaDetalle'
@@ -515,6 +516,12 @@ export function ObraDetalle() {
       etiqueta: 'Documentos',
       icono: 'documentos',
       contenido: <Documentos entidad="obra" entidadId={id} />,
+    },
+    {
+      id: 'prl',
+      etiqueta: 'PRL',
+      icono: 'shield-check',
+      contenido: <PrlObra obraId={id} />,
     },
     {
       id: 'trazabilidad',

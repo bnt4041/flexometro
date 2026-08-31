@@ -102,7 +102,7 @@ async def listar(
 async def crear(
     datos: FacturaRecibidaCreate,
     session: AsyncSession = Depends(get_session),
-    _alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    _alcance: Alcance = Depends(require_permiso("compras", "crear")),
 ) -> FacturaRecibidaOut:
     try:
         factura = await facturas.crear(
@@ -201,7 +201,7 @@ async def eliminar(
     factura_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
-    alcance: Alcance = Depends(require_permiso("compras", "editar")),
+    alcance: Alcance = Depends(require_permiso("compras", "borrar")),
 ) -> None:
     factura = await _factura_o_404(session, factura_id)
     verificar_propiedad(alcance, principal, factura.creado_por_subject)

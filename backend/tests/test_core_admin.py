@@ -1,11 +1,11 @@
+import re
 import uuid
 
 import pytest
 from fastapi import HTTPException
-from pydantic import ValidationError
 
 from app.core.auth import Principal, require_superadmin
-from app.modules.core.admin_schemas import OrganizacionCreate
+from app.core.texto import slugify
 
 
 def _principal(roles: frozenset[str]) -> Principal:
@@ -34,18 +34,37 @@ async def test_require_superadmin_acepta_con_el_rol():
     assert resultado is principal
 
 
-# --- Validación del slug de una organización nueva ---
-
-
-def test_slug_valido():
-    datos = OrganizacionCreate(slug="obra-verde", name="Obra Verde SL")
-    assert datos.slug == "obra-verde"
+# --- Slug de una organización nueva ---
+#
+# Ya no se teclea: se genera del nombre (`slug_organizacion_unico`). Así que
+# no hay nada que validar y sí que garantizar — el slug viaja a Keycloak como
+# atributo `organizacion`, y su alfabeto es minúsculas, dígitos y guiones.
 
 
 @pytest.mark.parametrize(
-    "slug",
-    ["Mayusculas", "con_guion_bajo", "-empieza-con-guion", "acaba-con-guion-", "a"],
+    ("nombre", "esperado"),
+    [
+        ("Obra Verde SL", "obra-verde-sl"),
+        ("Construcciones Muñoz, S.A.", "construcciones-munoz-s-a"),
+        ("  Espacios   de más  ", "espacios-de-mas"),
+        ("Guion_bajo y MAYÚSCULAS", "guion-bajo-y-mayusculas"),
+    ],
 )
-def test_slug_invalido(slug: str):
-    with pytest.raises(ValidationError):
-        OrganizacionCreate(slug=slug, name="X")
+def test_el_slug_sale_del_nombre(nombre: str, esperado: str):
+    assert slugify(nombre) == esperado
+
+
+@pytest.mark.parametrize(
+    "nombre",
+    ["Obra Verde SL", "¡!¿?", "---", "A", "Ñ", "x" * 200, "-empieza y acaba-"],
+)
+def test_el_slug_generado_siempre_vale_para_keycloak(nombre: str):
+    """Da igual lo que teclee quien da de alta: lo que sale tiene que entrar
+    en el realm. Un slug inválido reventaría en el alta, no aquí."""
+    slug = slugify(nombre)
+    assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", slug), slug
+    assert 2 <= len(slug) <= 64
+
+
+def test_un_nombre_sin_letras_no_deja_el_slug_vacio():
+    assert slugify("¡!¿?") == "empresa"

@@ -20,22 +20,32 @@ precios": un producto/servicio y una partida unitaria son la misma ficha.
 """
 
 from app.core.modules import registry
+from app.modules.automatizaciones import SPEC as AUTOMATIZACIONES
 from app.modules.campos_libres import SPEC as CAMPOS_LIBRES
 from app.modules.compras import SPEC as COMPRAS
 from app.modules.contratos import SPEC as CONTRATOS
 from app.modules.core import SPEC as CORE
 from app.modules.crm import SPEC as CRM
+from app.modules.desarrolladores import SPEC as DESARROLLADORES
 from app.modules.documentos import SPEC as DOCUMENTOS
 from app.modules.facturacion import SPEC as FACTURACION
 from app.modules.ia import SPEC as IA
+from app.modules.importador import SPEC as IMPORTADOR
+from app.modules.informes import SPEC as INFORMES
+from app.modules.notificaciones import SPEC as NOTIFICACIONES
 from app.modules.obras import SPEC as OBRAS
+from app.modules.planos import SPEC as PLANOS
+from app.modules.plexo import SPEC as PLEXO
 from app.modules.presupuestos import SPEC as PRESUPUESTOS
+from app.modules.prl import SPEC as PRL
+from app.modules.soporte import SPEC as SOPORTE
 from app.modules.terceros import SPEC as TERCEROS
 from app.modules.testmeter import SPEC as TESTMETER
 
 ALL_SPECS = (
     CORE, CAMPOS_LIBRES, CRM, DOCUMENTOS, TERCEROS, PRESUPUESTOS, OBRAS, COMPRAS, FACTURACION, IA,
-    CONTRATOS, TESTMETER,
+    CONTRATOS, PRL, NOTIFICACIONES, DESARROLLADORES, AUTOMATIZACIONES, IMPORTADOR, INFORMES,
+    PLANOS, PLEXO, SOPORTE, TESTMETER,
 )
 
 
@@ -47,23 +57,28 @@ def register_all() -> None:
 
 def import_models() -> None:
     """Puebla Base.metadata. Lo usa el env.py de Alembic."""
+    from app.modules.automatizaciones import models as _auto_models  # noqa: F401
     from app.modules.campos_libres import models as _campos_libres_models  # noqa: F401
     from app.modules.compras import models as _compras_models  # noqa: F401
     from app.modules.contratos import models as _contratos_models  # noqa: F401
-    from app.modules.crm import models as _crm_models  # noqa: F401
-    from app.modules.documentos import models as _documentos_models  # noqa: F401
     from app.modules.core import auditoria_models as _core_auditoria_models  # noqa: F401
     from app.modules.core import billing_models as _core_billing_models  # noqa: F401
     from app.modules.core import diccionario_models as _core_diccionario_models  # noqa: F401
     from app.modules.core import models as _core_models  # noqa: F401
     from app.modules.core import moneda_models as _core_moneda_models  # noqa: F401
     from app.modules.core import numeracion_models as _core_numeracion_models  # noqa: F401
-    from app.modules.core import traduccion_models as _core_traduccion_models  # noqa: F401
     from app.modules.core import permisos_models as _core_permisos_models  # noqa: F401
     from app.modules.core import settings_models as _core_settings_models  # noqa: F401
     from app.modules.core import tesoreria_models as _core_tesoreria_models  # noqa: F401
+    from app.modules.core import traduccion_models as _core_traduccion_models  # noqa: F401
+    from app.modules.crm import models as _crm_models  # noqa: F401
+    from app.modules.desarrolladores import models as _dev_models  # noqa: F401
+    from app.modules.documentos import models as _documentos_models  # noqa: F401
     from app.modules.facturacion import models as _facturacion_models  # noqa: F401
     from app.modules.ia import models as _ia_models  # noqa: F401
+    from app.modules.importador import models as _imp_models  # noqa: F401
+    from app.modules.informes import models as _inf_models  # noqa: F401
+    from app.modules.notificaciones import models as _notif_models  # noqa: F401
     from app.modules.obras import models as _obras_models  # noqa: F401
     from app.modules.presupuestos import models as _presupuestos_models  # noqa: F401
     from app.modules.presupuestos import (  # noqa: F401
@@ -72,4 +87,8 @@ def import_models() -> None:
     from app.modules.presupuestos import (  # noqa: F401
         plantilla_docx_models as _presupuesto_plantilla_docx_models,
     )
+    from app.modules.prl import models as _prl_models  # noqa: F401
+    from app.modules.planos import models as _pln_models  # noqa: F401
+    from app.modules.plexo import models as _plx_models  # noqa: F401
+    from app.modules.soporte import models as _sop_models  # noqa: F401
     from app.modules.terceros import models as _terceros_models  # noqa: F401

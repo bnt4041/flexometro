@@ -365,8 +365,57 @@ export function FacturaDetalle() {
               />
             ),
           },
+          {
+            // Factura de venta: siempre de cliente, así que a diferencia de
+            // Pedido este widget no depende de ningún tipo.
+            id: 'ayuda-ia',
+            titulo: 'Ayuda con IA',
+            x: 0,
+            y: 32,
+            w: 12,
+            h: 3,
+            minW: 4,
+            minH: 3,
+            contenido: !partidaSeleccionada ? (
+              <EmptyState title="Ninguna partida seleccionada">
+                Selecciona una partida en el listado para pedir ayuda a la IA sobre ella.
+              </EmptyState>
+            ) : (
+              <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+                <button className="btn btn--sm" onClick={() => setAyudaIAAbierta(true)}>
+                  <Sparkles size={14} aria-hidden="true" />
+                  Ayuda con IA sobre «{partidaSeleccionada.resumen}»
+                </button>
+              </div>
+            ),
+          },
         ]}
       />
+
+      {ayudaIAAbierta && partidaSeleccionada && (
+        <AyudaIADocumentoModal
+          contexto={{
+            tipo: 'partida',
+            codigo: partidaSeleccionada.codigo,
+            resumen: partidaSeleccionada.resumen,
+            unidad: partidaSeleccionada.unidad,
+            precio: partidaSeleccionada.precio,
+          }}
+          destinoCapituloId={partidaSeleccionada.capitulo_id}
+          conversar={(datos) =>
+            api.facturas.iaConversar(id, {
+              contexto: { ...datos.contexto, factura_id: id, factura_codigo: factura.codigo },
+              mensajes: datos.mensajes,
+            })
+          }
+          aplicarCapitulo={(datos) => api.facturas.iaAplicarCapitulo(id, datos)}
+          pegarPartida={(capituloId, datos) => api.facturasCapitulos.pegarPartidas(capituloId, datos)}
+          crearPartida={(capituloId, datos) => api.facturasCapitulos.addPartida(capituloId, datos)}
+          anadirComponente={(partidaId, datos) => api.facturasPartidas.anadirComponente(partidaId, datos)}
+          onCambio={() => void recargarTodo()}
+          onClose={() => setAyudaIAAbierta(false)}
+        />
+      )}
       <ErrorNotice error={errorCapitulos} />
 
       <div className="card" style={{ marginTop: 'var(--sp-4)' }}>

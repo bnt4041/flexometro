@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -359,7 +359,14 @@ async def actualizar_obra(
     obra = await obtener_obra(session, obra_id)
     if obra is None:
         return None
-    for campo, valor in datos.model_dump(exclude_unset=True).items():
+    cambios = datos.model_dump(exclude_unset=True)
+    # `estado_desde` solo se mueve cuando el estado cambia DE VERDAD: guardar
+    # la obra con el mismo estado no la «reactiva», y si lo hiciera, una obra
+    # parada nunca llegaría a avisar porque cualquier retoque la pondría a
+    # cero (ver la vigilancia «obra.estancada»).
+    if "estado" in cambios and cambios["estado"] != obra.estado:
+        obra.estado_desde = datetime.now(UTC)
+    for campo, valor in cambios.items():
         setattr(obra, campo, valor)
     await session.flush()
     return obra
