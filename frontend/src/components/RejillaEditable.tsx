@@ -133,6 +133,27 @@ function CapaEscapeMenu({ onCerrar }: { onCerrar: () => void }) {
   return null
 }
 
+interface EntradaDeshacer {
+  filaId: string
+  columnaId: string
+  valorAnterior: string
+}
+
+/** Ctrl+Z/Ctrl+Y (Fase 1j): hasta 10 pasos, uno por celda confirmada. Solo
+ *  cubre valores de celda (texto/número/select) reproduciendo el mismo
+ *  `onEditar` con el valor de antes — no altas, bajas, pegados ni
+ *  arrastres, cuyo "inverso" no siempre existe de forma segura (borrar una
+ *  fila puede llevarse consigo cosas que no se pueden recrear igual). Se
+ *  excluye `autocompletado` a propósito: esas celdas suelen ser el primer
+ *  paso de un alta (elegir de qué ficha crear la línea), no un valor que
+ *  tenga sentido "deshacer" célula a célula.
+ *
+ *  Nada de esto guarda estado propio: solo reproduce `onEditar`, así que
+ *  pasa por la misma validación y recálculo que cualquier otra edición —
+ *  no hay manera de que deshacer dañe datos que una edición normal no
+ *  pudiera dañar igual. */
+const LIMITE_DESHACER = 10
+
 const TECLAS_CONTROL = new Set([
   'Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape', 'Tab', 'Enter',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End',
@@ -221,6 +242,12 @@ export function RejillaEditable<F>({
   // abrió, para no reabrirla en cada render (esas props llegan como valores
   // nuevos cada vez que el padre recalcula `filas`/`columnas`).
   const aEditarProcesada = useRef<string | null>(null)
+  // Pilas de deshacer/rehacer (Fase 1j) — en `useRef`, no `useState`: no hay
+  // nada que pintar a partir de esto (sin botones de deshacer, solo el
+  // atajo de teclado), así que no hace falta forzar un repintado por cada
+  // celda confirmada.
+  const deshacerRef = useRef<EntradaDeshacer[]>([])
+  const rehacerRef = useRef<EntradaDeshacer[]>([])
 
   const esEditable = useCallback(
     (fila: F, columna: ColumnaRejilla<F>) => columna.editable?.(fila) ?? false,
@@ -247,6 +274,67 @@ export function RejillaEditable<F>({
     },
     [],
   )
+
+  // Punto único por el que pasa cualquier edición de celda de verdad (no el
+  // alta de una fila nueva): registra cómo deshacerla antes de avisar hacia
+  // fuera, y deja sin efecto un posible rehacer pendiente — igual que en
+  // cualquier editor, un cambio nuevo tras deshacer invalida lo que se
+  // podía rehacer.
+  const emitirEdicion = useCallback(
+    (fila: F, columna: ColumnaRejilla<F>, valor: string, opcion?: OpcionCelda) => {
+      if (columna.tipo !== 'autocompletado') {
+        deshacerRef.current.push({
+          filaId: idDe(fila),
+          columnaId: columna.id,
+          valorAnterior: valorParaEditar(fila, columna),
+        })
+        if (deshacerRef.current.length > LIMITE_DESHACER) deshacerRef.current.shift()
+        rehacerRef.current = []
+      }
+      onEditar(fila, columna.id, valor, opcion)
+    },
+    [idDe, onEditar, valorParaEditar],
+  )
+
+  function deshacer() {
+    const entrada = deshacerRef.current.pop()
+    if (!entrada) return
+    const fila = filas.find((f) => idDe(f) === entrada.filaId)
+    const columna = columnas.find((c) => c.id === entrada.columnaId)
+    // La fila o la columna ya no existe (se borró, cambió el filtro...): se
+    // descarta sin más, no hay a qué volver.
+    if (!fila || !columna) return
+    rehacerRef.current.push({
+      filaId: entrada.filaId,
+      columnaId: entrada.columnaId,
+      valorAnterior: valorParaEditar(fila, columna),
+    })
+    if (rehacerRef.current.length > LIMITE_DESHACER) rehacerRef.current.shift()
+    const opcion =
+      columna.tipo === 'select'
+        ? columna.opciones?.(fila).find((o) => o.valor === entrada.valorAnterior)
+        : undefined
+    onEditar(fila, columna.id, entrada.valorAnterior, opcion)
+  }
+
+  function rehacer() {
+    const entrada = rehacerRef.current.pop()
+    if (!entrada) return
+    const fila = filas.find((f) => idDe(f) === entrada.filaId)
+    const columna = columnas.find((c) => c.id === entrada.columnaId)
+    if (!fila || !columna) return
+    deshacerRef.current.push({
+      filaId: entrada.filaId,
+      columnaId: entrada.columnaId,
+      valorAnterior: valorParaEditar(fila, columna),
+    })
+    if (deshacerRef.current.length > LIMITE_DESHACER) deshacerRef.current.shift()
+    const opcion =
+      columna.tipo === 'select'
+        ? columna.opciones?.(fila).find((o) => o.valor === entrada.valorAnterior)
+        : undefined
+    onEditar(fila, columna.id, entrada.valorAnterior, opcion)
+  }
 
   // Si la fila activa desaparece (se borró, o cambió el filtro), no dejar el
   // cursor apuntando a un índice que ya no existe. Y si veníamos de crear una
@@ -406,7 +494,7 @@ export function RejillaEditable<F>({
     try {
       const fila = filas[activa.f]
       const columna = columnas[activa.c]
-      if (fila && columna) onEditar(fila, columna.id, opcion?.valor ?? borrador, opcion)
+      if (fila && columna) emitirEdicion(fila, columna, opcion?.valor ?? borrador, opcion)
       setEditando(false)
       setSugerencias([])
       contenedorRef.current?.focus()
@@ -430,6 +518,19 @@ export function RejillaEditable<F>({
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && onPegar) {
       e.preventDefault()
       onPegar()
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      deshacer()
+      return
+    }
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      ((e.shiftKey && e.key.toLowerCase() === 'z') || (!e.shiftKey && e.key.toLowerCase() === 'y'))
+    ) {
+      e.preventDefault()
+      rehacer()
       return
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && onCopiar) {
@@ -526,7 +627,7 @@ export function RejillaEditable<F>({
       case 'Delete': {
         e.preventDefault()
         const columna = columnas[activa.c]
-        if (fila && columna && esEditable(fila, columna)) onEditar(fila, columna.id, '')
+        if (fila && columna && esEditable(fila, columna)) emitirEdicion(fila, columna, '')
         return
       }
       case 'Escape':

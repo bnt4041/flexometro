@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeftRight, ExternalLink, Trash2 } from 'lucide-react'
 
 import { BuscadorSustitutoModal } from './BuscadorSustitutoModal'
+import { PegarModal } from './PegarModal'
 import type { ColumnaRejilla, ItemMenuContextual, OpcionCelda } from './RejillaEditable'
 import { RejillaEditable } from './RejillaEditable'
 import { EmptyState, ErrorNotice, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
-import type { ConceptoDetalle, Linea } from '../lib/api'
+import type { AlcancePegado, ConceptoDetalle, Linea } from '../lib/api'
+import { copiarAlPortapapeles, leerPortapapeles } from '../lib/portapapeles'
+import { useToast } from '../toast'
 
 /** Fila en blanco al final para dar de alta buscando en el banco, igual que
  *  hace `DescompuestoPartida` con las partidas. */
@@ -36,9 +39,11 @@ export function DescompuestoConcepto({
   conceptoId: string
   onCambio?: () => void
 }) {
+  const { notificar } = useToast()
   const [detalle, setDetalle] = useState<ConceptoDetalle | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sustituyendo, setSustituyendo] = useState<FilaComponente | null>(null)
+  const [pegando, setPegando] = useState<{ ids: string[]; origenEtiqueta: string } | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -144,6 +149,49 @@ export function DescompuestoConcepto({
     },
   ]
 
+  function copiarComponentes(ids: string[]) {
+    const reales = ids.filter((id) => id !== ID_BORRADOR)
+    if (reales.length === 0 || !detalle) return
+    copiarAlPortapapeles({
+      tipo: 'componentes_descompuesto',
+      ids: reales,
+      origenEtiqueta: `${detalle.codigo} · ${detalle.resumen}`,
+    })
+    notificar(reales.length === 1 ? 'Componente copiado' : `${reales.length} componentes copiados`)
+  }
+
+  function pegar() {
+    const contenido = leerPortapapeles()
+    if (!contenido) {
+      notificar('No hay nada copiado')
+      return
+    }
+    if (contenido.tipo !== 'componentes_descompuesto') {
+      notificar('Lo copiado no se puede pegar aquí')
+      return
+    }
+    setPegando({ ids: contenido.ids, origenEtiqueta: contenido.origenEtiqueta })
+  }
+
+  async function confirmarPegado(alcance: AlcancePegado) {
+    if (!pegando) return
+    try {
+      const resultado = await api.conceptos.pegarLineas(conceptoId, {
+        linea_ids: pegando.ids,
+        alcance,
+      })
+      setPegando(null)
+      await cargar()
+      onCambio?.()
+      notificar(
+        resultado.pegadas === 1 ? 'Componente pegado' : `${resultado.pegadas} componentes pegados`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPegando(null)
+    }
+  }
+
   if (!detalle) return null
 
   return (
@@ -153,6 +201,10 @@ export function DescompuestoConcepto({
         filas={filas}
         columnas={columnas}
         idDe={(f) => f.id}
+        onCopiar={copiarComponentes}
+        onPegar={pegar}
+        onSoltarEn={() => pegar()}
+        puedeArrastrar={(f) => f.id !== ID_BORRADOR}
         onEditar={(fila, columnaId, valor, opcion) => {
           if (fila.id === ID_BORRADOR) {
             // El alta solo ocurre al elegir una ficha del autocompletado:
@@ -248,6 +300,15 @@ export function DescompuestoConcepto({
             onCambio?.()
           }}
           onClose={() => setSustituyendo(null)}
+        />
+      )}
+
+      {pegando && (
+        <PegarModal
+          cantidad={pegando.ids.length}
+          origenEtiqueta={pegando.origenEtiqueta}
+          onElegir={(alcance) => void confirmarPegado(alcance)}
+          onClose={() => setPegando(null)}
         />
       )}
     </>

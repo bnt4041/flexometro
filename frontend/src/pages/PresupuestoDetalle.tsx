@@ -28,6 +28,7 @@ import { NotasCrm } from '../components/NotasCrm'
 import type { FilaPresupuesto } from '../components/RejillaPresupuesto'
 import { ID_RAIZ } from '../components/RejillaPresupuesto'
 import { ReajusteModal } from '../components/ReajusteModal'
+import { LayoutPlanos } from '../components/LayoutPlanos'
 import { MedicionesPartida } from '../components/MedicionesPartida'
 import { RejillaPresupuesto } from '../components/RejillaPresupuesto'
 import { Trazabilidad, cargarAsociadosDeObra, obraDePresupuesto } from '../components/Trazabilidad'
@@ -61,6 +62,7 @@ import type {
   Version,
 } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
+import { useWorkspace } from '../workspace'
 import { useContextoPresupuestos } from './Presupuestos'
 
 function formatoFecha(iso: string): string {
@@ -71,6 +73,11 @@ export function PresupuestoDetalle() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const { onCambio } = useContextoPresupuestos()
+  const { modules } = useWorkspace()
+  const planosActiva = modules.some((m) => m.code === 'planos' && m.is_active)
+  // La pestaña se controla desde aquí para poder saltar al plano desde
+  // Mediciones sin perder qué partida estaba seleccionada.
+  const [pestana, setPestana] = useState('datos')
   const [presupuesto, setPresupuesto] = useState<Detalle | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -451,7 +458,11 @@ export function PresupuestoDetalle() {
                   </div>
                 </div>
               ) : (
-                <MedicionesPartida partida={seleccion.partida} onCambio={cargar} />
+                <MedicionesPartida
+                  partida={seleccion.partida}
+                  onCambio={cargar}
+                  onAbrirPlanos={planosActiva ? () => setPestana('layout') : undefined}
+                />
               ),
           },
           {
@@ -664,6 +675,25 @@ export function PresupuestoDetalle() {
 
   const pestanas: PestanaFicha[] = [
     { id: 'datos', etiqueta: 'Datos', icono: 'datos', contenido: pestanaDatos },
+    // Los planos son de este presupuesto, no una biblioteca aparte: por eso
+    // van de pestaña y no de módulo al que ir a buscarlos. Lleva la partida
+    // seleccionada en «Datos» para poder mandarle lo que se mida.
+    ...(planosActiva
+      ? [
+          {
+            id: 'layout',
+            etiqueta: 'Layout',
+            icono: 'medir' as const,
+            contenido: (
+              <LayoutPlanos
+                presupuestoId={id}
+                partida={seleccion?.tipo === 'partida' ? seleccion.partida : null}
+                onAplicado={() => void cargar()}
+              />
+            ),
+          },
+        ]
+      : []),
     {
       id: 'contactos',
       etiqueta: 'Contactos',
@@ -848,6 +878,8 @@ export function PresupuestoDetalle() {
         </div>
       }
       pestanas={pestanas}
+      pestanaActiva={pestana}
+      onPestana={setPestana}
       onClose={cerrar}
     />
 

@@ -287,6 +287,80 @@ async def anadir_linea(
     return linea
 
 
+async def pegar_lineas(
+    session: AsyncSession, padre_id: uuid.UUID, linea_ids: list[uuid.UUID], alcance: str
+) -> int:
+    """Copia o mueve líneas de descompuesto de otra ficha (o de la misma) a
+    `padre_id` — la versión para el banco de precios de
+    `presupuesto_service.pegar_componentes_descompuesto`. Sin nada que
+    independizar antes: el descompuesto de una ficha del banco siempre es
+    propio."""
+    org_id = require_organization_id()
+    padre = await session.scalar(
+        select(Concepto).where(Concepto.id == padre_id, Concepto.organization_id == org_id)
+    )
+    if padre is None:
+        return 0
+
+    origen = list(
+        (
+            await session.execute(
+                select(Descomposicion).where(
+                    Descomposicion.id.in_(linea_ids),
+                    Descomposicion.organization_id == org_id,
+                )
+            )
+        ).scalars()
+    )
+    if not origen:
+        return 0
+    origen_por_id = {l.id: l for l in origen}
+    orden_pedido = [origen_por_id[lid] for lid in linea_ids if lid in origen_por_id]
+
+    siguiente = await session.scalar(
+        select(func.max(Descomposicion.orden)).where(Descomposicion.padre_id == padre_id)
+    )
+    orden = int(siguiente + 1) if siguiente is not None else 0
+
+    padres_origen: set[uuid.UUID] = set()
+    pegadas = 0
+    for linea in orden_pedido:
+        padres_origen.add(linea.padre_id)
+        # Ni contra sí misma ni cerrando un ciclo indirecto — igual que
+        # `anadir_linea`, que es justo lo que evita esto al pegar a mano.
+        if linea.hijo_id == padre_id or await calculo.crearia_ciclo(
+            session, padre_id, linea.hijo_id
+        ):
+            continue
+        if alcance == "mover":
+            linea.padre_id = padre_id
+            linea.orden = orden
+        else:
+            session.add(
+                Descomposicion(
+                    organization_id=org_id,
+                    padre_id=padre_id,
+                    hijo_id=linea.hijo_id,
+                    rendimiento=linea.rendimiento,
+                    factor=linea.factor,
+                    orden=orden,
+                )
+            )
+        orden += 1
+        pegadas += 1
+
+    if pegadas and padre.origen_precio != OrigenPrecio.DESCOMPOSICION:
+        padre.origen_precio = OrigenPrecio.DESCOMPOSICION
+    await session.flush()
+
+    if pegadas:
+        await calculo.recalcular_cascada(session, padre_id)
+    if alcance == "mover":
+        for origen_id in padres_origen - {padre_id}:
+            await calculo.recalcular_cascada(session, origen_id)
+    return pegadas
+
+
 async def obtener_linea(session: AsyncSession, linea_id: uuid.UUID) -> Descomposicion | None:
     org_id = require_organization_id()
     return await session.scalar(

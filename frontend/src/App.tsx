@@ -37,6 +37,7 @@ import { FacturaRecibidaDetalle } from './pages/FacturaRecibidaDetalle'
 import { FacturaRecibidaCrear, FacturasRecibidas } from './pages/FacturasRecibidas'
 import { IaPatrones } from './pages/IaPatrones'
 import { ImportarBC3 } from './pages/ImportarBC3'
+import { Inicio } from './pages/Inicio'
 import { Landing } from './pages/Landing'
 import { LandingNueva } from './pages/LandingNueva'
 import { ObraCrear, Obras } from './pages/Obras'
@@ -72,6 +73,7 @@ import { WorkspaceProvider, useWorkspace } from './workspace'
 /** Pantallas ya implementadas, indexadas por la ruta que publica el módulo en
  *  su `nav`. Lo que no esté aquí se pinta como hueco con su fase. */
 const PANTALLAS: Record<string, ComponentType> = {
+  '/inicio': Inicio,
   '/ajustes': Ajustes,
   '/terceros': Terceros,
   '/contactos': Contactos,

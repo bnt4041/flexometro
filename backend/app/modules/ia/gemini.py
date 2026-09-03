@@ -324,9 +324,14 @@ def _prompt_documento(
         "`proponer_capitulos`: cada partida nueva lleva su "
         "descompuesto con los componentes reales que hayas encontrado "
         "(dales su `concepto_id` exacto, nunca inventado) y, para lo que de "
-        "verdad no exista en el banco, un componente personalizado con un "
-        "precio de mercado razonable — dilo claramente en la descripción, no "
-        "lo des como precio real. Añade también `texto` en cada partida "
+        "verdad no exista en el banco: si el usuario ha pedido "
+        "explícitamente que estimes o pongas un precio de mercado para lo "
+        "que falte, añade un componente personalizado con un precio "
+        "razonable — dilo claramente en la descripción, no lo des como "
+        "precio real. Si no lo ha pedido, NO inventes ese componente: dilo "
+        "en la conversación (qué falta y que no está en el banco) y deja la "
+        "partida sin él, sin que eso te impida seguir con el resto. Añade "
+        "también `texto` en cada partida "
         "nueva con la explicación técnica (de qué trata, cómo se ha medido) "
         "— es la descripción ampliada de la partida, no un dato del "
         "descompuesto. NO te quedes solo con el precio y el descompuesto: "
@@ -334,9 +339,7 @@ def _prompt_documento(
         "cantidades que ya has calculado de las cotas (una línea por cada "
         "elemento medible), para que la partida quede con su medición real "
         "en vez de en 0 — es el mismo cálculo que ya has hecho para elegir "
-        "qué buscar en el banco, no lo descartes al proponer. Solo si una "
-        "partida no tiene ningún componente razonable ni en el banco ni por "
-        "precio de mercado, dilo en la conversación en vez de inventar. "
+        "qué buscar en el banco, no lo descartes al proponer. "
         "\n\nEn los dos casos: no es una acción real todavía, solo propones "
         "— el usuario confirma después en la pantalla. Nunca digas que ya lo "
         "has creado, guardado o buscado en el banco sin haberlo hecho de "
@@ -454,9 +457,10 @@ _ESQUEMA_COMPONENTE_GEMINI = {
         "personalizado": {
             "type": "BOOLEAN",
             "description": (
-                "true si este componente no está en el banco y usas un precio de "
-                "mercado razonable en su lugar. Rellena resumen/unidad/precio/"
-                "naturaleza en vez de concepto_id."
+                "true SOLO si este componente no está en el banco Y el usuario "
+                "ha pedido explícitamente que estimes o pongas un precio de "
+                "mercado para lo que falte — nunca por iniciativa propia. "
+                "Rellena resumen/unidad/precio/naturaleza en vez de concepto_id."
             ),
         },
         "resumen": {
@@ -469,7 +473,11 @@ _ESQUEMA_COMPONENTE_GEMINI = {
         },
         "precio": {
             "type": "NUMBER",
-            "description": "Precio unitario del componente personalizado (solo si personalizado es true)",
+            "description": (
+                "Precio unitario del componente personalizado: tu estimación de "
+                "mercado, ya que se ha pedido explícitamente (solo si "
+                "personalizado es true)"
+            ),
         },
         "naturaleza": {
             "type": "STRING",
@@ -502,7 +510,8 @@ _DECLARACION_PROPONER_CAPITULOS = {
     "description": (
         "Propón uno o varios capítulos nuevos en el presupuesto, cada "
         "partida con su descompuesto REAL resuelto contra el banco de "
-        "precios (o con un componente personalizado a precio de mercado "
+        "precios (o, solo si el usuario ha pedido explícitamente una "
+        "estimación, con un componente personalizado a precio de mercado "
         "para lo que no encuentres) — la vía para presupuestar algo que no "
         "trae precio propio en el documento (un plano, unas cotas). Busca "
         "los componentes antes con `buscar_conceptos_banco`; no inventes un "

@@ -4333,9 +4333,189 @@ input[type='file'].input {
 }
 
 .plano__panel {
-  width: 280px;
+  width: 300px;
   flex-shrink: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+/* Las secciones del panel ya vienen separadas por el `gap` de arriba: el
+   margen que traen de serie sumaba a eso y dejaba huecos desiguales. */
+.plano__panel .form-section {
+  margin: 0;
+}
+
+/* Calibrar es el paso que desbloquea todo lo demás, así que se explica en el
+   sitio en vez de esconderse detrás del icono de la regla. */
+.plano__calibrar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-accent-strong);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  font-size: var(--fs-sm);
+}
+
+.plano__calibrar-opciones {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+
+.plano__capas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plano__capa {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.plano__capa-nombre {
+  flex: 1;
+  min-width: 0;
+  /* Truncado y no envuelto: una capa llamada «Reconocido por la IA» partía la
+     fila en dos y descuadraba toda la lista. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 3px var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.plano__capa-nombre:hover {
+  background: var(--c-surface-3);
+}
+
+.plano__capa-nombre.is-activa {
+  font-weight: 600;
+  border-color: var(--c-accent-strong);
+  background: var(--c-accent-soft);
+}
+
+/* Subir/bajar la capa. Discretas: se usan una vez al montar el plano y no
+   deben competir con el nombre, que es lo que se pincha a todas horas. */
+.plano__capa-orden {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.plano__capa-orden button {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.plano__capa-orden button:hover:not(:disabled) {
+  color: var(--c-text);
+}
+
+.plano__capa-orden button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.plano__capa-nueva {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.plano__mediciones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.plano__medicion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
+}
+
+.plano__medicion.is-activa {
+  border-color: var(--c-accent-strong);
+  background: var(--c-accent-soft);
+}
+
+.plano__medicion-nombre {
+  display: flex;
+  justify-content: space-between;
+  /* `center` y no `baseline`: con el punto de color delante, alinear por la
+     base dejaba el punto flotando por encima del texto. */
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plano__medicion-texto {
+  /* Se queda con el hueco que sobra para que el valor no se despegue del
+     borde derecho cuando el nombre es corto. */
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plano__medicion-valor {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Los distintivos y el botón van en su propia línea, no colgando del nombre:
+   así una medición larga no empuja el «a la partida» fuera del panel. */
+.plano__medicion-pie {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: center;
+  font-size: var(--fs-xs);
+}
+
+.plano__medicion-pie:empty {
+  display: none;
 }
 
 .lienzo {
@@ -4379,12 +4559,17 @@ input[type='file'].input {
   background: none;
 }
 
-.plano__capa--activa {
-  font-weight: 600;
+/* Rueda = zoom y botón central = desplazar (ver `VisorPlano`). El cursor lo
+   dice mientras se arrastra, que si no parece que se haya quedado colgado. */
+.plano__visor.is-arrastrando {
+  cursor: grabbing;
 }
 
-.plano__medicion--activa {
-  background: var(--c-accent-soft);
+.plano__visor.is-arrastrando * {
+  /* Sin esto, arrastrar por encima del plano selecciona texto y el puntero
+     salta entre la mano y el cursor de selección. */
+  pointer-events: none;
+  user-select: none;
 }
 
 @media (max-width: 900px) {
@@ -4395,4 +4580,45 @@ input[type='file'].input {
   .plano__panel {
     width: auto;
   }
+}
+
+/* Cuántos elementos hay en la capa, en la hoja que se está viendo. Sin este
+   número, apagar una capa vacía parece que no funciona cuando lo que pasa es
+   que no había nada dentro. */
+.plano__capa-cuenta {
+  flex-shrink: 0;
+  min-width: 1.6em;
+  text-align: right;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-muted);
+}
+
+.plano__capa-cuenta.is-vacia {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* El color con el que se pinta el elemento, a la vista en su fila: es la
+   forma de relacionar lo de la lista con lo del plano sin tener que pinchar. */
+.plano__punto-color {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgb(0 0 0 / 0.2);
+}
+
+.plano__capa-borrar {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--c-text-muted);
+  line-height: 0;
+  cursor: pointer;
+}
+
+.plano__capa-borrar:hover {
+  color: var(--c-danger);
 }

@@ -38,9 +38,12 @@ from app.modules.planos.schemas import (
     EscalaImpresaIn,
     HojaOut,
     LecturaIaOut,
+    OrdenCapasIn,
     PlanoDetalle,
     PlanoOut,
     PlanoUpdate,
+    RevisionIaIn,
+    RevisionIaOut,
 )
 
 router = APIRouter(
@@ -168,6 +171,31 @@ async def borrar(
     await service.borrar_plano(session, plano)
 
 
+@router.delete("/hojas/{hoja_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def borrar_hoja(
+    hoja_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("planos", "borrar")),
+) -> None:
+    """Quita una hoja del plano y lo dibujado en ella.
+
+    Lo que ya se hubiera llevado a una partida NO se toca: esas líneas de
+    medición son del presupuesto y siguen contando. Lo que se pierde es la
+    marca sobre el plano de dónde salió el número.
+    """
+    hoja = await service.obtener_hoja(session, hoja_id)
+    if hoja is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Hoja no encontrada")
+    # La propiedad se comprueba sobre el plano, que es lo que tiene autoría:
+    # una hoja suelta no es de nadie, es del plano al que pertenece.
+    await _plano(session, hoja.plano_id, principal, alcance)
+    try:
+        await service.borrar_hoja(session, hoja)
+    except service.PlanoInvalido as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
 # ── Capas ───────────────────────────────────────────────────────────────
 
 
@@ -186,6 +214,21 @@ async def crear_capa(
     session.add(capa)
     await session.flush()
     return CapaOut.model_validate(capa)
+
+
+@router.put("/{plano_id}/capas/orden", response_model=list[CapaOut])
+async def ordenar_capas(
+    plano_id: uuid.UUID,
+    datos: OrdenCapasIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("planos", "editar")),
+) -> list[CapaOut]:
+    """Reordena las capas. El orden es el orden en Z: la última de la lista se
+    pinta encima de todas."""
+    plano = await _plano(session, plano_id, principal, alcance)
+    capas = await service.ordenar_capas(session, plano, datos.capa_ids)
+    return [CapaOut.model_validate(c) for c in capas]
 
 
 @router.put("/capas/{capa_id}", response_model=CapaOut)
@@ -315,6 +358,81 @@ async def leer_con_ia(
         cotas=[CotaLeidaOut(texto=c.texto, metros=c.metros, donde=c.donde) for c in lectura.cotas],
         resumen=lectura.resumen,
         avisos=lectura.avisos,
+    )
+
+
+@router.post("/hojas/{hoja_id}/revisar-con-ia", response_model=RevisionIaOut)
+async def revisar_con_ia(
+    hoja_id: uuid.UUID,
+    datos: RevisionIaIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("planos", "editar")),
+) -> RevisionIaOut:
+    """La IA revisa la hoja y, si se le deja, señala encima lo que reconoce.
+
+    Se diferencia de `leer-con-ia` en que esto **escribe**: calibra la hoja si
+    el plano lleva su escala impresa (exacto, sin estimar píxeles) y deja
+    dibujado lo que ha reconocido como propuesta a revisar. Con `peticion` se
+    le pide algo concreto («cuenta las puertas», «marca las estancias»).
+    """
+    from app.modules.core import billing_service
+
+    hoja = await service.obtener_hoja(session, hoja_id)
+    if hoja is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Hoja no encontrada")
+    plano = await service.obtener_plano(session, hoja.plano_id)
+    if plano is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plano no encontrado")
+    if plano.origen == OrigenPlano.DXF:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Un DXF ya trae su geometría exacta: señalarla a ojo con la IA sería "
+            "cambiar un dato bueno por una estimación. Mide pinchando la entidad.",
+        )
+
+    calibrada_antes = hoja.metros_por_unidad is not None
+    try:
+        contenido = await storage.descargar_objeto(plano.object_key)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "El fichero no está disponible ahora mismo"
+        ) from exc
+
+    # Solo se traduce lo que se sabe explicar. Cualquier otro fallo sube tal
+    # cual: taparlo con un 502 genérico daría un mensaje falso («el fichero no
+    # está disponible») y dejaría el error de verdad sin rastro.
+    try:
+        lectura, creados = await service.revisar_con_ia(
+            session, plano, hoja, contenido, peticion=datos.peticion, dibujar=datos.dibujar
+        )
+    except lector_ia.LecturaFallida as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    await billing_service.registrar_uso_ia(
+        session,
+        organization_id=require_organization_id(),
+        usuario_subject=principal.subject,
+        usuario_nombre=principal.username,
+        proveedor="gemini",
+        modelo=lectura.modelo,
+        tokens_entrada=lectura.tokens_entrada,
+        tokens_salida=lectura.tokens_salida,
+        referencia=str(plano.id),
+    )
+    await session.commit()
+
+    return RevisionIaOut(
+        escala_impresa=lectura.escala_impresa,
+        escala_texto=lectura.escala_texto,
+        escala_aplicable=lectura.escala_impresa is not None
+        and plano.origen == OrigenPlano.PDF,
+        cotas=[CotaLeidaOut(texto=c.texto, metros=c.metros, donde=c.donde) for c in lectura.cotas],
+        resumen=lectura.resumen,
+        respuesta=lectura.respuesta,
+        avisos=lectura.avisos,
+        elementos_creados=creados,
+        calibrada=not calibrada_antes and hoja.metros_por_unidad is not None,
     )
 
 

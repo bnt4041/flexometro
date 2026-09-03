@@ -48,6 +48,14 @@ class CapaIn(BaseModel):
     orden: int = 0
 
 
+class OrdenCapasIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Las capas del plano en el orden en que se quieren, de abajo arriba: la
+    #: última se pinta encima de todas.
+    capa_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
 class ElementoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -61,6 +69,9 @@ class ElementoOut(BaseModel):
     valor: Decimal | None = None
     unidad: str | None = None
     linea_medicion_id: uuid.UUID | None = None
+    #: Lo dibujó la IA mirando la imagen: su geometría es aproximada hasta que
+    #: alguien la revisa, y por eso se enseña marcado.
+    propuesto_ia: bool = False
     creado_por_nombre: str | None = None
     created_at: datetime
 
@@ -149,6 +160,32 @@ class LecturaIaOut(BaseModel):
     cotas: list[CotaLeidaOut] = []
     resumen: str | None = None
     avisos: list[str] = []
+
+
+class RevisionIaIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Lo que se le pide en concreto («cuenta las puertas», «mide el salón»).
+    #: Sin esto hace una revisión general del plano.
+    peticion: str | None = Field(default=None, max_length=500)
+    #: `False` para que solo lea y responda, sin dibujar nada encima.
+    dibujar: bool = True
+
+
+class RevisionIaOut(LecturaIaOut):
+    """Lo que ha hecho la IA al revisar la hoja.
+
+    A diferencia de `LecturaIaOut`, esto SÍ ha escrito: puede haber calibrado
+    la hoja (si el plano llevaba su escala escrita, que es exacta) y puede
+    haber dejado elementos dibujados, siempre marcados como propuesta.
+    """
+
+    #: Lo que responde a lo que se le haya pedido.
+    respuesta: str | None = None
+    #: Cuántos elementos ha dejado dibujados, ya marcados como propuesta.
+    elementos_creados: int = 0
+    #: `True` si ha calibrado la hoja con la escala impresa que ha leído.
+    calibrada: bool = False
 
 
 class EscalaImpresaIn(BaseModel):

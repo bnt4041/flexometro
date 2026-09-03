@@ -55,7 +55,55 @@ async def subir_tenant(
     try:
         plantilla = await service.subir_plantilla(session, cuenta_id, nombre, contenido)
     except service.PlantillaInvalida as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "mensaje": exc.mensaje_usuario,
+                "nota_tecnica": exc.nota_tecnica,
+                "reparable": exc.reparable,
+            },
+        ) from exc
+    await session.commit()
+    return PlantillaPresupuestoOut.model_validate(plantilla)
+
+
+@tenant_router.post(
+    "/reparar", response_model=PlantillaPresupuestoOut, status_code=status.HTTP_201_CREATED
+)
+async def reparar_y_subir_tenant(
+    nombre: str = Form(..., min_length=1, max_length=120),
+    archivo: UploadFile = File(...),
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> PlantillaPresupuestoOut:
+    """Repara automáticamente el error más común (etiquetas {%tr/%p ...%} de
+    apertura y cierre compartiendo fila/párrafo, ver `PlantillaInvalida` en
+    el servicio) y sube el resultado ya arreglado. Solo tiene sentido
+    llamarla tras un 422 de `subir_tenant` con `reparable: true`."""
+    if not archivo.filename or not archivo.filename.lower().endswith(".docx"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Solo se admiten archivos .docx"
+        )
+    contenido = await archivo.read()
+    if len(contenido) > TAMANO_MAXIMO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El archivo supera los 15 MB"
+        )
+
+    contenido_reparado = service.reparar_tags_docxtpl(contenido)
+
+    cuenta_id = await cuenta_id_del_principal(session, principal)
+    try:
+        plantilla = await service.subir_plantilla(session, cuenta_id, nombre, contenido_reparado)
+    except service.PlantillaInvalida as exc:
+        # La reparación automática solo cubre el caso de etiquetas mal
+        # separadas; si el fallo era otra cosa (o hay más de un problema),
+        # se devuelve igual que un intento normal, con su nota técnica.
+        mensaje = "La reparación automática no ha sido suficiente: " + exc.mensaje_usuario
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"mensaje": mensaje, "nota_tecnica": exc.nota_tecnica, "reparable": False},
+        ) from exc
     await session.commit()
     return PlantillaPresupuestoOut.model_validate(plantilla)
 

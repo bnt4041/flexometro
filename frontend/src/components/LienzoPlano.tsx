@@ -56,6 +56,7 @@ export function LienzoPlano({
   onSeleccionar,
   onTerminar,
   onEntidad,
+  onProgreso,
 }: {
   rutaArchivo: string
   esPdf: boolean
@@ -72,6 +73,10 @@ export function LienzoPlano({
   /** Una entidad del DXF elegida para medirla entera, con su geometría
    *  exacta: aquí no se estima nada. */
   onEntidad?: (puntos: PuntoPlano[], cerrado: boolean) => void
+  /** Cuántos puntos lleva puestos el trazo a medias. Sirve para poder guiar
+   *  paso a paso desde fuera («pincha el otro extremo»), que es la diferencia
+   *  entre una herramienta que se entiende y una que hay que adivinar. */
+  onProgreso?: (puntos: number) => void
 }) {
   const ancho = Number(hoja.ancho)
   const alto = Number(hoja.alto)
@@ -86,19 +91,30 @@ export function LienzoPlano({
     setEnCurso([])
   }, [hoja.id, herramienta])
 
+  useEffect(() => {
+    onProgreso?.(enCurso.length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enCurso.length])
+
   const colorDeCapa = useMemo(() => {
     const mapa = new Map(capas.map((c) => [c.id, c]))
     return (id: string | null) => (id ? mapa.get(id) ?? null : null)
   }, [capas])
 
-  const visibles = useMemo(
-    () =>
-      elementos.filter((e) => {
-        const capa = colorDeCapa(e.capa_id)
-        return capa ? capa.visible : true
-      }),
-    [elementos, colorDeCapa],
-  )
+  const visibles = useMemo(() => {
+    const dentro = elementos.filter((e) => {
+      const capa = colorDeCapa(e.capa_id)
+      return capa ? capa.visible : true
+    })
+    // El orden de las capas es el orden en Z. Lo que no tiene capa se pinta
+    // al final —encima de todo— y no debajo: son elementos viejos o de una
+    // capa borrada, y esconderlos bajo las demás sería perderlos de vista sin
+    // que nada lo explique.
+    return dentro
+      .map((elemento, i) => ({ elemento, i, orden: colorDeCapa(elemento.capa_id)?.orden }))
+      .sort((a, b) => (a.orden ?? Infinity) - (b.orden ?? Infinity) || a.i - b.i)
+      .map((x) => x.elemento)
+  }, [elementos, colorDeCapa])
 
   function puntoDelEvento(evento: React.MouseEvent): PuntoPlano | null {
     const svg = svgRef.current

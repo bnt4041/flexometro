@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punch List Flexómetro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --paper:#EDEFE6;
+    --paper-raised:#FAFBF5;
+    --paper-sunken:#E1E4D6;
+    --ink:#262B21;
+    --ink-soft:#5C6354;
+    --ink-faint:#8A907E;
+    --line:#CBD1BE;
+    --accent:#8F6717;
+    --accent-strong:#6E4F10;
+    --accent-contrast:#FFFDF6;
+    --good:#356E42;
+    --good-bg:#DCEBDD;
+    --risk:#A03D28;
+    --risk-bg:#F2DAD1;
+    --shadow: 0 1px 2px rgba(38,43,33,0.06), 0 1px 0 rgba(38,43,33,0.03);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#191D15;
+      --paper-raised:#22271C;
+      --paper-sunken:#14170F;
+      --ink:#E9EAD9;
+      --ink-soft:#ABB09B;
+      --ink-faint:#767C67;
+      --line:#3A4030;
+      --accent:#D8A63C;
+      --accent-strong:#F0C161;
+      --accent-contrast:#211803;
+      --good:#6FBF7C;
+      --good-bg:#22392A;
+      --risk:#E2795F;
+      --risk-bg:#3A2119;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 1px 0 rgba(0,0,0,0.2);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#191D15;
+    --paper-raised:#22271C;
+    --paper-sunken:#14170F;
+    --ink:#E9EAD9;
+    --ink-soft:#ABB09B;
+    --ink-faint:#767C67;
+    --line:#3A4030;
+    --accent:#D8A63C;
+    --accent-strong:#F0C161;
+    --accent-contrast:#211803;
+    --good:#6FBF7C;
+    --good-bg:#22392A;
+    --risk:#E2795F;
+    --risk-bg:#3A2119;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 1px 0 rgba(0,0,0,0.2);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important;}
+  }
+
+  .wrap{max-width:52rem; margin:0 auto; padding:0 1.25rem 4rem;}
+
+  .topbar{
+    position:sticky; top:0; z-index:5;
+    background:color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .topbar-inner{max-width:52rem; margin:0 auto; padding:1.1rem 1.25rem 0.9rem;}
+  .eyebrow{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:500;
+    display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;
+  }
+  .sync-status{color:var(--ink-faint); font-weight:400; letter-spacing:0.04em;}
+  .sync-status.ok{color:var(--good);}
+  .sync-status.err{color:var(--risk);}
+  h1{
+    font-family:"Big Shoulders Display", "Arial Narrow", sans-serif;
+    font-weight:800;
+    font-size:clamp(1.6rem, 4vw, 2.1rem);
+    letter-spacing:0.01em;
+    margin:0.15rem 0 0.7rem;
+    text-wrap:balance;
+    line-height:0.95;
+  }
+  .progress-row{display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;}
+  .progress-track{
+    flex:1; height:8px; border-radius:2px; background:var(--paper-sunken);
+    border:1px solid var(--line); overflow:hidden;
+  }
+  .progress-fill{
+    height:100%; background:var(--accent); width:0%;
+    transition:width 0.25s ease;
+  }
+  .progress-count{
+    font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums;
+    font-size:0.85rem; color:var(--ink-soft); white-space:nowrap;
+  }
+  .toolbar{display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; padding-bottom:0.9rem;}
+  .filters{display:flex; gap:0.35rem; flex-wrap:wrap;}
+  .filter-btn{
+    font-family:"IBM Plex Mono", monospace; font-size:0.72rem; letter-spacing:0.05em;
+    text-transform:uppercase; padding:0.4rem 0.65rem; border-radius:3px;
+    border:1px solid var(--line); background:var(--paper-raised); color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .filter-btn:hover{border-color:var(--accent); color:var(--ink);}
+  .filter-btn.active{background:var(--accent); border-color:var(--accent); color:var(--accent-contrast);}
+  .filter-btn:focus-visible, .reset-btn:focus-visible, .print-btn:focus-visible, .copy-btn:focus-visible, summary:focus-visible, .item-row:focus-within{
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+  .print-btn{
+    margin-left:auto;
+    font-family:"IBM Plex Mono", monospace; font-size:0.72rem; letter-spacing:0.05em;
+    text-transform:uppercase; padding:0.4rem 0.7rem; border-radius:3px;
+    border:1px solid var(--accent); background:var(--accent); color:var(--accent-contrast);
+    cursor:pointer;
+  }
+  .print-btn:hover{background:var(--accent-strong); border-color:var(--accent-strong);}
+  .copy-btn{
+    font-family:"IBM Plex Mono", monospace; font-size:0.72rem; letter-spacing:0.05em;
+    text-transform:uppercase; padding:0.4rem 0.65rem; border-radius:3px;
+    border:1px solid var(--line); background:var(--paper-raised); color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .copy-btn:hover{border-color:var(--accent); color:var(--ink);}
+  .copy-btn.copied{border-color:var(--good); color:var(--good);}
+  .reset-btn{
+    font-family:"IBM Plex Mono", monospace; font-size:0.72rem; letter-spacing:0.05em;
+    text-transform:uppercase; padding:0.4rem 0.65rem; border-radius:3px;
+    border:1px solid var(--line); background:transparent; color:var(--ink-faint);
+    cursor:pointer;
+  }
+  .reset-btn:hover{color:var(--risk); border-color:var(--risk);}
+
+  .intro{
+    padding:1.4rem 0 0.6rem;
+    color:var(--ink-soft); font-size:0.92rem; line-height:1.6; max-width:42rem;
+  }
+  .intro strong{color:var(--ink); font-weight:600;}
+  .intro code{
+    font-family:"IBM Plex Mono", monospace; font-size:0.85em;
+    background:var(--paper-sunken); padding:0.1em 0.35em; border-radius:2px;
+  }
+
+  section.card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:3px;
+    margin-top:1rem;
+    box-shadow:var(--shadow);
+  }
+  details{padding:0;}
+  summary{
+    list-style:none; cursor:pointer;
+    display:flex; align-items:center; gap:0.75rem;
+    padding:0.85rem 1.1rem;
+    border-bottom:1px solid transparent;
+  }
+  details[open] summary{border-bottom-color:var(--line);}
+  summary::-webkit-details-marker{display:none;}
+  .chevron{
+    font-family:"IBM Plex Mono", monospace; color:var(--ink-faint);
+    font-size:0.75rem; transition:transform 0.15s ease; flex-shrink:0;
+  }
+  details[open] .chevron{transform:rotate(90deg);}
+  .sec-head{flex:1; min-width:0;}
+  .sec-tag{
+    font-family:"IBM Plex Mono", monospace; font-size:0.68rem; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--ink-faint); display:flex; align-items:center; gap:0.5rem;
+    margin-bottom:0.15rem; flex-wrap:wrap;
+  }
+  .risk-pill{
+    font-family:"IBM Plex Mono", monospace; font-size:0.62rem; letter-spacing:0.08em;
+    text-transform:uppercase; color:var(--risk); background:var(--risk-bg);
+    padding:0.12rem 0.4rem; border-radius:2px; font-weight:500;
+  }
+  .sec-title{
+    font-family:"Big Shoulders Display", "Arial Narrow", sans-serif;
+    font-weight:700; font-size:1.28rem; letter-spacing:0.005em;
+  }
+  .sec-count{
+    font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums;
+    font-size:0.8rem; color:var(--ink-faint); flex-shrink:0;
+  }
+
+  .items{padding:0.35rem 0.6rem 0.7rem;}
+  .item-row{
+    display:flex; flex-direction:column; gap:0.4rem;
+    padding:0.55rem 0.5rem; border-radius:3px;
+  }
+  .item-row:hover{background:var(--paper-sunken);}
+  .item-row.hidden{display:none;}
+
+  .row-check{display:flex; align-items:flex-start; gap:0.65rem; cursor:pointer;}
+
+  .cb-wrap{position:relative; flex-shrink:0; margin-top:0.15rem;}
+  .cb-wrap input{
+    position:absolute; opacity:0; width:1.3rem; height:1.3rem; margin:0; cursor:pointer;
+  }
+  .cb-box{
+    width:1.15rem; height:1.15rem; border:1.5px solid var(--ink-faint); border-radius:2px;
+    display:flex; align-items:center; justify-content:center; background:var(--paper-raised);
+    pointer-events:none; flex-shrink:0;
+  }
+  .cb-wrap input:checked + .cb-box{
+    background:var(--good); border-color:var(--good);
+  }
+  .cb-wrap input:checked + .cb-box::after{
+    content:"✓"; color:var(--accent-contrast); font-size:0.8rem; font-weight:700; line-height:1;
+  }
+  .cb-wrap input:focus-visible + .cb-box{outline:2px solid var(--accent); outline-offset:2px;}
+
+  .item-label{font-size:0.92rem; line-height:1.55; color:var(--ink);}
+  .item-row.done .item-label{color:var(--ink-faint); text-decoration:line-through; text-decoration-color:var(--line);}
+
+  .item-comment{
+    width:100%; margin-left:1.8rem; max-width:calc(100% - 1.8rem);
+    font-family:"IBM Plex Sans", sans-serif; font-size:0.82rem; line-height:1.5;
+    color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:3px;
+    padding:0.4rem 0.55rem; resize:vertical; min-height:1.9rem; overflow:hidden;
+  }
+  .item-comment::placeholder{color:var(--ink-faint);}
+  .item-comment:focus-visible{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent);}
+  .item-row.has-comment .item-comment{border-color:var(--accent);}
+
+  @media print{
+    :root{
+      --paper:#ffffff; --paper-raised:#ffffff; --paper-sunken:#f0f0f0;
+      --ink:#111111; --ink-soft:#333333; --ink-faint:#666666; --line:#bbbbbb;
+    }
+    *{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+    body{background:#fff;}
+    .topbar{position:static; backdrop-filter:none; border-bottom:2px solid var(--line);}
+    .filters, .print-btn, .copy-btn, .reset-btn, .sync-status{display:none;}
+    .chevron{display:none;}
+    details .items{display:block !important;}
+    summary{border-bottom:1px solid var(--line) !important;}
+    .item-row.hidden{display:flex !important;}
+    section.card{box-shadow:none; break-inside:avoid;}
+    .item-row{break-inside:avoid;}
+    .item-comment{border-color:#999; resize:none;}
+  }
+
+  footer{
+    text-align:center; color:var(--ink-faint); font-size:0.78rem; margin-top:2.2rem; line-height:1.6;
+  }
+
+  @media (max-width: 30rem){
+    .print-btn{margin-left:0;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="eyebrow">
+      Pruebas manuales · solo interfaz
+      <span class="sync-status" id="syncStatus">en este navegador</span>
+    </div>
+    <h1>Punch list — Flexómetro</h1>
+    <div class="progress-row">
+      <div class="progress-track"><div class="progress-fill" id="fillGlobal"></div></div>
+      <div class="progress-count" id="countGlobal">0 / 0</div>
+    </div>
+    <div class="toolbar">
+      <div class="filters" id="filters">
+        <button class="filter-btn active" data-filter="all">Todo</button>
+        <button class="filter-btn" data-filter="pending">Pendiente</button>
+        <button class="filter-btn" data-filter="risk">Prioritario</button>
+        <button class="filter-btn" data-filter="comment">Con comentario</button>
+        <button class="filter-btn" data-filter="done">Hecho</button>
+      </div>
+      <button class="print-btn" id="printBtn">Descargar PDF</button>
+      <button class="copy-btn" id="copyBtn">Copiar resultados</button>
+      <button class="reset-btn" id="resetBtn">Reiniciar</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="intro">
+    Cada punto se prueba <strong>solo con clics, en la aplicación</strong> —
+    nada de terminal ni de código. Inicia sesión con un usuario normal (y,
+    donde se indique, con uno de permisos limitados) y ve marcando según
+    pruebes. Las secciones con <span class="risk-pill">PRIORITARIO</span>
+    son módulos que se han añadido hace muy poco y todavía nadie los ha
+    probado de principio a fin — conviene empezar por ahí. Cada punto tiene
+    un campo de texto para anotar un bug o una duda. <strong>El progreso se guarda
+    solo</strong> en este navegador según vas marcando, así que puedes cerrar
+    la pestaña y seguir donde lo dejaste. El botón
+    <strong>Descargar PDF</strong> abre el diálogo de impresión del
+    navegador con todo desplegado para guardarlo como PDF.
+  </p>
+  <div id="sections"></div>
+  <footer>Flexómetro · flexometro.online — checklist de usuario, sin pasos técnicos</footer>
+</div>
+
+<script>
+const DATA = [
+  { tag: "00 · Acceso", title: "Primer acceso a la aplicación", risk:false, items: [
+    "Entrar en la aplicación e iniciar sesión con un usuario normal.",
+    "Comprobar que el menú lateral muestra los módulos que le corresponden a esa organización.",
+    "Si el usuario pertenece a varias organizaciones, cambiar de una a otra desde el selector y ver que el contenido cambia con ella.",
+    "La pantalla de inicio carga completa, sin huecos en blanco ni partes que se quedan cargando indefinidamente.",
+  ]},
+  { tag: "01 · Núcleo", title: "Organizaciones y módulos", risk:false, items: [
+    "Con un usuario de la organización A, comprobar que no aparece ningún dato (obras, presupuestos, terceros) de otra organización, ni aunque se pegue una URL de detalle directa.",
+    "Desde Ajustes, intentar desactivar un módulo del que otro depende y comprobar que la aplicación avisa antes de dejarlo a medias.",
+    "Activar un módulo y comprobar que sus módulos dependientes aparecen ya activados en la misma pantalla.",
+    "Intentar entrar a la pantalla de un módulo desactivado: debe avisar de que no está disponible, no mostrar una pantalla rota o vacía.",
+  ]},
+  { tag: "02 · Permisos", title: "Grupos y accesos", risk:false, items: [
+    "Crear un grupo con ver limitado a 'lo propio' en un módulo, asignarlo a un usuario de prueba, y comprobar que solo ve lo que él mismo ha creado.",
+    "Con ese usuario, intentar abrir por URL un registro que no es suyo: debe verse como si no existiera, no como un aviso de 'sin permiso'.",
+    "Comprobar que un usuario con perfil de administrador ve y edita todo sin pertenecer a ningún grupo concreto.",
+    "Con un grupo que solo tenga permiso de editar (no de crear) en un módulo, comprobar que el botón de 'Nuevo' no aparece o está deshabilitado.",
+    "Crear una clave de API con permisos limitados desde Ajustes y comprobar que queda registrada con esos límites.",
+  ]},
+  { tag: "03 · Maestros", title: "Terceros y catálogo", risk:false, items: [
+    "Crear un tercero marcando 'Es cliente' y 'Es proveedor' a la vez, y comprobar que aparece en ambos filtros del listado.",
+    "Intentar guardar un tercero con un NIF con el dígito de control mal: la pantalla debe avisar antes de dejar guardar.",
+    "Crear un contacto sin asociarlo a ninguna empresa.",
+    "Con 'compartir maestros' activo, entrar con un usuario de una organización hermana y comprobar que ve el mismo tercero pero no puede editarlo.",
+    "Dar de alta un precio de proveedor con varios decimales (por ejemplo 0,1234 €) y comprobar que se guarda exacto, sin redondear.",
+  ]},
+  { tag: "04 · Presupuestos", title: "Precios, capítulos y partidas", risk:false, items: [
+    "Cambiar el precio de un producto en el Catálogo y comprobar que los precios del presupuesto que lo usan se actualizan solos.",
+    "Intentar meter un precio dentro de su propia composición (un ciclo): la aplicación debe impedirlo con un aviso claro.",
+    "Emitir un presupuesto (sacarlo de borrador) y comprobar que ya no deja editar sus precios.",
+    "Crear una nueva versión de un presupuesto ya emitido y comprobar que nace en borrador, con los precios otra vez editables.",
+    "Comparar dos versiones del mismo presupuesto y revisar que se ven bien qué partidas se han añadido, quitado o cambiado.",
+    "En una línea de medición, dejar solo el número de unidades (por ejemplo 5) sin longitud ni anchura, y comprobar que el resultado sale 5, no 0.",
+    "Desde Ajustes → Plantillas de presupuesto, comprobar que aparecen plantillas de partida (por defecto del sistema) para presupuesto, mediciones y descompuestos.",
+    "Subir una plantilla de documento propia (un .docx con marcadores) y comprobar que queda disponible para descargar.",
+    "Desde la ficha de un presupuesto, usar 'Descargar' y elegir una plantilla en PDF: comprobar que se abre con los datos reales del presupuesto (no en blanco ni con datos de otro).",
+    "Repetir la misma descarga en Word (.docx) y comprobar que el fichero se abre sin errores y con los mismos datos que el PDF.",
+    "Borrar una plantilla que no esté en uso desde Ajustes y comprobar que deja de aparecer en las opciones de descarga del presupuesto.",
+  ]},
+  { tag: "05 · BC3", title: "Importar y exportar bancos de precios", risk:false, items: [
+    "Antes de importar un fichero BC3, usar la vista previa/análisis para ver qué trae sin que se guarde nada todavía.",
+    "Importar un BC3 con tildes y eñes en las descripciones y comprobar que se leen bien, sin símbolos raros.",
+    "Tras importar, revisar si aparece alguna diferencia de precio señalada, en vez de quedar oculta.",
+    "Exportar un presupuesto a BC3 y volver a importarlo: los totales deben coincidir exactamente.",
+  ]},
+  { tag: "06 · Obra", title: "Personal, albaranes y costes", risk:false, items: [
+    "Asignar una persona a una obra, cambiar después su coste por hora en su ficha, y comprobar que la asignación antigua conserva el coste con el que se hizo.",
+    "Rellenar un parte de trabajo diario con horas reales de una persona asignada a una obra.",
+    "Registrar una línea de un albarán con un material que no está dado de alta en el catálogo, sin tener que crearlo antes.",
+    "Abrir el informe de coste real frente a lo presupuestado de una obra y comprobar que la suma de las filas coincide con el total mostrado.",
+  ]},
+  { tag: "07 · Compras", title: "Pedidos, albaranes y solicitudes a proveedor", risk:true, items: [
+    "PRIORITARIO — Abrir, sin iniciar sesión, el enlace de la separata que recibe un proveedor por correo, y comprobar que carga y deja rellenar precios (cambio reciente en esta pantalla).",
+    "Crear una solicitud de precios a varios proveedores y comprobar que a cada uno le corresponde un enlace propio.",
+    "Comparar las respuestas de precios de los distintos proveedores en la pantalla de la solicitud.",
+    "Si el proveedor ya tiene cuenta en Flexómetro, comprobar que la solicitud le aparece dentro de su propia aplicación, no solo por enlace.",
+    "Generar un pedido a proveedor y convertirlo en albarán al recibir el material.",
+  ]},
+  { tag: "08 · Facturación", title: "Certificaciones, facturas y cobros", risk:false, items: [
+    "Certificar una partida por segunda vez y comprobar que solo pide el avance nuevo, no repite lo ya certificado.",
+    "Emitir una factura, anotar su número, anularla y generar otra desde la misma certificación: el número nuevo debe seguir la secuencia, no repetir el anulado.",
+    "Intentar editar o borrar una factura ya emitida: la aplicación solo debe ofrecer la opción de anular.",
+    "Buscar la opción de 'Reintentar envío' en una factura y comprobar que existe para cuando el envío automático falla.",
+    "Registrar un cobro parcial de una factura y comprobar que su estado de cobro se actualiza solo en el listado.",
+  ]},
+  { tag: "09 · IA de presupuestos", title: "Sugerencias y lectura de planos", risk:false, items: [
+    "Sin tener la IA configurada en Ajustes, pedir una sugerencia de patrón y comprobar que la pantalla explica que no está disponible, en vez de un error confuso.",
+    "Pedir una sugerencia de patrón de presupuesto y comprobar que se puede revisar y editar resúmenes, unidades y quitar líneas antes de aceptarla.",
+    "Subir un plano acotado y pedir una lectura de medición con IA.",
+    "Aplicar la misma lectura de plano dos veces: la segunda vez debe avisar de que ya se aplicó.",
+    "Tras aplicar una lectura de plano, comprobar que la partida recalcula su medición e importe en la pantalla al momento.",
+  ]},
+  { tag: "10 · Copiloto", title: "Chat asistido", risk:true, items: [
+    "PRIORITARIO — Con un usuario sin permiso para ver facturas, preguntarle al copiloto por facturas: debe decir que no puede ayudar con eso, no inventarse datos.",
+    "Pedirle al copiloto que cree un tercero nuevo: debe mostrar los datos campo a campo y pedir confirmación antes de guardar nada.",
+    "Darle al copiloto un NIF inválido para un tercero nuevo: debe rechazarlo igual que el formulario normal.",
+    "Pedirle ayuda para abrir un ticket de soporte con un usuario sin permisos especiales.",
+    "Pedirle que borre o cambie un registro ya existente: hoy no debería poder hacerlo — comprobar que no lo hace.",
+  ]},
+  { tag: "11 · Planos", title: "Biblioteca, calibrado, DXF y medición", risk:true, items: [
+    "PRIORITARIO — Subir un PDF con varias láminas y comprobar que cada hoja se calibra por separado.",
+    "Intentar medir sobre una hoja sin calibrar: la aplicación debe impedirlo.",
+    "Calibrar una hoja, medir algo, y luego volver a calibrarla: las medidas ya hechas deben actualizarse solas, no quedar a la escala vieja.",
+    "Subir un plano en formato DXF y medir pinchando directamente sobre una entidad, sin tener que calibrar antes.",
+    "Con un PDF, usar 'Leer escala con IA': si el plano trae la escala escrita debe proponerla sola; si no, debe pedir que piques una cota conocida.",
+    "Llevar una medición del plano a una partida del presupuesto y comprobar que aparece como una línea de medición más.",
+    "Probar el medidor por cámara (realidad aumentada) y comprobar que, si algo falla, no se rompe el resto de la pantalla.",
+  ]},
+  { tag: "12 · PRL", title: "Caducidades y firma electrónica", risk:true, items: [
+    "PRIORITARIO — Comprobar que un documento (de una persona, un vehículo o una obra) a punto de caducar aparece marcado en el listado de PRL.",
+    "Enviar un documento a firma con dos firmantes y comprobar que cada uno recibe su propio enlace.",
+    "Al firmar, comprobar que pide una verificación por un canal distinto al que llevó el enlace (por ejemplo, un código por SMS si el enlace llegó por correo).",
+    "Una vez firmado por todos, abrir el PDF resultante y comprobar que lleva un sello y que existe una hoja de evidencias con firmante, hora e IP.",
+    "Abrir la ficha de un vehículo o maquinaria con documentación caducada y comprobar que se ve marcado como tal.",
+  ]},
+  { tag: "13 · Documental", title: "Documentos, CRM y contratos", risk:false, items: [
+    "Subir un documento y asociarlo a una obra o a un tercero desde su ficha.",
+    "Crear un contrato y comprobar que aparece enlazado tanto en la obra como en el tercero correspondiente.",
+    "Abrir el historial de un registro y comprobar que se ve quién lo cambió y cuándo.",
+  ]},
+  { tag: "14 · Avisos", title: "Notificaciones y WhatsApp", risk:true, items: [
+    "PRIORITARIO — Suscribirse a un tipo de aviso como persona y comprobar que solo le llega a quien se ha suscrito.",
+    "Configurar una vigilancia periódica (por ejemplo, obra parada varios días) y comprobar que el aviso llega solo cuando se cumple.",
+    "Comprobar que el mismo aviso puede llegar por campana, correo y WhatsApp según lo que tenga configurado cada persona en su perfil.",
+    "PRIORITARIO — Enviar un mensaje de prueba por WhatsApp desde la aplicación y comprobar que llega de verdad al número indicado.",
+    "Cambiar la configuración de WhatsApp en Ajustes y comprobar que el resto de avisos (correo, campana) siguen funcionando igual.",
+  ]},
+  { tag: "15 · Desarrolladores", title: "Claves de API y webhooks", risk:true, items: [
+    "PRIORITARIO — Crear una clave de API desde Ajustes → Desarrolladores con permisos concretos.",
+    "Revocar esa clave y comprobar que deja de aparecer como activa al instante.",
+    "Configurar un webhook y comprobar que el registro de envíos muestra cada intento con su resultado.",
+  ]},
+  { tag: "16 · Automatizaciones", title: "Flujos automáticos", risk:true, items: [
+    "PRIORITARIO — Crear un flujo con un disparador, una condición y una acción, y comprobar que se ejecuta cuando ocurre de verdad la condición.",
+    "Revisar el historial de ejecuciones de un flujo y comprobar que se ve qué pasó en cada intento.",
+    "Desactivar un flujo y comprobar que ya no se ejecuta aunque se cumpla la condición.",
+  ]},
+  { tag: "17 · Informes", title: "Informes y exportaciones", risk:true, items: [
+    "PRIORITARIO — Generar un informe agrupado con un usuario de acceso limitado a 'lo propio' y comprobar que solo suma sus datos.",
+    "Exportar una tabla a CSV y a PDF y comprobar que respeta el orden, el filtro y las columnas que tenías puestas en pantalla.",
+  ]},
+  { tag: "18 · Importador", title: "Carga masiva de datos", risk:true, items: [
+    "PRIORITARIO — Importar un Excel o CSV con alguna fila con datos incorrectos y comprobar que esa fila se marca como error mientras el resto se importa bien.",
+    "Comprobar que un dato inválido en el fichero (por ejemplo, un NIF mal) se rechaza igual que si se tecleara a mano.",
+  ]},
+  { tag: "19 · Soporte", title: "Tickets y wiki", risk:true, items: [
+    "PRIORITARIO — Abrir un ticket de soporte desde cualquier pantalla, con un usuario sin permisos especiales.",
+    "Comprobar que el ticket queda relacionado con la pantalla desde la que se abrió.",
+    "Buscar en la wiki con palabras distintas a las de la página (por ejemplo 'no encuentro el proyecto' cuando la página habla de 'obra') y comprobar que la encuentra igual.",
+  ]},
+  { tag: "20 · Plexo", title: "Vínculo entre cuentas", risk:true, items: [
+    "PRIORITARIO — Invitar a otra organización (de otra cuenta) a vincularse y comprobar que queda pendiente para las dos partes.",
+    "Aceptar, rechazar y revocar un vínculo desde ambos lados y comprobar que el estado se ve bien en las dos organizaciones.",
+    "Marcar un perfil como no visible y comprobar que la organización vinculada deja de verlo.",
+  ]},
+  { tag: "21 · Plataforma", title: "PWA, menú y configuración de cuenta", risk:false, items: [
+    "Instalar la aplicación desde el navegador (icono de instalar) y comprobar que abre como una app independiente.",
+    "Desde el menú de usuario, marcar una pantalla como favorita, editar el perfil y cerrar sesión.",
+    "Crear un campo libre nuevo desde Ajustes y comprobar que queda disponible en todas las organizaciones de la misma cuenta.",
+    "Cambiar el idioma de la interfaz y comprobar que se respetan los textos personalizados de la cuenta.",
+    "Descargar un PDF (una factura, una certificación) desde dentro de la aplicación y comprobar que se abre sin pedir iniciar sesión otra vez ni fallar.",
+  ]},
+  { tag: "22 · Administración", title: "Panel de superadmin", risk:false, items: [
+    "Crear una organización nueva desde el panel de Administración y comprobar que arranca con solo el módulo básico activado.",
+    "Activar un módulo para otra organización desde Administración y comprobar que el resto de organizaciones sigue exactamente igual.",
+    "Intentar crear una organización con un identificador ya usado: debe avisar de que ya existe.",
+    "Aplicar dos descuentos a la vez sobre una organización y comprobar que el coste mostrado nunca baja de cero.",
+    "Anular un descuento aplicado y comprobar que sigue apareciendo en el historial, marcado como anulado.",
+    "Dar de alta un administrador de una organización con correo real y comprobar que le llega el correo de bienvenida, y que la contraseña nunca se ve dos veces en pantalla.",
+    "Abrir Ajustes → IA/SMTP/Pasarela de pago y comprobar que nunca se ve la clave o contraseña real, solo si está configurada o no.",
+    "Entrar al panel de Administración con un usuario sin perfil de superadmin y comprobar que se le deniega el acceso.",
+  ]},
+];
+
+// Lo ya probado el 2026-09-01, para no empezar de cero. Solo se usa la
+// primera vez que se abre la página en un navegador; a partir de ahí manda
+// lo que haya guardado localmente.
+const ESTADO_INICIAL = {
+  "s0i0": {
+    "done": true,
+    "comment": ""
+  },
+  "s0i1": {
+    "done": true,
+    "comment": ""
+  },
+  "s0i2": {
+    "done": true,
+    "comment": "la funcionalidad entre empresas debe ser por fichas, ya que hay objetos, menos facturas y pedidos, a placer se podría cambiar."
+  },
+  "s0i3": {
+    "done": true,
+    "comment": "la pagina inicial debe ser la zona de informes y BI"
+  },
+  "s1i0": {
+    "done": true,
+    "comment": "la funcionalidad entre empresas debe ser por fichas, ya que hay objetos, menos facturas y pedidos, a placer se podría cambiar."
+  },
+  "s1i1": {
+    "done": true,
+    "comment": ""
+  },
+  "s1i2": {
+    "done": true,
+    "comment": ""
+  },
+  "s1i3": {
+    "done": true,
+    "comment": ""
+  },
+  "s2i0": {
+    "done": true,
+    "comment": ""
+  },
+  "s3i0": {
+    "done": true,
+    "comment": ""
+  },
+  "s2i1": {
+    "done": true,
+    "comment": ""
+  },
+  "s3i1": {
+    "done": true,
+    "comment": ""
+  },
+  "s2i2": {
+    "done": true,
+    "comment": ""
+  },
+  "s3i2": {
+    "done": true,
+    "comment": ""
+  },
+  "s2i3": {
+    "done": true,
+    "comment": ""
+  },
+  "s3i3": {
+    "done": true,
+    "comment": ""
+  },
+  "s2i4": {
+    "done": true,
+    "comment": ""
+  },
+  "s3i4": {
+    "done": true,
+    "comment": ""
+  },
+  "s4i0": {
+    "done": true,
+    "comment": "una vez añadido a un objeto, no debe de modificarse, aunque se cambie en el banco de precios, si que haya una opción para actualizarlo"
+  },
+  "s4i1": {
+    "done": true,
+    "comment": ""
+  },
+  "s4i2": {
+    "done": true,
+    "comment": ""
+  },
+  "s4i3": {
+    "done": true,
+    "comment": ""
+  },
+  "s4i4": {
+    "done": true,
+    "comment": ""
+  },
+  "s4i5": {
+    "done": true,
+    "comment": ""
+  }
+};
+
+const guardado = localStorage.getItem('flexometro-punchlist');
+let state = guardado ? JSON.parse(guardado) : structuredClone(ESTADO_INICIAL);
+let activeFilter = 'all';
+let saveTimer = null;
+
+function setSyncStatus(kind, text){
+  const el = document.getElementById('syncStatus');
+  el.textContent = text;
+  el.className = 'sync-status' + (kind ? ' ' + kind : '');
+}
+
+function save(){
+  localStorage.setItem('flexometro-punchlist', JSON.stringify(state));
+  setSyncStatus('ok', 'progreso guardado');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => setSyncStatus('', 'en este navegador'), 1500);
+}
+
+function itemId(si, ii){ return 's' + si + 'i' + ii; }
+
+function render(){
+  const root = document.getElementById('sections');
+  root.innerHTML = '';
+  DATA.forEach((sec, si) => {
+    const card = document.createElement('section');
+    card.className = 'card';
+
+    const details = document.createElement('details');
+    details.open = si < 2;
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `
+      <span class="chevron">&#9656;</span>
+      <span class="sec-head">
+        <span class="sec-tag">${sec.tag}${sec.risk ? '<span class="risk-pill">PRIORITARIO</span>' : ''}</span>
+        <span class="sec-title">${sec.title}</span>
+      </span>
+      <span class="sec-count" data-sec-count="${si}"></span>
+    `;
+    details.appendChild(summary);
+
+    const itemsWrap = document.createElement('div');
+    itemsWrap.className = 'items';
+
+    sec.items.forEach((label, ii) => {
+      const id = itemId(si, ii);
+      const row = document.createElement('div');
+      row.className = 'item-row';
+      row.dataset.id = id;
+      row.dataset.risk = sec.risk ? '1' : '0';
+
+      const entry = (state[id] && typeof state[id] === 'object') ? state[id] : { done: !!state[id], comment: '' };
+      state[id] = entry;
+      if (entry.done) row.classList.add('done');
+      if (entry.comment) row.classList.add('has-comment');
+
+      row.innerHTML = `
+        <label class="row-check">
+          <span class="cb-wrap">
+            <input type="checkbox" ${entry.done ? 'checked' : ''} aria-label="${label.replace(/"/g,'&quot;')}">
+            <span class="cb-box"></span>
+          </span>
+          <span class="item-label">${label}</span>
+        </label>
+        <textarea class="item-comment" rows="1" placeholder="Comentario o bug (opcional)">${(entry.comment || '').replace(/</g,'&lt;')}</textarea>
+      `;
+      const input = row.querySelector('input');
+      const textarea = row.querySelector('textarea');
+      input.addEventListener('change', () => {
+        entry.done = input.checked;
+        row.classList.toggle('done', input.checked);
+        save();
+        updateCounts();
+        applyFilter();
+      });
+      textarea.addEventListener('input', () => {
+        entry.comment = textarea.value;
+        row.classList.toggle('has-comment', !!textarea.value.trim());
+        save();
+        applyFilter();
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+      });
+      itemsWrap.appendChild(row);
+    });
+
+    details.appendChild(itemsWrap);
+    card.appendChild(details);
+    root.appendChild(card);
+  });
+  document.querySelectorAll('.item-comment').forEach(t => {
+    t.style.height = 'auto';
+    t.style.height = t.scrollHeight + 'px';
+  });
+  updateCounts();
+  applyFilter();
+}
+
+function updateCounts(){
+  let totalAll = 0, doneAll = 0;
+  DATA.forEach((sec, si) => {
+    let total = sec.items.length, done = 0;
+    sec.items.forEach((_, ii) => { const e = state[itemId(si, ii)]; if (e && e.done) done++; });
+    totalAll += total; doneAll += done;
+    const el = document.querySelector(`[data-sec-count="${si}"]`);
+    if (el) el.textContent = `${done} / ${total}`;
+  });
+  document.getElementById('countGlobal').textContent = `${doneAll} / ${totalAll}`;
+  document.getElementById('fillGlobal').style.width = totalAll ? (doneAll/totalAll*100) + '%' : '0%';
+}
+
+function applyFilter(){
+  document.querySelectorAll('.item-row').forEach(row => {
+    const isDone = row.classList.contains('done');
+    const isRisk = row.dataset.risk === '1';
+    const hasComment = row.classList.contains('has-comment');
+    let show = true;
+    if (activeFilter === 'pending') show = !isDone;
+    else if (activeFilter === 'done') show = isDone;
+    else if (activeFilter === 'risk') show = isRisk;
+    else if (activeFilter === 'comment') show = hasComment;
+    row.classList.toggle('hidden', !show);
+  });
+  document.querySelectorAll('section.card').forEach(card => {
+    const visible = card.querySelectorAll('.item-row:not(.hidden)').length;
+    card.style.display = visible === 0 ? 'none' : '';
+  });
+}
+
+document.getElementById('filters').addEventListener('click', (e) => {
+  const btn = e.target.closest('.filter-btn');
+  if (!btn) return;
+  activeFilter = btn.dataset.filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+  applyFilter();
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (!confirm('Esto desmarca todos los puntos y borra los comentarios de este navegador. ¿Continuar?')) return;
+  for (const k in state) delete state[k];
+  save();
+  render();
+});
+
+document.getElementById('printBtn').addEventListener('click', () => {
+  window.print();
+});
+
+function buildResultsText(){
+  let totalAll = 0, doneAll = 0;
+  DATA.forEach((sec, si) => sec.items.forEach((_, ii) => {
+    totalAll++;
+    if (state[itemId(si, ii)] && state[itemId(si, ii)].done) doneAll++;
+  }));
+  const lines = [];
+  lines.push('PUNCH LIST — FLEXÓMETRO — RESULTADOS DE PRUEBAS MANUALES');
+  lines.push(`Progreso: ${doneAll} / ${totalAll}`);
+  lines.push(`Última actualización: ${new Date().toISOString().slice(0,16).replace('T',' ')} UTC`);
+  lines.push('');
+  DATA.forEach((sec, si) => {
+    let done = 0;
+    sec.items.forEach((_, ii) => { const e = state[itemId(si, ii)]; if (e && e.done) done++; });
+    lines.push('='.repeat(64));
+    lines.push(`${sec.tag}${sec.risk ? ' [PRIORITARIO]' : ''} — ${sec.title} (${done}/${sec.items.length})`);
+    lines.push('='.repeat(64));
+    sec.items.forEach((label, ii) => {
+      const e = state[itemId(si, ii)] || { done: false, comment: '' };
+      lines.push(`[${e.done ? 'x' : ' '}] ${label}`);
+      if (e.comment && e.comment.trim()) lines.push(`    > ${e.comment.trim()}`);
+    });
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('copyBtn');
+  const text = buildResultsText();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    window.prompt('Copia manualmente (Ctrl+C) el resultado:', text);
+    return;
+  }
+  const original = btn.textContent;
+  btn.textContent = '¡Copiado!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1800);
+});
+
+setSyncStatus('', 'en este navegador');
+render();
+</script>
+</body>
+</html>

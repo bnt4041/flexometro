@@ -120,3 +120,78 @@ def test_se_topan_las_cotas_y_los_avisos():
     )
     assert len(lectura.cotas) <= 20
     assert len(lectura.avisos) <= 6
+
+
+# ── Lo que la IA señala sobre la imagen ─────────────────────────────────
+#
+# Esto es lo nuevo y lo más delicado: aquí sí se le aceptan coordenadas, así
+# que el filtro es lo único que separa «una estancia señalada» de «una forma
+# inventada que acaba en un presupuesto».
+
+
+def test_reconoce_un_area_una_longitud_y_un_conteo():
+    lectura = _parsear(
+        '{"escala_denominador": 50, "cotas": [], "elementos": ['
+        '{"tipo":"area","etiqueta":"Salón","puntos":[[0,0],[0.5,0],[0.5,0.5]]},'
+        '{"tipo":"longitud","etiqueta":"Tabique","puntos":[[0.1,0.1],[0.9,0.1]]},'
+        '{"tipo":"conteo","etiqueta":"Puertas","puntos":[[0.2,0.2],[0.3,0.3]]}]}'
+    )
+    assert [e.tipo for e in lectura.elementos] == ["area", "longitud", "conteo"]
+    assert lectura.elementos[0].etiqueta == "Salón"
+    assert lectura.elementos[2].puntos == [
+        (Decimal("0.2"), Decimal("0.2")),
+        (Decimal("0.3"), Decimal("0.3")),
+    ]
+
+
+@pytest.mark.parametrize(
+    "elemento",
+    [
+        # Un área necesita tres vértices: con dos no es una superficie.
+        '{"tipo":"area","etiqueta":"x","puntos":[[0,0],[1,1]]}',
+        # Una longitud necesita dos puntos.
+        '{"tipo":"longitud","etiqueta":"x","puntos":[[0,0]]}',
+        # Un tipo que el plano no sabe medir.
+        '{"tipo":"nota","etiqueta":"x","puntos":[[0,0]]}',
+        # Sin puntos no hay nada que señalar.
+        '{"tipo":"conteo","etiqueta":"x","puntos":[]}',
+    ],
+)
+def test_se_descarta_lo_que_no_es_una_medicion(elemento):
+    lectura = _parsear(f'{{"cotas": [], "elementos": [{elemento}]}}')
+    assert lectura.elementos == []
+
+
+def test_los_puntos_de_fuera_de_la_hoja_se_tiran():
+    """No se recortan al borde: un punto en 1,4 no es un punto en el borde, es
+    una forma mal situada, y recortarla la dejaría torcida y creíble."""
+    lectura = _parsear(
+        '{"cotas": [], "elementos": [{"tipo":"longitud","etiqueta":"x",'
+        '"puntos":[[0.1,0.1],[1.4,0.2],[0.9,0.9]]}]}'
+    )
+    assert lectura.elementos[0].puntos == [
+        (Decimal("0.1"), Decimal("0.1")),
+        (Decimal("0.9"), Decimal("0.9")),
+    ]
+
+
+def test_se_topan_los_elementos_y_sus_puntos():
+    muchos = ",".join(
+        '{"tipo":"conteo","etiqueta":"p","puntos":[[0.5,0.5]]}' for _ in range(80)
+    )
+    puntos = ",".join("[0.5,0.5]" for _ in range(400))
+    lectura = _parsear(
+        f'{{"cotas": [], "elementos": [{muchos},'
+        f'{{"tipo":"longitud","etiqueta":"larga","puntos":[{puntos}]}}]}}'
+    )
+    assert len(lectura.elementos) <= 40
+    assert all(len(e.puntos) <= 120 for e in lectura.elementos)
+
+
+def test_sin_elementos_la_lectura_de_siempre_sigue_igual():
+    """La revisión con dibujo es un añadido: leer la escala y las cotas tiene
+    que seguir funcionando igual cuando no se pide señalar nada."""
+    lectura = _parsear('{"escala_denominador": 100, "cotas": [], "resumen": "Planta"}')
+    assert lectura.escala_impresa == 100
+    assert lectura.elementos == []
+    assert lectura.respuesta is None

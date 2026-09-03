@@ -275,7 +275,12 @@ export function Modal({
  *  (diálogo pequeño centrado, para confirmaciones y subformularios cortos).
  *  Cada pantalla de lista lo monta sobre su propia ruta hija (`:id`,
  *  `nuevo`) vía `<Outlet/>`, así que tiene URL propia: se puede recargar o
- *  compartir el enlace y el modal reaparece solo. */
+ *  compartir el enlace y el modal reaparece solo.
+ *
+ *  Escape NO lo cierra, igual que `Modal` (ver su comentario): dentro de una
+ *  ficha grande es aún más fácil pulsarlo sin querer al cancelar una edición
+ *  o cerrar un desplegable, y perder toda la pantalla por eso es peor que ir
+ *  a la X a propósito. */
 export function ModalPantalla({
   title,
   onClose,
@@ -290,7 +295,6 @@ export function ModalPantalla({
   // documentos con la IA abierto sobre "Nueva certificación".
   elevado?: boolean
 }) {
-  useEscapeCierra(onClose)
   const [colapsada, alternarColapsada] = useSidebarColapsada()
 
   // Mismo motivo que en `Modal`: sacarlo de la jerarquía de un widget con

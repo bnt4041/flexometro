@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Icon } from './Icon'
 import type { NombreIcono } from './Icon'
-import { Tooltip, useEscapeCierra } from './ui'
+import { Tooltip } from './ui'
 import { useSidebarColapsada } from '../lib/sidebarColapsada'
 
 export interface PestanaFicha {
@@ -33,26 +33,39 @@ export interface PestanaFicha {
  *  las incluye en `pestanas`.
  *
  *  Reemplaza a `ModalPantalla` para estas pantallas (mismo look de modal a
- *  pantalla completa, misma tecla Escape para cerrar) — `ModalPantalla` sigue
- *  siendo la elección correcta para una ficha de una sola sección. */
+ *  pantalla completa) — `ModalPantalla` sigue siendo la elección correcta
+ *  para una ficha de una sola sección.
+ *
+ *  Escape NO la cierra a propósito, igual que `Modal`: es fácil pulsarla sin
+ *  querer al cancelar una edición de celda o cerrar un desplegable de dentro,
+ *  y perder toda la ficha (y la posición en la que estabas) por eso es peor
+ *  que tener que ir a la X a propósito. */
 export function FichaDetalle({
   titulo,
   subtitulo,
   pestanas,
   onClose,
+  pestanaActiva,
+  onPestana,
 }: {
   titulo: ReactNode
   subtitulo?: ReactNode
   pestanas: PestanaFicha[]
   onClose: () => void
+  /** Para llevar a alguien a una pestaña desde dentro de otra (Mediciones
+   *  manda al plano, por ejemplo). Sin esto la ficha se apaña sola, que es lo
+   *  normal: solo se controla desde fuera cuando hace falta ese salto. */
+  pestanaActiva?: string
+  onPestana?: (id: string) => void
 }) {
-  const [activaId, setActivaId] = useState(pestanas[0]?.id)
+  const [activaInterna, setActivaInterna] = useState(pestanas[0]?.id)
+  const activaId = pestanaActiva ?? activaInterna
+  const setActivaId = (id: string) => {
+    setActivaInterna(id)
+    onPestana?.(id)
+  }
   const activa = pestanas.find((p) => p.id === activaId) ?? pestanas[0]
   const [colapsada, alternarColapsada] = useSidebarColapsada()
-
-  // Por la pila de capas: si esta ficha tiene un modal abierto, el Escape es
-  // suyo, no de la ficha (ver `useEscapeCierra`).
-  useEscapeCierra(onClose)
 
   return (
     <div className="modal-pantalla-backdrop" onClick={onClose}>

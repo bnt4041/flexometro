@@ -2318,6 +2318,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  *  mientras la navegación al login está en marcha. En modo `stub` (sin
  *  Keycloak, solo desarrollo) no hay login al que mandarlo, así que se deja
  *  caer al mensaje normal. */
+/** Error de API con el `detail` crudo del backend enganchado, por si un
+ *  endpoint concreto necesita algo más que el mensaje aplanado (p. ej. una
+ *  nota técnica o un flag `reparable` — ver plantillas de presupuesto). */
+export class ErrorApi extends Error {
+  detalle?: unknown
+}
+
 async function comprobarRespuesta(response: Response): Promise<void> {
   if (response.ok) return
   if (response.status === 401 && requiereLogin()) {
@@ -2325,28 +2332,41 @@ async function comprobarRespuesta(response: Response): Promise<void> {
     await new Promise<never>(() => {})
     return
   }
-  throw new Error(await mensajeDeError(response))
+  const { mensaje, detalle } = await mensajeDeError(response)
+  const error = new ErrorApi(mensaje)
+  error.detalle = detalle
+  throw error
 }
 
-/** FastAPI devuelve `detail` como string en los HTTPException y como lista de
- *  errores en los 422 de validación; se aplanan a un texto legible. */
-async function mensajeDeError(response: Response): Promise<string> {
+/** FastAPI devuelve `detail` como string en los HTTPException, como lista de
+ *  errores en los 422 de validación, o como objeto cuando el endpoint manda
+ *  algo más estructurado — en los tres casos se aplana a un texto legible
+ *  para `.message`, y el objeto crudo (si lo hay) queda en `.detalle`. */
+async function mensajeDeError(response: Response): Promise<{ mensaje: string; detalle?: unknown }> {
   try {
     const body = await response.json()
     const detail = body?.detail
-    if (typeof detail === 'string') return detail
+    if (typeof detail === 'string') return { mensaje: detail }
     if (Array.isArray(detail)) {
-      return detail
+      const mensaje = detail
         .map((e) => {
           const campo = Array.isArray(e.loc) ? e.loc.slice(1).join('.') : ''
           return campo ? `${campo}: ${e.msg}` : e.msg
         })
         .join(' · ')
+      return { mensaje }
+    }
+    if (detail && typeof detail === 'object') {
+      const mensaje =
+        typeof (detail as { mensaje?: unknown }).mensaje === 'string'
+          ? (detail as { mensaje: string }).mensaje
+          : `${response.status} ${response.statusText}`
+      return { mensaje, detalle: detail }
     }
   } catch {
     /* respuesta sin cuerpo JSON */
   }
-  return `${response.status} ${response.statusText}`
+  return { mensaje: `${response.status} ${response.statusText}` }
 }
 
 /** Descarga un fichero protegido.
@@ -2782,6 +2802,16 @@ export const api = {
         f.append('nombre', nombre)
         f.append('archivo', archivo)
         return subir<PlantillaPresupuesto>('/api/ajustes/plantillas-presupuesto', f)
+      },
+      // Repara el error más habitual (una etiqueta {%tr/%p ...%} de apertura
+      // y cierre compartiendo fila/párrafo con los datos) y sube el
+      // resultado ya arreglado. Solo tiene sentido ofrecerla cuando el 422
+      // de `subir` trae `reparable: true` en su detalle.
+      reparar: (nombre: string, archivo: File) => {
+        const f = new FormData()
+        f.append('nombre', nombre)
+        f.append('archivo', archivo)
+        return subir<PlantillaPresupuesto>('/api/ajustes/plantillas-presupuesto/reparar', f)
       },
       eliminar: (id: string) => del(`/api/ajustes/plantillas-presupuesto/${id}`),
       descargarPatronUrl: (id: string) => `/api/ajustes/plantillas-presupuesto/${id}/descargar`,
@@ -3382,6 +3412,8 @@ export const api = {
     historial: (id: string) => request<RegistroAuditoria[]>(`/api/conceptos/${id}/historial`),
     addLinea: (id: string, datos: { hijo_id: string; rendimiento: string; factor?: string }) =>
       post<Linea>(`/api/conceptos/${id}/lineas`, datos),
+    pegarLineas: (id: string, datos: { linea_ids: string[]; alcance: AlcancePegado }) =>
+      post<{ pegadas: number }>(`/api/conceptos/${id}/lineas/pegar`, datos),
     addSuministro: (conceptoId: string, datos: Partial<PrecioSuministro>) =>
       post<PrecioSuministro>(`/api/conceptos/${conceptoId}/suministros`, datos),
     dondeSeUsa: (id: string) => request<UsoCompleto>(`/api/conceptos/${id}/donde-se-usa`),
@@ -4482,11 +4514,23 @@ export const api = {
     ) => patch<PlanoDetalle>(`/api/planos/${id}`, datos),
     remove: (id: string) => del(`/api/planos/${id}`),
 
+    hojas: {
+      /** Quita una hoja y lo dibujado en ella. Lo que ya se llevó a una
+       *  partida sigue contando en el presupuesto: lo que se pierde es la
+       *  marca sobre el plano de dónde salió. La última hoja no se puede
+       *  borrar; para eso se borra el plano. */
+      remove: (hojaId: string) => del(`/api/planos/hojas/${hojaId}`),
+    },
+
     capas: {
       create: (planoId: string, datos: DatosCapaPlano) =>
         post<CapaPlano>(`/api/planos/${planoId}/capas`, datos),
       update: (capaId: string, datos: DatosCapaPlano) =>
         put<CapaPlano>(`/api/planos/capas/${capaId}`, datos),
+      /** El orden de las capas es el orden en Z al pintar: la última de la
+       *  lista se dibuja encima de todas. */
+      ordenar: (planoId: string, capa_ids: string[]) =>
+        put<CapaPlano[]>(`/api/planos/${planoId}/capas/orden`, { capa_ids }),
       remove: (capaId: string) => del(`/api/planos/capas/${capaId}`),
     },
 
@@ -4498,6 +4542,12 @@ export const api = {
     /** Lee el plano con IA. No escribe nada: devuelve lo que ha leído. */
     leerConIa: (hojaId: string) =>
       post<LecturaIaPlano>(`/api/planos/hojas/${hojaId}/leer-con-ia`, {}),
+
+    /** La IA revisa la hoja y señala encima lo que reconoce. Escribe: calibra
+     *  si el plano lleva su escala impresa y deja dibujado lo reconocido como
+     *  propuesta. Con `peticion` se le pide algo concreto. */
+    revisarConIa: (hojaId: string, datos: { peticion?: string; dibujar?: boolean } = {}) =>
+      post<RevisionIaPlano>(`/api/planos/hojas/${hojaId}/revisar-con-ia`, datos),
 
     /** Calibra con la escala impresa en el cajetín. Exacto: la cuenta es
      *  geometría del papel, sin estimar ningún píxel. Solo PDF. */
@@ -5305,7 +5355,7 @@ async function peticionPublica<T>(path: string, init?: RequestInit): Promise<T> 
   const headers = new Headers(init?.headers)
   headers.set('Content-Type', 'application/json')
   const response = await fetch(path, { ...init, headers })
-  if (!response.ok) throw new Error(await mensajeDeError(response))
+  if (!response.ok) throw new Error((await mensajeDeError(response)).mensaje)
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
@@ -5359,7 +5409,7 @@ export const apiPublico = {
       method: 'POST',
       body: cuerpo,
     })
-    if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+    if (!respuesta.ok) throw new Error((await mensajeDeError(respuesta)).mensaje)
     return respuesta.json() as Promise<LecturaIA>
   },
 
@@ -5436,7 +5486,7 @@ export const apiPublico = {
         method: 'POST',
         body: cuerpo,
       })
-      if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+      if (!respuesta.ok) throw new Error((await mensajeDeError(respuesta)).mensaje)
       return respuesta.json() as Promise<ResultadoMedicionIA>
     },
 
@@ -5456,7 +5506,7 @@ export const apiPublico = {
         method: 'POST',
         body: cuerpo,
       })
-      if (!respuesta.ok) throw new Error(await mensajeDeError(respuesta))
+      if (!respuesta.ok) throw new Error((await mensajeDeError(respuesta)).mensaje)
       return respuesta.json() as Promise<RevisionPlanta>
     },
   },
@@ -5979,6 +6029,9 @@ export interface ElementoPlano {
   valor: string | null
   unidad: string | null
   linea_medicion_id: string | null
+  /** Lo dibujó la IA al revisar el plano: su geometría es aproximada hasta
+   *  que alguien la ajusta, así que se enseña marcado y no se aplica solo. */
+  propuesto_ia: boolean
   creado_por_nombre: string | null
   created_at: string
 }
@@ -6038,6 +6091,16 @@ export interface LecturaIaPlano {
   cotas: CotaLeida[]
   resumen: string | null
   avisos: string[]
+}
+
+/** Lo que ha hecho la IA al revisar la hoja. A diferencia de
+ *  `LecturaIaPlano`, esto sí ha escrito: puede haber calibrado la hoja con la
+ *  escala impresa (exacto) y haber dejado elementos dibujados, siempre
+ *  marcados como propuesta para revisar. */
+export interface RevisionIaPlano extends LecturaIaPlano {
+  respuesta: string | null
+  elementos_creados: number
+  calibrada: boolean
 }
 
 // ── Plexo: vínculo entre organizaciones ──────────────────────────────────

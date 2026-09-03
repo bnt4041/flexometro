@@ -161,16 +161,20 @@ def _hoja_descompuestos(hoja: Worksheet, conceptos: list) -> None:
         hoja.append([concepto.codigo, concepto.resumen, concepto.unidad, "", "", "", _numero(concepto.precio)])
         for celda in hoja[hoja.max_row]:
             celda.font = _NEGRITA
+        # `lineas_informe` son `LineaOut` (service.lineas_de): ya vienen con
+        # los datos del hijo aplanados (hijo_resumen/hijo_unidad/...), no un
+        # objeto `.hijo` anidado, y el precio del componente es
+        # `hijo_precio` (LineaOut no tiene `.precio` propio).
         for linea in getattr(concepto, "lineas_informe", []):
             hoja.append(
                 [
                     "",
-                    linea.hijo.resumen if linea.hijo else "",
-                    linea.hijo.unidad if linea.hijo else "",
+                    linea.hijo_resumen,
+                    linea.hijo_unidad,
                     _numero(linea.rendimiento),
                     _numero(linea.factor),
-                    _numero(linea.precio),
-                    _numero(linea.rendimiento * linea.factor * linea.precio if linea.precio else None),
+                    _numero(linea.hijo_precio),
+                    _numero(linea.rendimiento * linea.factor * linea.hijo_precio),
                 ]
             )
 

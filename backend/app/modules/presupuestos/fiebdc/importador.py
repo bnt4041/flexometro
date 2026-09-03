@@ -11,6 +11,7 @@ comparar los nuestros con los suyos dice si nuestro modelo de redondeo coincide
 con el del programa que lo generó.
 """
 
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -49,6 +50,33 @@ TIPOS_PRECIO = {
     TipoConceptoBC3.AUXILIAR: TipoConcepto.AUXILIAR,
     TipoConceptoBC3.UNITARIO: TipoConcepto.UNITARIO,
 }
+
+
+def _texto_utilizable(codigo: str, texto: str | None, incidencias: list[str]) -> str | None:
+    """Presto a veces incrusta en el registro `~T` un blob RTF/OLE2 (el
+    "informe"/memoria con formato) en vez de texto plano — la norma FIEBDC-3
+    no define eso para `~T`, es una manía del exportador. `decodificar()`
+    (lector.py) igualmente lo pasa por el códec del fichero con
+    `errors="replace"`, así que llega aquí como `str`, pero puede contener
+    bytes nulos —que PostgreSQL rechaza sin excepción en columnas de texto,
+    de ahí el 500— y, aunque no los traiga, un blob así es en su mayoría
+    caracteres de control ilegibles, no una descripción de verdad.
+
+    Se descarta (con su incidencia, igual que un registro no interpretado)
+    en vez de dejarlo pasar a medias: un texto lleno de caracteres de
+    control no es más útil para el usuario que no tener texto."""
+    if not texto:
+        return None
+    controles = sum(
+        1 for c in texto if unicodedata.category(c) == "Cc" and c not in "\n\r\t"
+    )
+    if "\x00" in texto or (len(texto) > 20 and controles / len(texto) > 0.15):
+        incidencias.append(
+            f"'{codigo}': el texto largo no es texto plano (probablemente un "
+            "informe con formato incrustado por Presto) y no se ha importado"
+        )
+        return None
+    return texto
 
 
 class EstrategiaCodigos(StrEnum):
@@ -196,7 +224,7 @@ async def _importar_conceptos(
                     resumen=concepto.resumen or codigo,
                     unidad=concepto.unidad or "ud",
                     precio=precios.get(codigo, Decimal("0.00")),
-                    texto=concepto.texto,
+                    texto=_texto_utilizable(codigo, concepto.texto, resultado.incidencias),
                     origen_dato=OrigenDato.FIEBDC3,
                 )
             )
@@ -205,7 +233,9 @@ async def _importar_conceptos(
 
         nuevo_id = uuid.uuid4()
         existentes[codigo] = nuevo_id
-        a_crear.append(_fila_concepto(org_id, nuevo_id, concepto, precios, archivo))
+        a_crear.append(
+            _fila_concepto(org_id, nuevo_id, concepto, precios, archivo, resultado.incidencias)
+        )
 
     if a_crear:
         # Inserción masiva: una sentencia en vez de una por concepto.
@@ -440,6 +470,7 @@ def _fila_concepto(
     concepto: ConceptoBC3,
     precios: dict[str, Decimal],
     archivo: ArchivoBC3,
+    incidencias: list[str],
 ) -> dict:
     descompuesto = concepto.codigo in archivo.descomposiciones
     return {
@@ -450,7 +481,7 @@ def _fila_concepto(
         "naturaleza": NaturalezaConcepto(concepto.naturaleza),
         "unidad": concepto.unidad or "ud",
         "resumen": concepto.resumen or concepto.codigo,
-        "texto": concepto.texto,
+        "texto": _texto_utilizable(concepto.codigo, concepto.texto, incidencias),
         "precio": precios.get(concepto.codigo, Decimal("0.00")),
         # Un descompuesto queda ligado a sus hijos; uno sin descomposición
         # conserva el precio del fichero y no lo pisa nadie.
@@ -486,7 +517,7 @@ async def _importar_presupuesto(
         organization_id=org_id,
         codigo=codigo_presupuesto or await siguiente_codigo(session),
         nombre=nombre_presupuesto or raiz.resumen or archivo.cabecera or "Obra importada",
-        descripcion=raiz.texto,
+        descripcion=_texto_utilizable(raiz.codigo, raiz.texto, resultado.incidencias),
         origen_dato=OrigenDato.FIEBDC3,
     )
     session.add(presupuesto)
@@ -559,7 +590,7 @@ async def _recorrer_bc3(
                     parent_id=parent_id,
                     codigo=hijo.codigo.rstrip("#") or hijo.codigo,
                     resumen=hijo.resumen or hijo.codigo,
-                    texto=hijo.texto,
+                    texto=_texto_utilizable(hijo.codigo, hijo.texto, resultado.incidencias),
                     orden=orden_cap,
                 )
                 session.add(capitulo)
@@ -585,7 +616,7 @@ async def _recorrer_bc3(
                 concepto_id=conceptos_bd.get(hijo.codigo),
                 codigo=hijo.codigo,
                 resumen=hijo.resumen or hijo.codigo,
-                texto=hijo.texto,
+                texto=_texto_utilizable(hijo.codigo, hijo.texto, resultado.incidencias),
                 unidad=hijo.unidad or "ud",
                 precio=precios.get(hijo.codigo, Decimal("0.00")),
                 orden=orden_part,

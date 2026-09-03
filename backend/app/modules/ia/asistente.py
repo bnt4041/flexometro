@@ -81,10 +81,15 @@ _ESQUEMA_COMPONENTE = {
         "personalizado": {
             "type": "boolean",
             "description": (
-                "true si este componente no está en el banco de precios y el "
-                "usuario ha dado su propio precio (p. ej. \"el carpintero cobra "
-                "120€ por puerta\"). En ese caso rellena resumen/unidad/precio/"
-                "naturaleza en vez de concepto_id."
+                "true si este componente no está en el banco de precios y hay un "
+                "precio que usar: el que ha dado el propio usuario (p. ej. \"el "
+                "carpintero cobra 120€ por puerta\"), o, solo si el usuario ha "
+                "pedido explícitamente que estimes tú un precio de mercado para "
+                "algo, tu propia estimación razonable — dilo claramente en el "
+                "resumen en ese caso, no la des como precio real. Sin precio del "
+                "usuario ni petición expresa de estimarlo, no marques esto: dilo "
+                "en la conversación en vez de inventar el componente. Rellena "
+                "resumen/unidad/precio/naturaleza en vez de concepto_id."
             ),
         },
         "resumen": {
@@ -97,7 +102,11 @@ _ESQUEMA_COMPONENTE = {
         },
         "precio": {
             "type": "number",
-            "description": "Precio unitario del componente personalizado, tal cual lo ha dado el usuario (solo si personalizado es true)",
+            "description": (
+                "Precio unitario del componente personalizado: el que ha dado el "
+                "usuario, o tu estimación de mercado si el usuario la ha pedido "
+                "explícitamente (solo si personalizado es true)"
+            ),
         },
         "naturaleza": {
             "type": "string",
@@ -208,10 +217,13 @@ _HERRAMIENTAS = [
                 "presupuesto actual, con los componentes de su descompuesto que "
                 "pida el usuario. Cada componente puede ser del banco de precios "
                 "(búscalo antes con `buscar_conceptos_banco` para tener su id "
-                "exacto) o personalizado, si el usuario ha dado un precio de "
-                "palabra para algo que no está en el banco (un oficio, un "
-                "material...) — en ese caso no hace falta concepto_id, se da de "
-                "alta como concepto nuevo al confirmar. No crea nada todavía: "
+                "exacto) o personalizado: si el usuario ha dado su propio precio "
+                "para algo que no está en el banco (un oficio, un material...), "
+                "o si ha pedido explícitamente que tú estimes un precio de "
+                "mercado para ello — en ese caso no hace falta concepto_id, se da "
+                "de alta como concepto nuevo al confirmar. Sin precio del usuario "
+                "ni petición expresa de estimarlo, no inventes el componente: "
+                "dilo en la conversación. No crea nada todavía: "
                 "solo deja lista la propuesta para que se confirme."
             ),
             "parameters": {
@@ -331,10 +343,13 @@ _HERRAMIENTAS = [
                 "partida de presupuesto, es una ficha del banco de precios). "
                 "Cada componente puede ser del banco (búscalo antes con "
                 "`buscar_conceptos_banco` para tener su id exacto) o "
-                "personalizado, si el usuario ha dado un precio de palabra "
-                "para algo que no está en el banco — en ese caso no hace "
-                "falta concepto_id, se da de alta como concepto nuevo al "
-                "confirmar. No añade nada todavía: solo deja lista la "
+                "personalizado: si el usuario ha dado su propio precio para "
+                "algo que no está en el banco, o si ha pedido explícitamente "
+                "que tú estimes un precio de mercado para ello — en ese caso "
+                "no hace falta concepto_id, se da de alta como concepto nuevo "
+                "al confirmar. Sin precio del usuario ni petición expresa de "
+                "estimarlo, no inventes el componente: dilo en la "
+                "conversación. No añade nada todavía: solo deja lista la "
                 "propuesta para que se confirme."
             ),
             "parameters": {
@@ -459,10 +474,15 @@ def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
             "llamando a `proponer_componentes_ficha` — no inventes un "
             "`concepto_id`, si no lo encuentras dilo en vez de suponerlo. Si "
             "el usuario da un precio de palabra para algo que no está en el "
-            "banco, no hace falta que exista un concepto para eso: usa ese "
-            "componente como personalizado (marca `personalizado: true` y "
-            "rellena resumen/unidad/precio/naturaleza con lo que ha dicho el "
-            "usuario) — se da de alta como concepto nuevo al confirmar. Si "
+            "banco, o pide explícitamente que estimes tú un precio de "
+            "mercado para ello, no hace falta que exista un concepto para "
+            "eso: usa ese componente como personalizado (marca "
+            "`personalizado: true` y rellena resumen/unidad/precio/"
+            "naturaleza — con lo que ha dicho el usuario, o con tu "
+            "estimación si te la ha pedido, dejándolo claro en el resumen) "
+            "— se da de alta como concepto nuevo al confirmar. Sin precio "
+            "del usuario ni petición expresa de estimarlo, no inventes el "
+            "componente: dilo en la conversación. Si "
             "en vez de esto el usuario pide ORGANIZAR el banco de precios "
             "(\"crea capítulos por fases\", \"agrúpalo por naturaleza\", "
             "\"reordena esto\"...), eso no es un componente de esta ficha: "
@@ -483,7 +503,10 @@ def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
             "de nuevo al organizar, solo se mueve. Nunca digas que ya se ha "
             "añadido o movido, porque no es así — solo lo propones, y quien "
             "pregunta decide si confirma. Responde siempre en español, "
-            "breve y directo. No inventes precios que nadie te haya dado."
+            "breve y directo. No inventes precios: los del banco salen de "
+            "una búsqueda, los personalizados de lo que diga el usuario o, "
+            "si te lo pide explícitamente, de tu propia estimación —dejada "
+            "clara como tal."
         )
     return (
         "Eres un asistente de presupuestación de construcción en España, "
@@ -502,11 +525,15 @@ def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
         "a `proponer_crear_partida` — no inventes un `concepto_id`, si no lo "
         "encuentras dilo en vez de suponerlo. Si el usuario da un precio de "
         "palabra para algo que no está en el banco (\"el carpintero me cobra "
-        "120€ por puerta\", un material concreto, etc.), no hace falta que "
-        "exista un concepto para eso: usa ese componente como personalizado "
-        "(marca `personalizado: true` y rellena resumen/unidad/precio/"
-        "naturaleza con lo que ha dicho el usuario) — se da de alta como "
-        "concepto nuevo al confirmar, no es una limitación real. Si el "
+        "120€ por puerta\", un material concreto, etc.), o pide "
+        "explícitamente que estimes tú un precio de mercado para ello, no "
+        "hace falta que exista un concepto para eso: usa ese componente "
+        "como personalizado (marca `personalizado: true` y rellena "
+        "resumen/unidad/precio/naturaleza — con lo que ha dicho el usuario, "
+        "o con tu estimación si te la ha pedido, dejándolo claro en el "
+        "resumen) — se da de alta como concepto nuevo al confirmar, no es "
+        "una limitación real. Sin precio del usuario ni petición expresa de "
+        "estimarlo, no inventes el componente: dilo en la conversación. Si el "
         "usuario quiere organizar el presupuesto por fases de obra (\"un "
         "capítulo de demolición\", \"monta la fase de fontanería\", "
         "\"organízame esto en capítulos\", \"hazlo todo de una vez\"...), usa "
@@ -529,9 +556,10 @@ def _prompt_sistema(contexto: ContextoAyudaLinea) -> str:
         "copiada, creada, movida o dada de alta, "
         "porque no lo está — solo lo propones, y quien pregunta decide si "
         "confirma. Responde siempre en español, breve y directo. No inventes "
-        "precios que nadie te haya dado: los del banco salen de una búsqueda, "
-        "los personalizados de lo que diga el propio usuario en la "
-        "conversación."
+        "precios: los del banco salen de una búsqueda, los personalizados de "
+        "lo que diga el propio usuario en la conversación o, solo si te pide "
+        "explícitamente que estimes uno, de tu propia estimación de "
+        "mercado —dejada clara como tal, nunca como precio real."
     )
 
 

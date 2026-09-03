@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { aplicarOverridesTraduccion } from './i18n'
 import { api } from './lib/api'
@@ -30,6 +31,7 @@ interface Workspace {
 const WorkspaceContext = createContext<Workspace | null>(null)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate()
   const [estado, setEstado] = useState<Estado>('arrancando')
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [modules, setModules] = useState<Module[]>([])
@@ -65,9 +67,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         await cargarConfig()
 
         // Primero el retorno de Keycloak: si venimos con un código, hay que
-        // canjearlo antes de decidir si hay sesión.
+        // canjearlo antes de decidir si hay sesión. `navigate()`, no
+        // `window.history.replaceState`: esto vive dentro de `<BrowserRouter>`
+        // (Fase 1m), que ya montó su propio `history` al arrancar la app y no
+        // se entera de un cambio hecho por fuera de su API — antes, cambiar la
+        // URL a pelo dejaba al router pensando que seguía en «/», así que en
+        // cuanto se montaban las rutas el `<Navigate to={inicio}>` de «/» se
+        // comía el destino recién restaurado y mandaba siempre a la página
+        // principal en vez de a donde estaba el usuario cuando se perdió la
+        // sesión.
         const destino = await procesarRetorno()
-        if (destino) window.history.replaceState({}, '', destino)
+        if (destino) navigate(destino, { replace: true })
 
         if (requiereLogin() && !(await restaurarSesion())) {
           if (!cancelado) setEstado('sin-sesion')
@@ -86,7 +96,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelado = true
     }
-  }, [cargarDatos])
+  }, [cargarDatos, navigate])
 
   const cambiarOrganizacion = useCallback(
     async (slug: string) => {

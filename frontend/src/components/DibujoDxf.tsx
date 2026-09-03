@@ -59,7 +59,14 @@ export function DibujoDxf({
     // el color y el interruptor de visibilidad salen de ahí.
     const porNombre = new Map(capas.map((c) => [c.nombre, c]))
 
-    dibujo.trazos.forEach((trazo, indice) => {
+    // Se pinta capa a capa, en su orden: es el orden en Z, igual que para lo
+    // dibujado encima. El índice original se conserva porque `resaltado` va
+    // contra la lista de trazos del fichero, no contra este recorrido.
+    const enOrden = dibujo.trazos
+      .map((trazo, indice) => ({ trazo, indice, orden: porNombre.get(trazo.c)?.orden }))
+      .sort((a, b) => (a.orden ?? Infinity) - (b.orden ?? Infinity) || a.indice - b.indice)
+
+    enOrden.forEach(({ trazo, indice }) => {
       const capa = porNombre.get(trazo.c)
       if (capa && !capa.visible) return
       ctx.strokeStyle = indice === resaltado ? '#b45309' : capa?.color ?? '#333333'

@@ -14,6 +14,10 @@ from app.modules.core import auditoria_service
 from app.modules.core.auditoria_schemas import RegistroAuditoriaOut
 from app.modules.presupuestos import banco_service, calculo, service
 from app.modules.presupuestos.models import Concepto, TipoConcepto
+from app.modules.presupuestos.presupuesto_schemas import (
+    PegarComponentesDescompuesto,
+    ResultadoPegado,
+)
 from app.modules.presupuestos.schemas import (
     ArbolBanco,
     AsignarFamiliaIn,
@@ -264,6 +268,26 @@ async def anadir_linea(
 
     concepto = await service.obtener_concepto(session, concepto_id)
     return next(l for l in service.lineas_de(concepto) if l.id == linea.id)
+
+
+@conceptos_router.post("/{concepto_id}/lineas/pegar", response_model=ResultadoPegado)
+async def pegar_lineas(
+    concepto_id: uuid.UUID,
+    datos: PegarComponentesDescompuesto,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+    alcance: Alcance = Depends(require_permiso("presupuestos", "editar")),
+) -> ResultadoPegado:
+    """Copia o mueve componentes de un descompuesto (de esta ficha o de otra)
+    al de esta ficha del banco — igual que pegar en el descompuesto de una
+    partida, pero entre fichas."""
+    padre = await service.obtener_concepto(session, concepto_id)
+    if padre is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Concepto no encontrado")
+    verificar_propiedad(alcance, principal, padre.creado_por_subject)
+    pegadas = await service.pegar_lineas(session, concepto_id, datos.linea_ids, datos.alcance)
+    await session.commit()
+    return ResultadoPegado(pegadas=pegadas)
 
 
 async def _verificar_propiedad_linea(

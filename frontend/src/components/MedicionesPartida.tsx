@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FunctionSquare, Plus, Scan, Trash2 } from 'lucide-react'
+import { FunctionSquare, Map as IconoMapa, Plus, Scan, Trash2 } from 'lucide-react'
 
 import { BotonAtajos } from './AtajosTeclado'
 import { FormulasModal } from './FormulasModal'
@@ -25,14 +25,20 @@ export function MedicionesPartida({
   partida,
   onCambio,
   onLeerPlano,
+  onAbrirPlanos,
 }: {
   partida: Partida
   onCambio: () => void
   onLeerPlano?: () => void
+  /** Lleva al layout de planos de la ficha con esta partida ya apuntada. Sin
+   *  esto no se ofrece el botón: medir sobre un plano solo tiene sentido
+   *  donde hay un layout al que ir. */
+  onAbrirPlanos?: () => void
 }) {
   const { modules } = useWorkspace()
   const { notificar } = useToast()
   const iaActiva = modules.some((m) => m.code === 'ia' && m.is_active)
+  const planosActiva = modules.some((m) => m.code === 'planos' && m.is_active)
   const [detalle, setDetalle] = useState<PartidaDetalle | null>(null)
   const [formulas, setFormulas] = useState<FormulaMedicion[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -318,6 +324,14 @@ export function MedicionesPartida({
             <button className="btn btn--sm" onClick={onLeerPlano}>
               <Scan size={14} aria-hidden="true" />
               Leer plano
+            </button>
+          </Tooltip>
+        )}
+        {planosActiva && onAbrirPlanos && (
+          <Tooltip texto="Ir al layout de planos para medir sobre el plano y traerlo aquí">
+            <button className="btn btn--sm" onClick={onAbrirPlanos}>
+              <IconoMapa size={14} aria-hidden="true" />
+              Planos
             </button>
           </Tooltip>
         )}

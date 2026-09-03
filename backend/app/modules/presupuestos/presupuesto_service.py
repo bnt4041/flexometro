@@ -1374,12 +1374,20 @@ async def sustituir_partida(
     partida_origen_id: uuid.UUID | None,
     copiar_descompuesto: bool,
 ) -> Partida | None:
-    """«Cambiar por banco de precios» (Fase 52): sustituye resumen/unidad/
-    precio (y, si se pide, el descompuesto) de una partida ya existente por
-    los de un candidato elegido a mano por el usuario — del banco de
-    precios propio, o de otra partida (de otro presupuesto o ya
+    """«Cambiar por banco de precios» (Fase 52): trae el descompuesto de un
+    candidato elegido a mano por el usuario a una partida ya existente — del
+    banco de precios propio, o de otra partida (de otro presupuesto o ya
     certificada). Nunca los mezcla automáticamente: la elección es siempre
-    del usuario, esto solo aplica la que ya hizo."""
+    del usuario, esto solo aplica la que ya hizo.
+
+    Con origen "banco" solo se trae el descompuesto: código/resumen/unidad
+    de la partida se quedan como estaban, y el precio sale de recalcular
+    ese descompuesto nuevo — no se copian del concepto ni se enlaza la
+    partida a él (`concepto_id` se limpia si venía de un enlace anterior),
+    para no atarla a que ese concepto no cambie de precio más adelante. Con
+    origen "partida"/"certificacion" sí se traen código/resumen/unidad/
+    precio del origen, que es una partida concreta de un documento propio,
+    no una ficha maestra del banco."""
     org_id = require_organization_id()
     partida = await obtener_partida(session, partida_id)
     if partida is None:
@@ -1388,16 +1396,20 @@ async def sustituir_partida(
     if origen == "banco":
         assert concepto_id is not None
         concepto = await session.scalar(
-            select(Concepto).where(Concepto.id == concepto_id, Concepto.organization_id == org_id)
+            select(Concepto)
+            .options(selectinload(Concepto.lineas))
+            .where(Concepto.id == concepto_id, Concepto.organization_id == org_id)
         )
         if concepto is None:
             raise ConceptoInvalido("El concepto no existe en esta organización")
         await _vaciar_descomposicion_propia(session, partida_id)
-        partida.concepto_id = concepto.id
-        partida.codigo = concepto.codigo
-        partida.resumen = concepto.resumen
-        partida.unidad = concepto.unidad
-        partida.precio = concepto.precio
+        # Limpiar el enlace ANTES de añadir componentes es necesario, no solo
+        # cosmético: `anadir_componente` independiza desde `concepto_id` si la
+        # partida aún no tiene líneas propias, y con el enlace viejo todavía
+        # puesto eso clonaría su descompuesto ANTERIOR mezclado con el nuevo.
+        partida.concepto_id = None
+        for linea in concepto.lineas:
+            await anadir_componente(session, partida_id, linea.hijo_id, linea.rendimiento, linea.factor)
     else:
         assert partida_origen_id is not None
         origen_partida = await obtener_partida(session, partida_origen_id)

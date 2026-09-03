@@ -17,6 +17,7 @@ import {
   FileSignature,
   FileText,
   HardHat,
+  Home,
   History,
   Link2,
   MessageSquareText,
@@ -55,6 +56,7 @@ import {
  *  neutro en vez de romper la pantalla. */
 const ICONOS: Record<string, LucideIcon> = {
   // Navegación (vienen del backend, ver ModuleSpec/NavItem de cada módulo)
+  home: Home,
   settings: Settings,
   users: Users,
   user: User,

@@ -195,4 +195,9 @@ class ElementoPlano(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Auto
         PGUUID(as_uuid=True), nullable=True
     )
 
+    #: Lo dibujó la IA al revisar el plano, no una persona. Su geometría sale
+    #: de mirar la imagen, así que es aproximada: se enseña marcada, se ajusta
+    #: arrastrando, y nunca se lleva sola a una partida.
+    propuesto_ia: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     hoja: Mapped[HojaPlano] = relationship(back_populates="elementos")

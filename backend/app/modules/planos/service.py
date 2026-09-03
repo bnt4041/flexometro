@@ -4,7 +4,7 @@ import logging
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
@@ -198,6 +198,56 @@ async def obtener_hoja(session: AsyncSession, hoja_id: uuid.UUID) -> HojaPlano |
     )
 
 
+async def ordenar_capas(
+    session: AsyncSession, plano: Plano, capa_ids: list[uuid.UUID]
+) -> list[CapaPlano]:
+    """Fija el orden de las capas, que es el orden en Z al pintar.
+
+    Se aceptan solo las capas de este plano y se ignoran las que falten en la
+    lista: quien pide el cambio manda la lista que tiene en pantalla, y entre
+    que la leyó y la manda puede haberse creado otra desde otro sitio. Esas se
+    quedan al final en vez de perder su sitio o hacer fallar la petición.
+    """
+    capas = list(
+        await session.scalars(
+            select(CapaPlano)
+            .where(
+                CapaPlano.plano_id == plano.id,
+                CapaPlano.organization_id == require_organization_id(),
+            )
+            .order_by(CapaPlano.orden)
+        )
+    )
+    por_id = {c.id: c for c in capas}
+    pedidas = [por_id[cid] for cid in capa_ids if cid in por_id]
+    resto = [c for c in capas if c not in pedidas]
+    for orden, capa in enumerate([*pedidas, *resto]):
+        capa.orden = orden
+    await session.flush()
+    return [*pedidas, *resto]
+
+
+async def borrar_hoja(session: AsyncSession, hoja: HojaPlano) -> None:
+    """Quita una hoja del plano, con lo que hubiera dibujado en ella.
+
+    No se renumera lo que queda: el número de hoja es la página del PDF que se
+    pinta debajo, así que recorrerlos dejaría cada hoja enseñando el dibujo de
+    otra página. Quedan huecos (1, 3, 4) y está bien que queden.
+
+    Un plano sin hojas no es nada —no habría nada que enseñar ni dónde
+    medir—, así que la última no se borra: para eso se borra el plano entero.
+    """
+    cuantas = await session.scalar(
+        select(func.count()).select_from(HojaPlano).where(HojaPlano.plano_id == hoja.plano_id)
+    )
+    if int(cuantas or 0) <= 1:
+        raise PlanoInvalido(
+            "Es la única hoja del plano. Para quitarla, borra el plano entero."
+        )
+    await session.delete(hoja)
+    await session.flush()
+
+
 async def borrar_plano(session: AsyncSession, plano: Plano) -> None:
     clave = plano.object_key
     await session.delete(plano)
@@ -292,6 +342,122 @@ def _medir(
     if tipo == TipoElemento.LONGITUD:
         return geometria.longitud(forma, escala), UNIDAD_DE[tipo]
     return geometria.area(forma, escala), UNIDAD_DE[tipo]
+
+
+# ── Revisar el plano con la IA ──────────────────────────────────────────
+
+#: La capa donde cae lo que dibuja la IA. Aparte para poder apagarla de un
+#: clic: al revisar un plano se propone de golpe media docena de estancias, y
+#: verlas todas a la vez encima del dibujo tapa el plano.
+CAPA_IA = "Reconocido por la IA"
+COLOR_CAPA_IA = "#7c3aed"
+
+
+async def revisar_con_ia(
+    session: AsyncSession,
+    plano: Plano,
+    hoja: HojaPlano,
+    contenido: bytes,
+    *,
+    peticion: str | None = None,
+    dibujar: bool = True,
+) -> tuple[lector_ia.Lectura, int]:
+    """Le da el plano a la IA y aplica lo que se pueda aplicar sin riesgo.
+
+    Dos cosas muy distintas salen de aquí, y conviene no confundirlas:
+
+    - **La escala impresa se aplica sola** cuando el plano la lleva escrita y
+      la hoja todavía no está calibrada. Eso es exacto —geometría del papel,
+      cero píxeles— así que esperar a que alguien pulse un botón para algo que
+      no tiene margen de error solo añade un paso.
+    - **Lo que dibuja se queda como propuesta** (`propuesto_ia`), porque sale
+      de mirar la imagen y lleva el error del modelo encima. Se ve marcado, se
+      ajusta arrastrando y no se lleva solo a ninguna partida.
+    """
+    # Contadas con una consulta y no con `len(plano.hojas)`: el plano viene de
+    # un `select` sin cargar la relación, y tocarla aquí dispararía una carga
+    # perezosa fuera del greenlet (MissingGreenlet).
+    total_hojas = int(
+        await session.scalar(
+            select(func.count()).select_from(HojaPlano).where(HojaPlano.plano_id == plano.id)
+        )
+        or 1
+    )
+    lectura = await lector_ia.interpretar(
+        session,
+        contenido,
+        plano.content_type,
+        peticion=peticion,
+        dibujar=dibujar,
+        hoja=hoja.numero,
+        hojas=total_hojas,
+    )
+
+    if (
+        lectura.escala_impresa is not None
+        and hoja.metros_por_unidad is None
+        and plano.origen == OrigenPlano.PDF
+    ):
+        await calibrar_por_escala_impresa(session, hoja, plano, lectura.escala_impresa)
+
+    creados = await _dibujar_lo_reconocido(session, plano, hoja, lectura.elementos)
+    return lectura, creados
+
+
+async def _dibujar_lo_reconocido(
+    session: AsyncSession,
+    plano: Plano,
+    hoja: HojaPlano,
+    elementos: list[lector_ia.ElementoLeido],
+) -> int:
+    if not elementos:
+        return 0
+    capa = await _capa_de_la_ia(session, plano)
+    ancho, alto = Decimal(str(hoja.ancho)), Decimal(str(hoja.alto))
+    creados = 0
+    for leido in elementos:
+        # De 0-1 a coordenadas de hoja: lo único que hace falta para pasar de
+        # «arriba a la izquierda de la imagen» al sistema en el que se guarda
+        # y se mide todo lo demás.
+        forma = [
+            {"x": str(x * ancho), "y": str(y * alto)} for x, y in leido.puntos
+        ]
+        elemento = await guardar_elemento(
+            session,
+            hoja,
+            tipo=TipoElemento(leido.tipo),
+            forma=forma,
+            capa_id=capa.id,
+            texto=leido.etiqueta,
+            color=None,
+        )
+        elemento.propuesto_ia = True
+        creados += 1
+    await session.flush()
+    return creados
+
+
+async def _capa_de_la_ia(session: AsyncSession, plano: Plano) -> CapaPlano:
+    capa = await session.scalar(
+        select(CapaPlano).where(
+            CapaPlano.plano_id == plano.id, CapaPlano.nombre == CAPA_IA
+        )
+    )
+    if capa is not None:
+        return capa
+    orden = await session.scalar(
+        select(func.count()).select_from(CapaPlano).where(CapaPlano.plano_id == plano.id)
+    )
+    capa = CapaPlano(
+        organization_id=require_organization_id(),
+        plano_id=plano.id,
+        nombre=CAPA_IA,
+        color=COLOR_CAPA_IA,
+        orden=int(orden or 0),
+    )
+    session.add(capa)
+    await session.flush()
+    return capa
 
 
 # ── Elementos ───────────────────────────────────────────────────────────

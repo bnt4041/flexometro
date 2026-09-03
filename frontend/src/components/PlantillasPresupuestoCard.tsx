@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Trash2, Upload } from 'lucide-react'
+import { Download, Trash2, Upload, Wrench } from 'lucide-react'
 
 import { ErrorNotice, Field } from './ui'
-import { api, descargar } from '../lib/api'
+import { api, descargar, ErrorApi } from '../lib/api'
 import type { PlantillaPresupuesto } from '../lib/api'
 import { useToast } from '../toast'
+
+/** Detalle estructurado que manda el backend cuando una plantilla falla al
+ *  subirse (ver `PlantillaInvalida` en plantilla_docx_service.py): mensaje
+ *  en lenguaje llano, nota técnica para quien construyó la plantilla, y si
+ *  el problema es de los que la aplicación sabe arreglar sola. */
+interface DetalleErrorPlantilla {
+  mensaje: string
+  nota_tecnica?: string
+  reparable?: boolean
+}
+
+function esDetalleErrorPlantilla(valor: unknown): valor is DetalleErrorPlantilla {
+  return typeof valor === 'object' && valor !== null && typeof (valor as { mensaje?: unknown }).mensaje === 'string'
+}
 
 /** Plantillas Word para exportar presupuestos con diseño propio (Fase 39):
  *  las de sistema vienen ya creadas y sirven de patrón de partida —
@@ -16,7 +30,10 @@ export function PlantillasPresupuestoCard() {
   const [plantillas, setPlantillas] = useState<PlantillaPresupuesto[]>([])
   const [nombre, setNombre] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [detalleError, setDetalleError] = useState<DetalleErrorPlantilla | null>(null)
+  const [archivoFallido, setArchivoFallido] = useState<File | null>(null)
   const [subiendo, setSubiendo] = useState(false)
+  const [reparando, setReparando] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const cargar = useCallback(async () => {
@@ -32,14 +49,23 @@ export function PlantillasPresupuestoCard() {
     void cargar()
   }, [cargar])
 
+  function mostrarError(err: unknown) {
+    setError(err instanceof Error ? err.message : 'Error desconocido')
+    const detalle = err instanceof ErrorApi ? err.detalle : undefined
+    setDetalleError(esDetalleErrorPlantilla(detalle) ? detalle : null)
+  }
+
   async function subir(archivo: File | null) {
     if (!archivo) return
     if (!nombre.trim()) {
       setError('Ponle un nombre a la plantilla antes de subirla')
+      setDetalleError(null)
       return
     }
     setSubiendo(true)
     setError(null)
+    setDetalleError(null)
+    setArchivoFallido(null)
     try {
       const plantilla = await api.ajustes.plantillasPresupuesto.subir(nombre.trim(), archivo)
       setPlantillas((actual) => [...actual, plantilla])
@@ -50,10 +76,35 @@ export function PlantillasPresupuestoCard() {
           : 'Plantilla subida, pero no se ha reconocido ninguna clave — revisa que uses {{ }} dentro del Word',
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      mostrarError(err)
+      setArchivoFallido(archivo)
     } finally {
       setSubiendo(false)
       if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  // La plantilla que falló sigue en memoria (`archivoFallido`), así que
+  // reparar no exige volver a elegir el fichero: se reenvía la misma que ya
+  // se intentó subir, ahora con el bucle/condición de tabla arreglados.
+  async function repararYSubir() {
+    if (!archivoFallido) return
+    setReparando(true)
+    try {
+      const plantilla = await api.ajustes.plantillasPresupuesto.reparar(
+        nombre.trim() || archivoFallido.name.replace(/\.docx$/i, ''),
+        archivoFallido,
+      )
+      setPlantillas((actual) => [...actual, plantilla])
+      setNombre('')
+      setError(null)
+      setDetalleError(null)
+      setArchivoFallido(null)
+      notificar('Reparada y subida. Revisa el resultado antes de usarla en un presupuesto real.')
+    } catch (err) {
+      mostrarError(err)
+    } finally {
+      setReparando(false)
     }
   }
 
@@ -63,7 +114,7 @@ export function PlantillasPresupuestoCard() {
       await api.ajustes.plantillasPresupuesto.eliminar(plantilla.id)
       setPlantillas((actual) => actual.filter((p) => p.id !== plantilla.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      mostrarError(err)
     }
   }
 
@@ -81,6 +132,29 @@ export function PlantillasPresupuestoCard() {
       </p>
 
       <ErrorNotice error={error} />
+      {detalleError && (
+        <div
+          className="notice notice--error"
+          style={{ marginTop: 'calc(-1 * var(--sp-3))', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}
+        >
+          {detalleError.nota_tecnica && (
+            <details>
+              <summary className="muted" style={{ cursor: 'pointer', fontSize: 'var(--fs-sm)' }}>
+                Nota técnica
+              </summary>
+              <p className="muted" style={{ fontSize: 'var(--fs-sm)', margin: 'var(--sp-1) 0 0' }}>
+                {detalleError.nota_tecnica}
+              </p>
+            </details>
+          )}
+          {detalleError.reparable && archivoFallido && (
+            <button className="btn btn--sm" disabled={reparando} onClick={() => void repararYSubir()}>
+              <Wrench size={14} aria-hidden="true" />
+              {reparando ? 'Reparando…' : 'Reparar automáticamente y subir'}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="toolbar">
         <Field label="Nombre de la plantilla nueva">

@@ -8,5 +8,8 @@ SPEC = ModuleSpec(
     icon="settings",
     router=router,
     always_active=True,
-    nav=(NavItem(label="Ajustes", path="/ajustes", icon="settings"),),
+    nav=(
+        NavItem(label="Inicio", path="/inicio", icon="home"),
+        NavItem(label="Ajustes", path="/ajustes", icon="settings"),
+    ),
 )

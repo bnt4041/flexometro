@@ -9,15 +9,21 @@ DOCX→PDF con fidelidad, así que se invoca `soffice` como subproceso.
 """
 
 import asyncio
+import copy
 import logging
 import uuid
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile, ZipFile
 
+from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
+from docx.oxml.ns import qn
 from docxtpl import DocxTemplate
-from jinja2 import Environment
+from jinja2 import Environment, TemplateSyntaxError
+from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +48,17 @@ TIMEOUT_CONVERSION_SEGUNDOS = 30
 
 
 class PlantillaInvalida(Exception):
-    pass
+    """Lleva el error en dos niveles: `mensaje_usuario` (qué ha pasado y qué
+    hacer, en lenguaje llano) y `nota_tecnica` (el detalle real — excepción,
+    línea, etiqueta concreta — para quien construyó la plantilla o para
+    soporte). `reparable` marca los casos que `reparar_tags_docxtpl()` sabe
+    arreglar solo, para que la pantalla pueda ofrecer ese botón."""
+
+    def __init__(self, mensaje_usuario: str, nota_tecnica: str = "", reparable: bool = False):
+        super().__init__(mensaje_usuario)
+        self.mensaje_usuario = mensaje_usuario
+        self.nota_tecnica = nota_tecnica or mensaje_usuario
+        self.reparable = reparable
 
 
 class ConversionPdfFallida(Exception):
@@ -154,16 +170,20 @@ async def contexto_plantilla(session: AsyncSession, presupuesto: Presupuesto) ->
             {"codigo": c.codigo, "resumen": c.resumen, "unidad": c.unidad, "precio": c.precio}
             for c in conceptos
         ],
+        # `lineas_informe` son `LineaOut` (service.lineas_de): ya vienen con
+        # los datos del hijo aplanados (hijo_codigo/hijo_resumen/...), no un
+        # objeto `.hijo` anidado — LineaOut tampoco tiene `.precio` propio,
+        # el precio del componente es `hijo_precio`.
         "componentes_descompuesto": [
             {
                 "concepto_codigo": c.codigo,
                 "concepto_resumen": c.resumen,
-                "hijo_codigo": linea.hijo.codigo if linea.hijo else "",
-                "hijo_resumen": linea.hijo.resumen if linea.hijo else "",
-                "hijo_unidad": linea.hijo.unidad if linea.hijo else "",
+                "hijo_codigo": linea.hijo_codigo,
+                "hijo_resumen": linea.hijo_resumen,
+                "hijo_unidad": linea.hijo_unidad,
                 "rendimiento": linea.rendimiento,
                 "factor": linea.factor,
-                "precio": linea.precio,
+                "precio": linea.hijo_precio,
             }
             for c in conceptos
             for linea in getattr(c, "lineas_informe", [])
@@ -229,13 +249,247 @@ async def obtener_plantilla(
     return plantilla
 
 
+def _texto_de(elemento) -> str:
+    return "".join(t.text or "" for t in elemento.iter(qn("w:t")))
+
+
+def _detectar_tags_mal_separados(contenido: bytes) -> list[str]:
+    """`docxtpl` exige que las etiquetas de fila (`{%tr for%}`/`{%tr endfor%}`,
+    también `if`/`endif`) y de párrafo (`{%p if%}`/`{%p endif%}`, también
+    `for`/`endfor`) vivan CADA UNA en su propia fila/párrafo — la fila o
+    párrafo que contiene la etiqueta se sustituye entera por ella, así que si
+    comparte fila/párrafo con más contenido (lo normal si se escriben juntas
+    en Word), ese contenido desaparece y la etiqueta pareja queda huérfana:
+    es la causa de "Encountered unknown tag 'endfor'/'endif'" en la enorme
+    mayoría de los casos, y no un problema del propio fichero .docx.
+
+    Se comprueba directamente sobre el XML, sin pasar por Jinja, para poder
+    dar un mensaje específico en vez del genérico de sintaxis."""
+    try:
+        with ZipFile(BytesIO(contenido)) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+    except (BadZipFile, KeyError):
+        return []  # no es zip, o no es un docx con cuerpo — lo verá _validar_docx
+
+    root = etree.fromstring(xml.encode("utf-8"))
+    problemas = []
+
+    for tr in root.iter(qn("w:tr")):
+        txt = _texto_de(tr)
+        tiene_apertura = "{%tr for" in txt or "{%tr if" in txt
+        tiene_cierre = "{%tr endfor" in txt or "{%tr endif" in txt
+        if tiene_apertura and tiene_cierre:
+            problemas.append(
+                "una fila de una tabla tiene la etiqueta de apertura (%tr for/if) "
+                "y la de cierre (%tr endfor/endif) juntas en la misma fila"
+            )
+
+    for p in root.iter(qn("w:p")):
+        txt = _texto_de(p)
+        tiene_apertura = "{%p for" in txt or "{%p if" in txt
+        tiene_cierre = "{%p endfor" in txt or "{%p endif" in txt
+        if tiene_apertura and tiene_cierre:
+            problemas.append(
+                "un párrafo tiene la etiqueta de apertura (%p for/if) y la de "
+                "cierre (%p endfor/endif) juntas en el mismo párrafo"
+            )
+
+    return problemas
+
+
 def _validar_docx(contenido: bytes) -> set[str]:
+    problemas_estructura = _detectar_tags_mal_separados(contenido)
+    if problemas_estructura:
+        detalle = "; ".join(problemas_estructura)
+        raise PlantillaInvalida(
+            mensaje_usuario=(
+                "La plantilla tiene un bucle o una condición de tabla mal "
+                "colocados: la etiqueta que abre el bucle/condición y la que "
+                "lo cierra tienen que estar cada una en su propia fila (o "
+                "párrafo), no juntas con los datos. Puedes repararla tú "
+                "moviendo la etiqueta de cierre a una fila o párrafo nuevo, "
+                "o dejar que la aplicación lo intente arreglar sola."
+            ),
+            nota_tecnica=(
+                "docxtpl sustituye la fila/párrafo que contiene una etiqueta "
+                "{%tr/%p ...%} por esa etiqueta sola, descartando el resto de "
+                "su contenido; si apertura y cierre comparten fila/párrafo, la "
+                "primera 'engulle' a la segunda y Jinja acaba viendo un "
+                "endfor/endif sin for/if — de ahí el error de sintaxis "
+                "genérico que se veía antes. Detectado: " + detalle
+            ),
+            reparable=True,
+        )
+
     try:
         return DocxTemplate(BytesIO(contenido)).get_undeclared_template_variables(
             jinja_env=_entorno_jinja()
         )
-    except Exception as exc:  # cualquier fallo de lectura de docxtpl/python-docx
-        raise PlantillaInvalida("El archivo no es un .docx válido") from exc
+    except (BadZipFile, PackageNotFoundError) as exc:
+        # El fichero no se puede abrir como paquete OOXML: no es un .docx real
+        # (texto plano, un .doc antiguo renombrado, un fichero corrupto...).
+        raise PlantillaInvalida(
+            mensaje_usuario=(
+                "El archivo no se puede abrir como documento Word: no es un "
+                ".docx válido. Ábrelo en Word y guárdalo de nuevo como "
+                "'Documento de Word (.docx)' antes de subirlo."
+            ),
+            nota_tecnica=f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except TemplateSyntaxError as exc:
+        # El .docx en sí es válido, pero sus marcadores {{ }} tienen un error
+        # de sintaxis Jinja — casi siempre porque Word autocorrige las llaves.
+        raise PlantillaInvalida(
+            mensaje_usuario=(
+                "El documento es un .docx válido, pero tiene un error de "
+                "sintaxis en uno de sus marcadores. Esto suele pasar porque "
+                "Word autocorrige las llaves dobles al escribirlas: prueba a "
+                "desactivar el autocorrector (Archivo → Opciones → Revisión → "
+                "Autocorrección) o a pegar los marcadores sin formato "
+                "(Ctrl+Shift+V) y vuelve a subir el archivo."
+            ),
+            nota_tecnica=(
+                f"jinja2.TemplateSyntaxError en línea {exc.lineno}: {exc.message}"
+                if exc.lineno
+                else f"jinja2.TemplateSyntaxError: {exc.message}"
+            ),
+        ) from exc
+    except Exception as exc:  # cualquier otro fallo de lectura de docxtpl/python-docx
+        raise PlantillaInvalida(
+            mensaje_usuario=(
+                "No se ha podido leer la plantilla. Revisa que el archivo no esté dañado."
+            ),
+            nota_tecnica=f"{type(exc).__name__}: {exc}",
+        ) from exc
+
+
+def reparar_tags_docxtpl(contenido: bytes) -> bytes:
+    """Arregla el caso detectado por `_detectar_tags_mal_separados`: separa
+    la etiqueta de apertura y la de cierre de un bucle/condición de tabla o
+    párrafo, cada una a su propia fila/párrafo, sin tocar nada más.
+
+    Es una reparación mecánica y determinista (no pasa por ningún modelo de
+    IA) — es la fila/párrafo exacto el que hay que mover, no algo que haya
+    que adivinar, así que un arreglo mecánico es más fiable y no gasta
+    tokens de IA. Verificado con render real antes de usarse en producción:
+    ver la conversación de la incidencia."""
+    doc = Document(BytesIO(contenido))
+
+    for tabla in doc.tables:
+        for fila in list(tabla.rows):
+            tr = fila._tr
+            txt = _texto_de(tr)
+            tiene_apertura = "{%tr for" in txt or "{%tr if" in txt
+            tiene_cierre = "{%tr endfor" in txt or "{%tr endif" in txt
+            if not (tiene_apertura and tiene_cierre):
+                continue
+
+            apertura_txt = None
+            for prefijo in ("{%tr for ", "{%tr if "):
+                for t in tr.iter(qn("w:t")):
+                    if t.text and prefijo in t.text:
+                        ini = t.text.index(prefijo)
+                        fin = t.text.index("%}", ini) + 2
+                        apertura_txt = t.text[ini:fin]
+                        t.text = t.text[:ini] + t.text[fin:]
+                        break
+                if apertura_txt is not None:
+                    break
+
+            cierre_txt = None
+            for marca in ("{%tr endfor %}", "{%tr endif %}"):
+                for t in tr.iter(qn("w:t")):
+                    if t.text and marca in t.text:
+                        t.text = t.text.replace(marca, "")
+                        cierre_txt = marca
+                        break
+                if cierre_txt is not None:
+                    break
+
+            if apertura_txt is None or cierre_txt is None:
+                continue
+
+            fila_apertura = copy.deepcopy(tr)
+            primero = True
+            for t in fila_apertura.iter(qn("w:t")):
+                t.text = apertura_txt if primero else ""
+                primero = False
+
+            fila_cierre = copy.deepcopy(tr)
+            primero = True
+            for t in fila_cierre.iter(qn("w:t")):
+                t.text = cierre_txt if primero else ""
+                primero = False
+
+            tr.addprevious(fila_apertura)
+            tr.addnext(fila_cierre)
+
+    body = doc.element.body
+    for p in list(body.iter(qn("w:p"))):
+        txt = _texto_de(p)
+        tiene_apertura = "{%p for" in txt or "{%p if" in txt
+        tiene_cierre = "{%p endfor" in txt or "{%p endif" in txt
+        if not (tiene_apertura and tiene_cierre):
+            continue
+
+        for prefijo in ("{%p if ", "{%p for "):
+            ini = txt.find(prefijo)
+            if ini == -1:
+                continue
+            fin = txt.index("%}", ini) + 2
+            _aislar_etiqueta_en_parrafo_propio(p, txt[ini:fin], antes=True)
+            break
+
+        for marca in ("{%p endif %}", "{%p endfor %}"):
+            if marca in _texto_de(p):
+                _aislar_etiqueta_en_parrafo_propio(p, marca, antes=False)
+                break
+
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _aislar_etiqueta_en_parrafo_propio(p, marca: str, antes: bool) -> bool:
+    """Saca `marca` (una etiqueta {%p ...%}) de `p` a un párrafo nuevo ella
+    sola, insertado antes o después de `p`. `marca` puede compartir el mismo
+    <w:r> con más texto, separada por <w:br/> (líneas con Mayús+Intro)."""
+    for t in p.iter(qn("w:t")):
+        if not t.text or marca not in t.text:
+            continue
+        resto_antes, resto_despues = t.text.split(marca, 1)
+        run = t.getparent()
+        hijos = list(run)
+        idx = hijos.index(t)
+        quitar_br_prev = idx > 0 and hijos[idx - 1].tag == qn("w:br")
+        quitar_br_next = idx + 1 < len(hijos) and hijos[idx + 1].tag == qn("w:br")
+
+        nuevo_p = copy.deepcopy(p)
+        for h in list(nuevo_p):
+            if h.tag != qn("w:pPr"):
+                nuevo_p.remove(h)
+        nuevo_run = copy.deepcopy(run)
+        for h in list(nuevo_run):
+            nuevo_run.remove(h)
+        nuevo_t = copy.deepcopy(t)
+        nuevo_t.text = marca
+        nuevo_run.append(nuevo_t)
+        nuevo_p.append(nuevo_run)
+
+        t.text = resto_antes + resto_despues
+        if quitar_br_prev:
+            run.remove(hijos[idx - 1])
+        if quitar_br_next and hijos[idx + 1] in run:
+            run.remove(hijos[idx + 1])
+        if t.text == "" and len(list(run.iter(qn("w:t")))) > 1:
+            run.remove(t)
+
+        if antes:
+            p.addprevious(nuevo_p)
+        else:
+            p.addnext(nuevo_p)
+        return True
+    return False
 
 
 async def subir_plantilla(
