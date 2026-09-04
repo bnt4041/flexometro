@@ -1321,6 +1321,30 @@ textarea.input {
   color: var(--c-text-subtle);
 }
 
+/* Como `.rejilla__aviso`, pero clicable y con color propio en vez de gris
+   apagado: el de "medido sobre un plano" es una acción (lleva a comprobarlo
+   contra el plano), no un simple adorno, y en gris tenue se perdía entre el
+   resto de la fila — nadie lo veía a menos que lo buscara a propósito. */
+.rejilla__aviso-boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  line-height: 0;
+  cursor: pointer;
+}
+
+.rejilla__aviso-boton:hover {
+  background: var(--c-accent-strong);
+  color: #fff;
+}
+
 .rejilla-barra__ayuda {
   font-size: var(--fs-xs);
 }

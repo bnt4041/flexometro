@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileImage, FileText, Trash2, Upload, Waypoints } from 'lucide-react'
+import { ArrowLeft, FileImage, FileText, Trash2, Upload, Waypoints } from 'lucide-react'
 
 import { VisorPlano } from './VisorPlano'
 import { EmptyState, ErrorNotice } from './ui'
@@ -31,10 +31,29 @@ export function LayoutPlanos({
   presupuestoId,
   partida,
   onAplicado,
+  onVolver,
+  irA,
+  onIrAConsumido,
 }: {
   presupuestoId: string
   partida?: Partida | null
   onAplicado?: () => void
+  /** Vuelve a la pestaña de Datos, con la partida que ya estaba
+   *  seleccionada — se llega a Planos SIEMPRE desde ahí (el botón «Planos»
+   *  de Mediciones), así que aquí dentro conviene un botón que lo diga
+   *  explícitamente: la pestaña «Datos» de arriba también sirve, pero es un
+   *  texto gris más entre seis pestañas y no se lee como «volver». Sin
+   *  `partida` (se entró por la biblioteca de planos, no desde una
+   *  partida) no hay a dónde volver que tenga más sentido que la propia
+   *  pestaña, así que no se ofrece. */
+  onVolver?: () => void
+  /** A qué plano (y, si se sabe, qué hoja) ir en vez de al primero de la
+   *  lista — se rellena al venir de Mediciones con una línea concreta. */
+  irA?: { planoId: string; hojaId?: string }
+  /** Avisa de que `irA` ya se ha aplicado, para que quien lo puso no lo
+   *  vuelva a forzar en el siguiente repintado (p. ej. tras cambiar de
+   *  plano a mano dentro de esta misma pestaña). */
+  onIrAConsumido?: () => void
 }) {
   const { notificar } = useToast()
   const [planos, setPlanos] = useState<Plano[]>([])
@@ -46,7 +65,19 @@ export function LayoutPlanos({
   // Un DXF llega ya con su geometría y sus unidades; un PDF o una foto no, así
   // que a esos los revisa la IA sola nada más subirlos.
   const [revisarConIa, setRevisarConIa] = useState(false)
+  const [hojaObjetivo, setHojaObjetivo] = useState<string | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Salta al plano (y hoja) que traiga `irA`, aunque no sea el primero de la
+  // lista. `VisorPlano` pide el detalle por `planoId` directamente, así que
+  // no hace falta esperar a que `planos` esté cargado para poder ponerlo.
+  useEffect(() => {
+    if (!irA) return
+    setPlanoId(irA.planoId)
+    setHojaObjetivo(irA.hojaId)
+    onIrAConsumido?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irA])
 
   const cargar = useCallback(async () => {
     setCargando(true)
@@ -150,6 +181,12 @@ export function LayoutPlanos({
       }}
     >
       <div className="rejilla-barra">
+        {onVolver && (
+          <button type="button" className="btn btn--sm" onClick={onVolver}>
+            <ArrowLeft size={14} aria-hidden="true" />
+            Volver a Mediciones
+          </button>
+        )}
         {planos.map((p) => {
           const Icono = ICONO_ORIGEN[p.origen]
           return (
@@ -158,7 +195,10 @@ export function LayoutPlanos({
               type="button"
               className={p.id === planoId ? 'btn btn--sm btn--primary' : 'btn btn--sm'}
               aria-pressed={p.id === planoId}
-              onClick={() => setPlanoId(p.id)}
+              onClick={() => {
+                setPlanoId(p.id)
+                setHojaObjetivo(undefined)
+              }}
               title={`${p.codigo} · ${p.nombre}`}
             >
               <Icono size={14} aria-hidden="true" />
@@ -222,8 +262,11 @@ export function LayoutPlanos({
         planoId && (
           <VisorPlano
             planoId={planoId}
+            hojaInicial={hojaObjetivo}
             aplicarA={
-              partida ? { partidaId: partida.id, unidad: partida.unidad, idsLineas } : undefined
+              partida
+                ? { partidaId: partida.id, unidad: partida.unidad, resumen: partida.resumen, idsLineas }
+                : undefined
             }
             onAplicado={() => {
               void cargarLineas()

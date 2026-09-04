@@ -25,7 +25,7 @@ from app.modules.planos import dxf as lector_dxf
 from app.modules.planos import geometria, service
 from app.modules.planos import ia as lector_ia
 from app.modules.planos.enums import OrigenPlano
-from app.modules.planos.models import CapaPlano, Plano
+from app.modules.planos.models import CapaPlano, HojaPlano, Plano
 from app.modules.planos.schemas import (
     AplicadaOut,
     AplicarIn,
@@ -44,6 +44,7 @@ from app.modules.planos.schemas import (
     PlanoUpdate,
     RevisionIaIn,
     RevisionIaOut,
+    UbicacionElementoOut,
 )
 
 router = APIRouter(
@@ -559,6 +560,25 @@ async def aplicar(
     return AplicadaOut(
         linea_medicion_id=linea_id, valor=elemento.valor, unidad=elemento.unidad or ""
     )
+
+
+@router.get("/elementos/{elemento_id}/ubicacion", response_model=UbicacionElementoOut)
+async def ubicacion_elemento(
+    elemento_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    alcance: Alcance = Depends(require_permiso("planos", "ver")),
+) -> UbicacionElementoOut:
+    """De qué plano y qué hoja es un elemento — para el icono de "medido
+    sobre un plano" de una línea de medición: sin esto, saltar ahí solo se
+    podía hacer a la pestaña de Planos en general, sin saber en cuál de los
+    planos ni en qué hoja estaba lo que se había medido."""
+    elemento = await service.obtener_elemento(session, elemento_id)
+    if elemento is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No encontrado")
+    hoja = await session.get(HojaPlano, elemento.hoja_id)
+    if hoja is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "La hoja ya no existe")
+    return UbicacionElementoOut(plano_id=hoja.plano_id, hoja_id=hoja.id)
 
 
 async def _plano(

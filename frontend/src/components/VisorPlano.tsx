@@ -5,6 +5,7 @@ import {
   Circle,
   Hand,
   Layers,
+  Map as IconoMapa,
   Minus,
   Plus,
   Ruler,
@@ -21,14 +22,14 @@ import {
 
 import { LienzoPlano } from './LienzoPlano'
 import type { Herramienta } from './LienzoPlano'
-import { ErrorNotice, Field, Modal, formatoImporte } from './ui'
+import { ErrorNotice, Field, Modal, Tooltip, formatoImporte } from './ui'
 import { api } from '../lib/api'
 import type {
   CapaPlano,
   ElementoPlano,
-  LecturaIaPlano,
   PlanoDetalle as Detalle,
   PuntoPlano,
+  RevisionIaPlano,
 } from '../lib/api'
 import { useToast } from '../toast'
 
@@ -92,6 +93,10 @@ const NOMBRE_TIPO: Record<ElementoPlano['tipo'], string> = {
 export interface AplicarAPartida {
   partidaId: string
   unidad: string
+  /** Para el botón de pedirle a la IA que busque justo esto (ver
+   *  `sugerirPeticionIa` más abajo) — sin esto, la caja de texto arranca en
+   *  blanco y no sabe para qué partida se está midiendo. */
+  resumen: string
   /** Ids de `LineaMedicion` que ya tiene ESTA partida — distingue "aplicado
    *  a esta partida" de "aplicado a otra partida de este mismo presupuesto"
    *  sin tener que ampliar el backend solo para eso. */
@@ -112,6 +117,7 @@ export interface AplicarAPartida {
  *  biblioteca de planos) se comporta exactamente como antes. */
 export function VisorPlano({
   planoId,
+  hojaInicial,
   aplicarA,
   onAplicado,
   onCargado,
@@ -119,6 +125,10 @@ export function VisorPlano({
   onRevisado,
 }: {
   planoId: string
+  /** Qué hoja abrir al cargar este plano, si no es la primera — por ejemplo
+   *  al llegar desde una línea de medición que se hizo sobre una hoja
+   *  concreta. Solo se usa si esa hoja sigue existiendo en el plano. */
+  hojaInicial?: string
   aplicarA?: AplicarAPartida
   onAplicado?: () => void
   /** Avisa con el plano en cuanto llega — para que quien envuelve esto (una
@@ -146,7 +156,7 @@ export function VisorPlano({
     null,
   )
   const [error, setError] = useState<string | null>(null)
-  const [lectura, setLectura] = useState<LecturaIaPlano | null>(null)
+  const [lectura, setLectura] = useState<RevisionIaPlano | null>(null)
   const [leyendo, setLeyendo] = useState(false)
   // Cuando la IA ha leído una cota, su valor queda cargado: al pinchar los dos
   // extremos se calibra directamente, sin volver a teclear cuánto mide.
@@ -162,19 +172,44 @@ export function VisorPlano({
   // el plano: se apunta aquí lo que hay que corregir y se aplica cuando el
   // nuevo tamaño ya está en pantalla (`useLayoutEffect`).
   const ajusteScroll = useRef<{ factor: number; x: number; y: number } | null>(null)
+  // Espacio pulsado, para arrastrar el plano con el botón izquierdo (quien no
+  // tiene rueda de ratón que apretar). En una referencia y no en estado: no
+  // hace falta repintar nada al pulsarlo, solo que el próximo `mousedown` se
+  // entere.
+  const espacioPulsado = useRef(false)
+  // El `planoId` de verdad, al día en todo momento — para que una respuesta
+  // que llega tarde (ver `cargar`) pueda comparar contra el actual y no
+  // contra el que tenía cuando ella misma se lanzó (que es siempre igual a
+  // sí misma y nunca detectaría nada).
+  const planoIdActual = useRef(planoId)
+  planoIdActual.current = planoId
+  const hojaIdActual = useRef(hojaId)
+  hojaIdActual.current = hojaId
+  const hojaInicialActual = useRef(hojaInicial)
+  hojaInicialActual.current = hojaInicial
 
   const cargar = useCallback(async () => {
+    // Si esto tarda y mientras tanto se cambia de plano (un DXF grande de
+    // fondo puede tardar más en el servidor que el PDF al que se salta
+    // después), la respuesta de ESTE plano puede llegar la última aunque se
+    // pidiera la primera. Sin comprobar que sigue siendo el plano actual al
+    // volver, esa respuesta vieja pisaría los datos del plano nuevo — el
+    // visor se quedaría mostrando el plano anterior con el nombre del
+    // siguiente en la pestaña.
+    const pedido = planoId
     try {
-      const detalle = await api.planos.get(planoId)
+      const detalle = await api.planos.get(pedido)
+      if (pedido !== planoIdActual.current) return
       setPlano(detalle)
       // Se comprueba que lo que había elegido siga existiendo, no solo que
       // hubiera algo elegido: al borrar la hoja o la capa activa, quedarse
       // con su id dejaría el visor apuntando a algo que ya no está.
-      setHojaId((actual) =>
-        actual && detalle.hojas.some((h) => h.id === actual)
-          ? actual
-          : (detalle.hojas[0]?.id ?? null),
-      )
+      setHojaId((actual) => {
+        if (actual && detalle.hojas.some((h) => h.id === actual)) return actual
+        const inicial = hojaInicialActual.current
+        if (inicial && detalle.hojas.some((h) => h.id === inicial)) return inicial
+        return detalle.hojas[0]?.id ?? null
+      })
       setCapaActiva((actual) =>
         actual && detalle.capas.some((c) => c.id === actual)
           ? actual
@@ -183,6 +218,7 @@ export function VisorPlano({
       setError(null)
       onCargado?.(detalle)
     } catch (err) {
+      if (pedido !== planoIdActual.current) return
       setError(err instanceof Error ? err.message : 'Error desconocido')
     }
   }, [planoId])
@@ -193,9 +229,15 @@ export function VisorPlano({
 
   const cargarElementos = useCallback(async () => {
     if (!hojaId) return
+    // Mismo motivo que en `cargar`: una respuesta que llega tarde de una
+    // hoja que ya no es la que se está viendo no debe pisar la lista.
+    const pedida = hojaId
     try {
-      setElementos(await api.planos.elementos.list(hojaId))
+      const lista = await api.planos.elementos.list(pedida)
+      if (pedida !== hojaIdActual.current) return
+      setElementos(lista)
     } catch (err) {
+      if (pedida !== hojaIdActual.current) return
       setError(err instanceof Error ? err.message : 'Error desconocido')
     }
   }, [hojaId])
@@ -212,20 +254,24 @@ export function VisorPlano({
   const esVectorial = plano?.origen === 'dxf'
 
   // Rueda = zoom, y no scroll: en un plano se amplía mucho más a menudo de lo
-  // que se baja. Para desplazarse está el botón central, como en cualquier
-  // programa de CAD. El listener va a mano y no por `onWheel` de React porque
-  // React lo registra como pasivo y `preventDefault()` no surtiría efecto: la
-  // página entera haría scroll además de ampliarse.
+  // que se baja. Para desplazarse hay dos formas, porque no todo el mundo
+  // tiene rueda física que pulsar: el botón central (ratón, como cualquier
+  // programa de CAD) y Espacio + arrastrar con el izquierdo (sin ratón de
+  // verdad, para quien solo tiene panel táctil). El deslizar de dos dedos de
+  // un panel táctil también llega como `wheel`, pero con `deltaX` — un ratón
+  // de rueda solo manda vertical — así que ese caso desplaza en vez de
+  // ampliar, aunque no se toque ni el botón central ni Espacio. Nada de esto
+  // depende de la herramienta activa: se puede mover y ampliar el plano igual
+  // a media medición que con la herramienta de seleccionar.
+  //
+  // Los listeners van a mano y no por los `onWheel`/`onMouseDown` de React
+  // porque React registra `onWheel` como pasivo y `preventDefault()` no
+  // surtiría efecto: la página entera haría scroll además de ampliarse.
   useEffect(() => {
     const caja = visorRef.current
     if (!caja) return
 
-    function alRodar(evento: WheelEvent) {
-      if (!caja) return
-      evento.preventDefault()
-      const rect = caja.getBoundingClientRect()
-      const x = evento.clientX - rect.left
-      const y = evento.clientY - rect.top
+    function ampliar(evento: WheelEvent, x: number, y: number) {
       setZoom((actual) => {
         const nuevo = Math.min(
           8,
@@ -236,20 +282,39 @@ export function VisorPlano({
       })
     }
 
+    function alRodar(evento: WheelEvent) {
+      if (!caja) return
+      evento.preventDefault()
+      // `ctrlKey`/`metaKey`: así marca el navegador un gesto de pellizco de
+      // panel táctil (Chrome, Safari), que siempre quiere decir ampliar,
+      // tenga o no componente horizontal.
+      if (!evento.ctrlKey && !evento.metaKey && Math.abs(evento.deltaX) > 0) {
+        caja.scrollLeft += evento.deltaX
+        caja.scrollTop += evento.deltaY
+        return
+      }
+      const rect = caja.getBoundingClientRect()
+      ampliar(evento, evento.clientX - rect.left, evento.clientY - rect.top)
+    }
+
     let arrastre: { x: number; y: number; scrollLeft: number; scrollTop: number } | null = null
 
-    function alPulsar(evento: MouseEvent) {
-      if (evento.button !== 1 || !caja) return
-      // Sin esto el navegador entra en su propio modo de desplazamiento
-      // automático (la brújula del botón central) y se come el arrastre.
-      evento.preventDefault()
-      arrastre = {
-        x: evento.clientX,
-        y: evento.clientY,
-        scrollLeft: caja.scrollLeft,
-        scrollTop: caja.scrollTop,
-      }
+    function empezarArrastre(x: number, y: number) {
+      if (!caja) return
+      arrastre = { x, y, scrollLeft: caja.scrollLeft, scrollTop: caja.scrollTop }
       caja.classList.add('is-arrastrando')
+    }
+
+    function alPulsar(evento: MouseEvent) {
+      // Botón central en cualquier momento, o izquierdo con Espacio pulsado
+      // (para quien no tiene rueda que apretar). El izquierdo normal, sin
+      // Espacio, se deja pasar: es el que coloca los vértices al medir.
+      if (evento.button === 1 || (evento.button === 0 && espacioPulsado.current)) {
+        // Sin esto el navegador entra en su propio modo de desplazamiento
+        // automático (la brújula del botón central) y se come el arrastre.
+        evento.preventDefault()
+        empezarArrastre(evento.clientX, evento.clientY)
+      }
     }
 
     function alMover(evento: MouseEvent) {
@@ -277,6 +342,29 @@ export function VisorPlano({
     // componente devuelve un «Cargando…» y el visor no existe todavía en el
     // DOM, así que con `[]` la referencia sería nula y no se engancharía nada.
   }, [plano?.id, hojaId])
+
+  // Escucha Espacio para el arrastre con el botón izquierdo de arriba.
+  useEffect(() => {
+    function alBajar(evento: KeyboardEvent) {
+      if (evento.key !== ' ' || evento.repeat) return
+      // Sin la comprobación de en qué elemento se teclea, mantener pulsado
+      // Espacio en la caja de texto de "Pedirle algo a la IA" (más abajo)
+      // cambiaría de arrastrar el plano cada vez que se escribe un espacio.
+      const objetivo = evento.target as HTMLElement | null
+      if (objetivo && ['INPUT', 'TEXTAREA'].includes(objetivo.tagName)) return
+      evento.preventDefault()
+      espacioPulsado.current = true
+    }
+    function alSoltar(evento: KeyboardEvent) {
+      if (evento.key === ' ') espacioPulsado.current = false
+    }
+    window.addEventListener('keydown', alBajar)
+    window.addEventListener('keyup', alSoltar)
+    return () => {
+      window.removeEventListener('keydown', alBajar)
+      window.removeEventListener('keyup', alSoltar)
+    }
+  }, [])
 
   // Mantener bajo el cursor el punto del plano que estaba ahí antes de
   // ampliar. Sin esto, cada golpe de rueda te deja mirando otra parte del
@@ -671,6 +759,27 @@ export function VisorPlano({
                 void revisar(texto)
               }}
             />
+            {/* Solo tiene sentido si se abrió desde una partida concreta (ver
+                `aplicarA`): sin eso la IA no tendría qué buscar. Un atajo al
+                caso más habitual — pedirle justo lo que hace falta para esta
+                partida — sin tener que escribirlo. */}
+            {aplicarA && (
+              <Tooltip texto={`Que la IA busque y señale «${aplicarA.resumen}» en este plano`}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={leyendo}
+                  onClick={() =>
+                    void revisar(
+                      `Busca y señala «${aplicarA.resumen}» en este plano, para poder medirlo.`,
+                    )
+                  }
+                >
+                  <IconoMapa size={14} aria-hidden="true" />
+                  Buscar «{aplicarA.resumen}»
+                </button>
+              </Tooltip>
+            )}
             <button
               type="button"
               className="btn btn--sm btn--primary"
@@ -1301,13 +1410,33 @@ function LecturaIa({
   onEscala,
   onCota,
 }: {
-  lectura: LecturaIaPlano
+  lectura: RevisionIaPlano
   onCerrar: () => void
   onEscala: (denominador: number) => void
   onCota: (metros: string) => void
 }) {
   return (
     <Modal title="Lo que la IA ha leído del plano" onClose={onCerrar}>
+      {/* Lo que se ha pedido en concreto («busca el solado interior»…) manda
+          sobre el resumen general: es la respuesta a la pregunta, no una
+          descripción del plano, así que va primero y destacada — si no, se
+          ve siempre el mismo resumen/cotas/avisos genéricos del plano y
+          parece que la IA ha ignorado lo que se le pidió. */}
+      {lectura.respuesta && (
+        <section className="form-section">
+          <p>
+            <strong>{lectura.respuesta}</strong>
+          </p>
+          {lectura.elementos_creados > 0 && (
+            <p className="muted">
+              {lectura.elementos_creados === 1
+                ? 'Ha señalado 1 elemento sobre el plano, como propuesta.'
+                : `Ha señalado ${lectura.elementos_creados} elementos sobre el plano, como propuesta.`}
+            </p>
+          )}
+        </section>
+      )}
+
       {lectura.resumen && <p>{lectura.resumen}</p>}
 
       {lectura.escala_impresa !== null && lectura.escala_aplicable && (

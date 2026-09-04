@@ -448,4 +448,13 @@ class LineaMedicion(UUIDPrimaryKeyMixin, OrganizationMixin, TimestampMixin, Base
     )
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    #: De qué `ElementoPlano` sale esta línea, si se llevó aquí midiendo sobre
+    #: un plano — espejo de `ElementoPlano.linea_medicion_id`, sin FK por el
+    #: mismo motivo que esa columna (ver su comentario en `planos/models.py`).
+    #: Sirve solo para saber que viene de un plano y enseñarlo; para volver al
+    #: plano en sí hace falta el módulo de planos, activado o no.
+    desde_plano_elemento_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+
     partida: Mapped[Partida] = relationship(back_populates="lineas")

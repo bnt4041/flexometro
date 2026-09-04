@@ -1152,6 +1152,8 @@ export interface LineaMedicion {
   formula_id: string | null
   formula_expresion: string | null
   formula_valores: Record<string, string>
+  /** El `ElementoPlano` del que sale, si se midió sobre un plano. */
+  desde_plano_elemento_id: string | null
 }
 
 export interface Partida {
@@ -4568,6 +4570,13 @@ export const api = {
         post<{ linea_medicion_id: string; valor: string; unidad: string }>(
           `/api/planos/elementos/${elementoId}/aplicar`,
           { partida_id },
+        ),
+      /** De qué plano y qué hoja es este elemento — para saltar directo ahí
+       *  desde el icono de una línea de medición, en vez de abrir un plano
+       *  cualquiera a ciegas. */
+      ubicacion: (elementoId: string) =>
+        request<{ plano_id: string; hoja_id: string }>(
+          `/api/planos/elementos/${elementoId}/ubicacion`,
         ),
     },
   },

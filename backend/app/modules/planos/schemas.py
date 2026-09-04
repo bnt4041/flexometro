@@ -76,6 +76,15 @@ class ElementoOut(BaseModel):
     created_at: datetime
 
 
+class UbicacionElementoOut(BaseModel):
+    """De qué plano y qué hoja es un elemento — para poder saltar directo a
+    verlo (desde el icono de una línea de medición, por ejemplo) sin tener
+    que abrir la hoja a ciegas a ver si está ahí."""
+
+    plano_id: uuid.UUID
+    hoja_id: uuid.UUID
+
+
 class ElementoIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

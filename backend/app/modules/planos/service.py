@@ -557,14 +557,23 @@ async def aplicar_a_partida(
 
     hoja = await session.get(HojaPlano, elemento.hoja_id)
     plano = await session.get(Plano, hoja.plano_id) if hoja else None
-    procedencia = f"{plano.codigo} hoja {hoja.numero}" if plano and hoja else "plano"
+    # El nombre del plano, no su código: «PLN00010» no le dice nada a quien
+    # lee el presupuesto, y con el icono de la fila (ver `LineaMedicionOut`)
+    # ya se distingue que viene de un plano — este texto es para identificar
+    # DE CUÁL, no para repetir que lo es.
+    procedencia = f"{plano.nombre} · hoja {hoja.numero}" if plano and hoja else "un plano"
     comentario = f"{elemento.texto or 'Medido sobre plano'} ({procedencia})"
 
     if elemento.tipo == TipoElemento.CONTEO:
-        datos = LineaMedicionCreate(comentario=comentario[:250], uds=elemento.valor)
+        datos = LineaMedicionCreate(
+            comentario=comentario[:250], uds=elemento.valor, desde_plano_elemento_id=elemento.id
+        )
     else:
         datos = LineaMedicionCreate(
-            comentario=comentario[:250], uds=Decimal(1), longitud=elemento.valor
+            comentario=comentario[:250],
+            uds=Decimal(1),
+            longitud=elemento.valor,
+            desde_plano_elemento_id=elemento.id,
         )
 
     linea = await crear_linea(session, partida_id, datos)

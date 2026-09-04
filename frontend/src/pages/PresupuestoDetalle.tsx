@@ -78,6 +78,22 @@ export function PresupuestoDetalle() {
   // La pestaña se controla desde aquí para poder saltar al plano desde
   // Mediciones sin perder qué partida estaba seleccionada.
   const [pestana, setPestana] = useState('datos')
+  // A qué plano y hoja ir al abrir la pestaña de Planos desde Mediciones —
+  // sin esto se abría siempre el primero de la lista, que puede no tener
+  // nada que ver con lo que se estaba midiendo.
+  const [irAPlano, setIrAPlano] = useState<{ planoId: string; hojaId?: string } | null>(null)
+
+  function abrirPlanos(elementoId?: string) {
+    setPestana('planos')
+    if (!elementoId) return
+    api.planos.elementos
+      .ubicacion(elementoId)
+      .then((u) => setIrAPlano({ planoId: u.plano_id, hojaId: u.hoja_id }))
+      .catch(() => {
+        // Sin ubicación no se salta a ningún sitio en concreto: se queda en
+        // el plano por defecto, que es lo que ya pasaba antes de esto.
+      })
+  }
   const [presupuesto, setPresupuesto] = useState<Detalle | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -461,7 +477,7 @@ export function PresupuestoDetalle() {
                 <MedicionesPartida
                   partida={seleccion.partida}
                   onCambio={cargar}
-                  onAbrirPlanos={planosActiva ? () => setPestana('layout') : undefined}
+                  onAbrirPlanos={planosActiva ? abrirPlanos : undefined}
                 />
               ),
           },
@@ -681,14 +697,19 @@ export function PresupuestoDetalle() {
     ...(planosActiva
       ? [
           {
-            id: 'layout',
-            etiqueta: 'Layout',
+            // «Layout» no es palabra en español y no decía nada de un
+            // vistazo: la pestaña se llama como lo que hay dentro.
+            id: 'planos',
+            etiqueta: 'Planos',
             icono: 'medir' as const,
             contenido: (
               <LayoutPlanos
                 presupuestoId={id}
                 partida={seleccion?.tipo === 'partida' ? seleccion.partida : null}
                 onAplicado={() => void cargar()}
+                onVolver={seleccion?.tipo === 'partida' ? () => setPestana('datos') : undefined}
+                irA={irAPlano ?? undefined}
+                onIrAConsumido={() => setIrAPlano(null)}
               />
             ),
           },

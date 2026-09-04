@@ -30,10 +30,12 @@ export function MedicionesPartida({
   partida: Partida
   onCambio: () => void
   onLeerPlano?: () => void
-  /** Lleva al layout de planos de la ficha con esta partida ya apuntada. Sin
-   *  esto no se ofrece el botón: medir sobre un plano solo tiene sentido
-   *  donde hay un layout al que ir. */
-  onAbrirPlanos?: () => void
+  /** Lleva a la pestaña de Planos de la ficha con esta partida ya apuntada.
+   *  Sin esto no se ofrece el botón: medir sobre un plano solo tiene sentido
+   *  donde hay una pestaña de Planos a la que ir. Con `elementoId` va directa
+   *  al plano y la hoja donde está ese elemento, en vez de al primer plano
+   *  de la lista (que puede no tener nada que ver con esta partida). */
+  onAbrirPlanos?: (elementoId?: string) => void
 }) {
   const { modules } = useWorkspace()
   const { notificar } = useToast()
@@ -203,6 +205,28 @@ export function MedicionesPartida({
       ancho: '200px',
       valor: (l) => l.comentario ?? '',
       editable: () => true,
+      // Sale de un plano: el icono lo dice sin ocupar una columna aparte, y
+      // llevar a `onAbrirPlanos` deja ir a comprobarla contra el plano sin
+      // tener que ir a buscar el botón de la barra.
+      prefijo: (l) =>
+        l.desde_plano_elemento_id ? (
+          <span className="rejilla__avisos">
+            <Tooltip texto="Medido sobre un plano — clic para abrir la pestaña de Planos">
+              <button
+                type="button"
+                className="rejilla__aviso rejilla__aviso-boton"
+                aria-label="Medido sobre un plano"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onAbrirPlanos?.(l.desde_plano_elemento_id ?? undefined)
+                }}
+              >
+                <IconoMapa size={13} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          </span>
+        ) : null,
     },
     {
       id: 'uds',
@@ -328,8 +352,16 @@ export function MedicionesPartida({
           </Tooltip>
         )}
         {planosActiva && onAbrirPlanos && (
-          <Tooltip texto="Ir al layout de planos para medir sobre el plano y traerlo aquí">
-            <button className="btn btn--sm" onClick={onAbrirPlanos}>
+          <Tooltip texto="Ir a la pestaña de Planos para medir sobre el plano y traerlo aquí">
+            <button
+              className="btn btn--sm"
+              onClick={() =>
+                onAbrirPlanos(
+                  detalle?.lineas.find((l) => l.desde_plano_elemento_id)?.desde_plano_elemento_id ??
+                    undefined,
+                )
+              }
+            >
               <IconoMapa size={14} aria-hidden="true" />
               Planos
             </button>

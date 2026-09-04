@@ -25,6 +25,10 @@ class LineaMedicionBase(BaseModel):
     # Con fórmula (Fase 37), el parcial sale de la expresión y de estos valores.
     formula_id: uuid.UUID | None = None
     formula_valores: dict[str, Decimal] = Field(default_factory=dict)
+    #: Puesto solo al medir sobre un plano (`planos.aplicar_a_partida`); en
+    #: `LineaMedicionUpdate` no está, así que una edición normal de la línea
+    #: nunca lo toca.
+    desde_plano_elemento_id: uuid.UUID | None = None
 
 
 class LineaMedicionCreate(LineaMedicionBase):
