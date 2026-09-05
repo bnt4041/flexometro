@@ -11,7 +11,7 @@ import { Historial } from '../components/Historial'
 import { NotasCrm } from '../components/NotasCrm'
 import { Checkbox, ErrorNotice, Field, ModalPantalla, Tooltip } from '../components/ui'
 import { api } from '../lib/api'
-import type { Contacto } from '../lib/api'
+import type { Contacto, Tercero } from '../lib/api'
 import { useDiccionario } from '../lib/useDiccionario'
 import { useContextoContactos } from './Contactos'
 
@@ -30,6 +30,17 @@ export function ContactoDetalle() {
   const [guardando, setGuardando] = useState(false)
   const tratamientos = useDiccionario('tratamiento')
   const cargos = useDiccionario('cargo')
+  const [empresas, setEmpresas] = useState<Tercero[]>([])
+
+  useEffect(() => {
+    api.terceros
+      .list({ activo: true, limit: 500 })
+      .then((pagina) => setEmpresas(pagina.items))
+      .catch(() => {
+        // Sin lista de empresas se puede seguir viendo/editando el resto del
+        // contacto; solo se pierde el selector de empresa.
+      })
+  }, [])
 
   const cargar = useCallback(async () => {
     try {
@@ -141,13 +152,25 @@ export function ContactoDetalle() {
               </select>
             </Field>
             <Field label="Empresa">
-              {contacto.tercero_id ? (
-                <Link className="btn btn--sm" to={`/terceros/${contacto.tercero_id}`}>
-                  Ver ficha
-                </Link>
-              ) : (
-                <span className="muted">Contacto suelto, sin empresa</span>
-              )}
+              <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <select
+                  className="select"
+                  value={valor('tercero_id') ?? ''}
+                  onChange={(e) => cambiar('tercero_id', e.target.value || null)}
+                >
+                  <option value="">Sin empresa</option>
+                  {empresas.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.razon_social}
+                    </option>
+                  ))}
+                </select>
+                {valor('tercero_id') && (
+                  <Link className="btn btn--sm" to={`/terceros/${valor('tercero_id')}`}>
+                    Ver ficha
+                  </Link>
+                )}
+              </div>
             </Field>
           </div>
           <div style={{ display: 'flex', gap: 'var(--sp-5)', marginTop: 'var(--sp-4)' }}>
